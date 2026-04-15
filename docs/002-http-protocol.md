@@ -21,15 +21,25 @@ All on-chain instruction names referenced below are defined in ADR-001.
 
 Actors: **C** = client (payer). **S** = server (merchant).
 
-| Direction | Method · Path | Payload | Purpose |
-|---|---|---|---|
-| S → C | `402 Payment Required` | open-challenge JSON (below) | Advertise open parameters when no channel exists |
-| C → S | `POST /channel/open` | `{ action: "open", tx: <base64> }` | Submit payer-signed partial `open` tx |
-| C → S | `GET <resource>` + `Mpp-Voucher` header | voucher (below), Ed25519-signed | Pay for one metered request |
-| C → S | `POST /channel/topup` | `{ action: "topup", tx: <base64> }` | Add to deposit |
-| C → S | `POST /channel/close` | `{ action: "close", tx: <base64> }` | Initiate client-side close |
+| Direction | Method · Path | Payload | Drives on-chain ix | Purpose |
+|---|---|---|---|---|
+| S → C | `402 Payment Required` | open-challenge JSON (below) | — | Advertise open parameters when no channel exists |
+| C → S | `POST /channel/open` | `{ action: "open", tx: <base64> }` | `open` | Submit payer-signed partial `open` tx |
+| C → S | `GET <resource>` + `Mpp-Voucher` header | voucher (below), Ed25519-signed | — (off-chain) | Pay for one metered request |
+| C → S | `POST /channel/topup` | `{ action: "topup", tx: <base64> }` | `topUp` | Submit payer-signed partial `topUp` tx |
+| C → S | `POST /channel/close` | `{ action: "close", tx: <base64> }` | `requestClose` | Submit payer-signed partial `requestClose` tx |
+| C → S | `POST /channel/finalize` | — | `finalize` | Crank post-grace freeze of the watermark |
+| C → S | `POST /channel/withdraw_payer` | — | `withdraw_payer` | Crank payer refund (`deposit − settled`) post-grace |
+| C → S | `POST /channel/withdraw_payee` | — | `withdraw_payee` | Crank payee payout (`settled → channel.payee`) |
 
-All credential bodies carry a **partially-signed Solana transaction** (base64). Payer signs the authority portion; the server co-signs as fee payer and submits. Vouchers are purely off-chain — no tx involved.
+Two categories:
+
+- **Credential endpoints** (`/open`, `/topup`, `/close`) carry a **partially-signed Solana transaction** (base64). Payer signs the authority portion; the server co-signs as fee payer and submits. Required because these ixs need payer authority.
+- **Crank endpoints** (`/finalize`, `/withdraw_payer`, `/withdraw_payee`) have **empty bodies**. The underlying on-chain ixs are permissionless; the server submits as fee payer purely as a convenience for clients that don't want to manage an RPC connection. A client may equivalently submit these ixs **directly to Solana RPC** without the server's cooperation — this is the escape hatch when the server is unresponsive.
+
+Merchant-only ixs (`settle`, `settleAndFinalize`, `distribute`) are never exposed over HTTP; the server submits them on its own schedule.
+
+Vouchers are purely off-chain — no tx involved.
 
 **Open-challenge body** (returned in `402`):
 
