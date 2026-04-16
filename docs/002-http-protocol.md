@@ -28,16 +28,16 @@ Actors: **C** = client (payer). **S** = server (merchant).
 | C → S | `GET <resource>` + `Mpp-Voucher` header | voucher (below), Ed25519-signed | — (off-chain) | Pay for one metered request |
 | C → S | `POST /channel/topup` | `{ action: "topup", tx: <base64> }` | `topUp` | Submit payer-signed partial `topUp` tx |
 | C → S | `POST /channel/close` | `{ action: "close", tx: <base64> }` | `requestClose` | Submit payer-signed partial `requestClose` tx |
+| C → S | `POST /channel/withdraw_payer` | `{ action: "withdraw_payer", tx: <base64> }` | `withdraw_payer` | Submit payer-signed partial `withdraw_payer` tx |
 | C → S | `POST /channel/finalize` | — | `finalize` | Crank post-grace freeze of the watermark |
-| C → S | `POST /channel/withdraw_payer` | — | `withdraw_payer` | Crank payer refund (`deposit − settled`) post-grace |
-| C → S | `POST /channel/withdraw_payee` | — | `withdraw_payee` | Crank payee payout (`settled → channel.payee`) |
+| C → S | `POST /channel/withdraw_payee` | — | `withdraw_payee` | Crank payee payout (`(settled − paid_out) → channel.payee`) |
 
 Two categories:
 
-- **Credential endpoints** (`/open`, `/topup`, `/close`) carry a **partially-signed Solana transaction** (base64). Payer signs the authority portion; the server co-signs as fee payer and submits. Required because these ixs need payer authority.
-- **Crank endpoints** (`/finalize`, `/withdraw_payer`, `/withdraw_payee`) have **empty bodies**. The underlying on-chain ixs are permissionless; the server submits as fee payer purely as a convenience for clients that don't want to manage an RPC connection. A client may equivalently submit these ixs **directly to Solana RPC** without the server's cooperation — this is the escape hatch when the server is unresponsive.
+- **Credential endpoints** (`/open`, `/topup`, `/close`, `/withdraw_payer`) carry a **partially-signed Solana transaction** (base64). Payer signs the authority portion; the server co-signs as fee payer and submits. Required because these ixs need payer authority.
+- **Crank endpoints** (`/finalize`, `/withdraw_payee`) have **empty bodies**. The underlying on-chain ixs are permissionless; the server submits as fee payer purely as a convenience for clients that don't want to manage an RPC connection. A client may equivalently submit these ixs **directly to Solana RPC** without the server's cooperation — this is the escape hatch when the server is unresponsive.
 
-Merchant-only ixs (`settle`, `settleAndFinalize`, `distribute`) are never exposed over HTTP; the server submits them on its own schedule.
+Server-submitted ixs (`settle`, `settleAndFinalize`, `distribute`) are never exposed over HTTP; the server submits them on its own schedule. `distribute` is technically permissionless (preimage is the authority), but in practice only the server holds the preimage, so it acts as the de-facto caller — including for mid-session distributes from `OPEN` state when the server wants to realize accumulated `settled` revenue without closing the channel.
 
 Vouchers are purely off-chain — no tx involved.
 
@@ -90,13 +90,18 @@ sequenceDiagram
         S->>C: 200 + resource
     end
 
+    Note over S: (optional) mid-session distribute
+    S->>P: submit `distribute` ix (preimage)
+    P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients<br/>paid_out = settled<br/>state stays OPEN
+    P-->>S: OK
+
     Note over S: Server decides to close
     S->>P: submit `settleAndFinalize` ix (final voucher)
-    P->>P: verify voucher, set settled<br/>state = FINALIZED
+    P->>P: verify voucher, set settled<br/>closureStartedAt = now<br/>state = FINALIZED
     P-->>S: OK
 
     S->>P: submit `distribute` ix (preimage)
-    P->>P: verify hash(preimage)<br/>transfer splits → recipients<br/>transfer (deposit − settled) → payer<br/>realloc to 8 bytes<br/>state = CLOSED
+    P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients<br/>transfer (deposit − settled) → payer<br/>realloc to 8 bytes<br/>state = CLOSED
     P-->>S: OK
 ```
 
@@ -120,20 +125,20 @@ sequenceDiagram
     alt Within grace — merchant cooperates
         Note over S,P: now < closureStartedAt + GRACE
         S->>P: submit `settleAndFinalize` ix (final voucher)
-        P->>P: lock watermark<br/>state = FINALIZED
+        P->>P: lock watermark<br/>closureStartedAt = 0<br/>state = FINALIZED
         P-->>S: OK
 
         S->>P: submit `distribute` ix (preimage)
-        P->>P: transfer splits → recipients<br/>transfer (deposit − settled) → payer<br/>realloc to 8 bytes<br/>state = CLOSED
+        P->>P: transfer (settled − paid_out) → recipients<br/>transfer (deposit − settled) → payer<br/>realloc to 8 bytes<br/>state = CLOSED
         P-->>S: OK
     else Post-grace — permissionless escape
         Note over A,P: now ≥ closureStartedAt + GRACE
         A->>P: submit `finalize` ix (no voucher)
-        P->>P: freeze watermark<br/>state = FINALIZED
+        P->>P: freeze watermark<br/>closureStartedAt = 0<br/>state = FINALIZED
         P-->>A: OK
 
         A->>P: submit `withdraw_payee` ix
-        P->>P: transfer settled → channel.payee<br/>(if payerWithdrawnAt == 0) transfer (deposit − settled) → payer<br/>realloc to 8 bytes<br/>state = CLOSED<br/>rent → payer
+        P->>P: transfer (settled − paid_out) → channel.payee<br/>(if payerWithdrawnAt == 0) transfer (deposit − settled) → payer<br/>realloc to 8 bytes<br/>state = CLOSED<br/>rent → payer
         P-->>A: OK
     end
 ```
