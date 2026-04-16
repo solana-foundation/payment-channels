@@ -132,14 +132,10 @@ sequenceDiagram
         P->>P: freeze watermark<br/>state = FINALIZED
         P-->>A: OK
 
-        A->>P: submit `withdraw_payer` ix
-        P->>P: transfer (deposit − settled) → payer<br/>payerWithdrawnAt = now
-        P-->>A: OK (state still FINALIZED)
-
         A->>P: submit `withdraw_payee` ix
-        P->>P: transfer settled → channel.payee<br/>payeeWithdrawnAt = now<br/>both flags set → realloc to 8 bytes<br/>state = CLOSED<br/>rent → payer
+        P->>P: transfer settled → channel.payee<br/>(if payerWithdrawnAt == 0) transfer (deposit − settled) → payer<br/>realloc to 8 bytes<br/>state = CLOSED<br/>rent → payer
         P-->>A: OK
     end
 ```
 
-The client POSTs a close credential (payer-signed `requestClose` tx); the server submits it and grace begins. **Within grace**, the server finalizes cooperatively via `settleAndFinalize` + `distribute`. **Post-grace**, anyone cranks `finalize` (permissionless, voucher-free) to move `CLOSING → FINALIZED`; then `withdraw_payer` and `withdraw_payee` fire independently — either order — each setting its own flag. The second of the two tombstones the PDA and refunds rent to the payer.
+The client POSTs a close credential (payer-signed `requestClose` tx); the server submits it and grace begins. **Within grace**, the server finalizes cooperatively via `settleAndFinalize` + `distribute`. **Post-grace**, anyone cranks `finalize` (permissionless, voucher-free) to move `CLOSING → FINALIZED`, then `withdraw_payee` to atomically pay `settled → channel.payee`, refund `deposit − settled → payer` (if not already withdrawn), and tombstone the PDA. The payer may also pull their refund early at any point during `FINALIZED` via the standalone `withdraw_payer` ix.
