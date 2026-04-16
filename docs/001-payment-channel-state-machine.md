@@ -22,29 +22,46 @@ Instructions whose destinations are fully determined by PDA seeds are **permissi
 ```rust
 #[repr(u8)]
 pub enum ChannelStatus {
-    Open      = 0,
-    Finalized = 1,
-    Closing   = 2,
+    Uninitialized = 0,  // sentinel: zero-initialized account; rejected by every ix
+    Open          = 1,
+    Finalized     = 2,
+    Closing       = 3,
 }
 ```
 
 ### Channel PDA
 
 ```rust
-/// Active channel account. 90 bytes.
-#[repr(C)]
+/// Active channel account. 190 bytes.
+#[repr(C, packed)]
 pub struct Channel {
-    pub deposit:            u64,       // [ 0..8 )  Initial escrow amount
-    pub settled:            u64,       // [ 8..16)  Cumulative authorized watermark
-    pub paid_out:           u64,       // [16..24)  Cumulative tokens distributed to merchant; paid_out ≤ settled
-    pub closure_started_at: i64,       // [24..32)  Unix ts; 0 = not in closure trajectory
-    pub payer_withdrawn_at: i64,       // [32..40)  Unix ts; 0 = payer has not withdrawn
-    pub distribution_hash:  [u8; 16],  // [40..56)  Blake3-truncated commitment to splits config
-    pub payee:              [u8; 32],  // [56..88)  Fallback destination for withdraw_payee
-    pub status:             u8,        // [88..89)  ChannelStatus
-    pub bump:               u8,        // [89..90)  Canonical PDA bump
+    pub deposit:            u64,       // [  0..8  )  Initial escrow amount
+    pub settled:            u64,       // [  8..16 )  Cumulative authorized watermark
+    pub paid_out:           u64,       // [ 16..24 )  Cumulative tokens distributed to merchant; paid_out ≤ settled
+    pub closure_started_at: i64,       // [ 24..32 )  Unix ts; see footnote ‡ for dual semantics
+    pub payer_withdrawn_at: i64,       // [ 32..40 )  Unix ts; 0 = payer has not withdrawn
+    pub grace_period:       u32,       // [ 40..44 )  Seconds; per-channel grace duration set at `open`
+    pub distribution_hash:  [u8; 16],  // [ 44..60 )  Blake3-truncated commitment to splits config
+    pub payer:              [u8; 32],  // [ 60..92 )  Payer pubkey (refund destination + payer-authority signer check)
+    pub payee:              [u8; 32],  // [ 92..124)  Fallback destination for withdraw_payee
+    pub authorized_signer:  [u8; 32],  // [124..156)  Voucher signer pubkey; equals `payer` when no delegate is bound
+    pub mint:               [u8; 32],  // [156..188)  Token mint
+    pub status:             u8,        // [188..189)  ChannelStatus
+    pub bump:               u8,        // [189..190)  Canonical PDA bump
 }
 ```
+
+### PDA derivation
+
+```text
+seeds = [ b"channel", payer, payee, mint, authorized_signer, salt.to_le_bytes() ]
+```
+
+- `payer`, `payee`, `mint`, `authorized_signer`: 32-byte pubkeys (also stored in the struct after `open` validates them via PDA re-derivation).
+- `salt: u64`: client-chosen disambiguator passed at `open`. Allows multiple concurrent channels between the same `(payer, payee, mint, authorized_signer)` tuple (e.g. parallel sessions). Not stored on-chain — must be supplied by the caller on every ix that re-derives the PDA.
+- `bump`: canonical bump from `find_program_address` at `open`, stored in the struct. Subsequent ixs use `create_program_address` with the stored bump.
+
+The seeds bind every parameter that affects the channel's identity, so any subsequent ix can verify the supplied accounts by re-deriving the PDA and comparing against the channel's own address — no separate per-account whitelist needed.
 
 ### Voucher
 
@@ -101,6 +118,8 @@ pub enum SigType {
 | `withdraw_payee` | `FINALIZED → CLOSED` | `now ≥ closureStartedAt + GRACE` |
 
 † **voucher fresh** = `voucher.expires_at == None` OR `now < voucher.expires_at`. Expired vouchers MUST be rejected to prevent merchants from settling stale authorizations after the payer's TTL has passed.
+
+‡ **`closureStartedAt` dual semantics.** Set to `now` on `requestClose` and on `OPEN → FINALIZED` via `settleAndFinalize` (gives merchant a fresh `grace_period` window in `FINALIZED` to call `distribute` with splits before `withdraw_payee` unlocks). **Reset to `0`** on `CLOSING → FINALIZED` via either ix (the grace was already consumed during `CLOSING` — `Finalize` required it to elapse, and `SettleAndFinalize` cooperatively closed mid-grace). With `closureStartedAt == 0`, the `withdraw_payee` guard `now ≥ closureStartedAt + grace_period` is trivially true — by design, no further wait. Merchant SHOULD bundle `settleAndFinalize` + `distribute` atomically in a single tx on the cooperative happy path to avoid racing `withdraw_payee` after the reset.
 
 ## Instructions
 

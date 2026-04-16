@@ -25,7 +25,7 @@ Actors: **C** = client (payer). **S** = server (merchant).
 |---|---|---|---|---|
 | S → C | `402 Payment Required` | open-challenge JSON (below) | — | Advertise open parameters when no channel exists |
 | C → S | `POST /channel/open` | `{ action: "open", tx: <base64> }` | `open` | Submit payer-signed partial `open` tx |
-| C → S | `GET <resource>` + `Mpp-Voucher` header | voucher (below), Ed25519-signed | — (off-chain) | Pay for one metered request |
+| C → S | `GET <resource>` + `Authorization: Payment <base64url-JSON>` header | voucher (below), Ed25519-signed, wrapped in MPP credential | — (off-chain) | Pay for one metered request |
 | C → S | `POST /channel/topup` | `{ action: "topup", tx: <base64> }` | `topUp` | Submit payer-signed partial `topUp` tx |
 | C → S | `POST /channel/close` | `{ action: "close", tx: <base64> }` | `requestClose` | Submit payer-signed partial `requestClose` tx |
 | C → S | `POST /channel/withdraw_payer` | `{ action: "withdraw_payer", tx: <base64> }` | `withdraw_payer` | Submit payer-signed partial `withdraw_payer` tx |
@@ -51,7 +51,7 @@ Vouchers are purely off-chain — no tx involved.
   "minimumDeposit": "<u64 decimal string>",
   "distributionHash": "<16 bytes hex>",
   "authorizedSigner": "<pubkey base58, may equal payer>",
-  "gracePeriod": <unix seconds>
+  "gracePeriod": <duration in seconds — stored per-channel on-chain at `open`>
 }
 ```
 
