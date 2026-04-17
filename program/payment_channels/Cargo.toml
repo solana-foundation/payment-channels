@@ -2,9 +2,17 @@
 name    = "payment_channels"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 
 [lib]
 crate-type = ["lib", "cdylib"]
+
+[features]
+default = []
+# Enables codama derives + build.rs IDL emission. Host-only; must NOT
+# be enabled for `cargo build-sbf` (see `compile_error!` guard in
+# src/lib.rs). Use `cargo build --features idl` or `just generate-idl`.
+idl = ["dep:codama"]
 
 [build-dependencies]
 codama     = "0.7.2"
@@ -12,26 +20,28 @@ serde_json = "1"
 
 [dependencies]
 pinocchio                          = { version = "0.10.2", features = ["cpi", "copy"] }
-solana-address                     = { version = "2", features = ["curve25519"] }
+solana-address                     = { version = "2", features = ["curve25519", "borsh"] }
 pinocchio-associated-token-account = "0.3.0"
 pinocchio-system                   = "0.5.0"
 pinocchio-token                    = "0.5.0"
 pinocchio-token-2022               = "0.2.0"
-codama                             = "0.7.2"
+codama                             = { version = "0.7.2", optional = true }
 const-crypto                       = "0.3"
+borsh                              = { version = "1", default-features = false, features = ["derive"] }
 thiserror                          = { version = "2", default-features = false }
 
 [dev-dependencies]
-litesvm                  = "^0.7"
-litesvm-token            = { version = "^0.7", features = ["token-2022"] }
-solana-account           = "^2"
-solana-instruction       = "^2"
-solana-keypair           = "^2"
-solana-message           = "^2"
-solana-pubkey            = "^2"
-solana-signer            = "^2"
-solana-transaction       = "^2"
-solana-transaction-error = "^2"
+litesvm                  = "^0.10"
+litesvm-token            = { version = "^0.10", features = ["token-2022"] }
+payment_channels_client  = { path = "../../clients/rust" }
+solana-account           = "^3"
+solana-instruction       = "^3"
+solana-keypair           = "^3"
+solana-message           = "^3"
+solana-pubkey            = "^3"
+solana-signer            = "^3"
+solana-transaction       = "^3"
+solana-transaction-error = "^3"
 serde_json               = "1"
 rstest                   = "0.24"
 

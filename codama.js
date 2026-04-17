@@ -11,7 +11,7 @@ export default {
     },
     rust: {
       from: '@codama/renderers-rust',
-      args: ['./clients/rust', { formatCode: false, syncCargoToml: true }],
+      args: ['./clients/rust', { formatCode: false, syncCargoToml: false }],
     },
   },
 };
