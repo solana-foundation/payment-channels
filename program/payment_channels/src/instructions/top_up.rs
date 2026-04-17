@@ -1,13 +1,15 @@
+#[cfg(feature = "idl")]
 use codama::CodamaType;
 use core::mem::size_of;
-use pinocchio::{AccountView, ProgramResult, error::ProgramError};
+use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 
 use crate::errors::PaymentChannelsError;
 
 pub const DISCRIMINATOR: u8 = 2;
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy, CodamaType)]
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct TopUpArgs {
     pub amount: u64,
 }
@@ -58,8 +60,11 @@ impl<'a> TryFrom<&'a [AccountView]> for TopUpAccounts<'a> {
     }
 }
 
-pub fn process(accounts: &[AccountView], data: &[u8]) -> ProgramResult {
-    let _args = TopUpArgs::load(data)?;
+pub fn process(
+    _program_id: &Address,
+    accounts: &[AccountView],
+    _args: &TopUpArgs,
+) -> ProgramResult {
     let _accs = TopUpAccounts::try_from(accounts)?;
     Err(PaymentChannelsError::NotImplemented.into())
 }

@@ -1,18 +1,25 @@
+#[cfg(feature = "idl")]
 use codama::CodamaType;
 use core::mem::size_of;
-use pinocchio::{AccountView, ProgramResult, error::ProgramError};
+use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 
-use crate::errors::PaymentChannelsError;
+use crate::event_engine::EventSerialize;
+use crate::event_engine::emit_event;
+use crate::events::Opened;
 
 pub const DISCRIMINATOR: u8 = 0;
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy, CodamaType)]
+// `packed` (over plain `repr(C)`) so `&[u8]` can be reinterpreted as
+// `&Self` after the dispatcher splits off the 1-byte discriminator,
+// without an alignment copy.
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct OpenArgs {
     pub salt: u64,
     pub deposit: u64,
     pub grace_period: u32,
-    pub distribution_hash: [u8; 16],
+    pub distribution_hash: [u8; 32],
 }
 
 impl OpenArgs {
@@ -37,6 +44,8 @@ pub struct OpenAccounts<'a> {
     pub token_program: &'a AccountView,
     pub system_program: &'a AccountView,
     pub rent: &'a AccountView,
+    pub event_authority: &'a AccountView,
+    pub self_program: &'a AccountView,
 }
 
 impl<'a> TryFrom<&'a [AccountView]> for OpenAccounts<'a> {
@@ -54,6 +63,8 @@ impl<'a> TryFrom<&'a [AccountView]> for OpenAccounts<'a> {
             token_program,
             system_program,
             rent,
+            event_authority,
+            self_program,
         ] = accounts
         else {
             return Err(ProgramError::NotEnoughAccountKeys);
@@ -69,12 +80,29 @@ impl<'a> TryFrom<&'a [AccountView]> for OpenAccounts<'a> {
             token_program,
             system_program,
             rent,
+            event_authority,
+            self_program,
         })
     }
 }
 
-pub fn process(accounts: &[AccountView], data: &[u8]) -> ProgramResult {
-    let _args = OpenArgs::load(data)?;
-    let _accs = OpenAccounts::try_from(accounts)?;
-    Err(PaymentChannelsError::NotImplemented.into())
+/// Validate-and-emit stub. Real business logic (PDA creation, token
+/// transfers, Channel state initialization) lands with the full `open`
+/// implementation. For now this proves the event-emission path end-to-end
+/// against the compiled .so by emitting an `Opened` event on success.
+pub fn process(program_id: &Address, accounts: &[AccountView], _args: &OpenArgs) -> ProgramResult {
+    let accs = OpenAccounts::try_from(accounts)?;
+
+    let event = Opened {
+        channel: *accs.channel.address(),
+    };
+    let bytes = event.to_bytes_fixed::<{ Opened::WIRE_LEN }>();
+    emit_event(
+        program_id,
+        accs.event_authority,
+        accs.self_program,
+        bytes.as_slice(),
+    )?;
+
+    Ok(())
 }

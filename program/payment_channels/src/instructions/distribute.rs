@@ -1,6 +1,7 @@
+#[cfg(feature = "idl")]
 use codama::CodamaType;
 use core::mem::size_of;
-use pinocchio::{AccountView, ProgramResult, error::ProgramError};
+use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 
 use crate::errors::PaymentChannelsError;
 
@@ -8,12 +9,14 @@ pub const DISCRIMINATOR: u8 = 6;
 
 pub const MAX_DISTRIBUTE_PREIMAGE: usize = 512;
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy, CodamaType)]
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct DistributeArgs {
     pub preimage_len: u16,
     pub _pad: [u8; 6],
-    #[codama(type = fixed_size(bytes, 512))]
+    /// Blake3-hashed on-chain; digest must equal `Channel::distribution_hash`.
+    #[cfg_attr(feature = "idl", codama(type = fixed_size(bytes, 512)))]
     pub preimage: [u8; MAX_DISTRIBUTE_PREIMAGE],
 }
 
@@ -63,8 +66,11 @@ impl<'a> TryFrom<&'a [AccountView]> for DistributeAccounts<'a> {
     }
 }
 
-pub fn process(accounts: &[AccountView], data: &[u8]) -> ProgramResult {
-    let _args = DistributeArgs::load(data)?;
+pub fn process(
+    _program_id: &Address,
+    accounts: &[AccountView],
+    _args: &DistributeArgs,
+) -> ProgramResult {
     let _accs = DistributeAccounts::try_from(accounts)?;
     Err(PaymentChannelsError::NotImplemented.into())
 }

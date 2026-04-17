@@ -6,6 +6,17 @@ use std::{env, fs, path::Path};
 fn main() {
     println!("cargo:rerun-if-changed=src/");
     println!("cargo:rerun-if-env-changed=GENERATE_IDL");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_IDL");
+
+    // Only regenerate the IDL when the `idl` feature is active. Cargo
+    // sets `CARGO_FEATURE_IDL=1` for this process when the feature is
+    // enabled. With it off, codama derives are cfg'd out of the source
+    // and Codama::load would see empty derive sites, producing a
+    // degraded JSON — skip entirely so plain `cargo build` stays
+    // idempotent and the committed IDL isn't clobbered.
+    if std::env::var_os("CARGO_FEATURE_IDL").is_none() {
+        return;
+    }
 
     if let Err(e) = generate_idl() {
         println!("cargo:warning=Failed to generate IDL: {}", e);

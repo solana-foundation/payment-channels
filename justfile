@@ -51,9 +51,11 @@ build-program: prepare-deploy-keys
     cd {{program_dir}} && cargo build-sbf
     @echo "✓ program built"
 
-# IDL is emitted by build.rs on every host build.
+# IDL is emitted by build.rs, gated on the `idl` feature so plain
+# `cargo build` / `cargo build-sbf` don't touch it (codama is
+# behind the same feature).
 generate-idl:
-    cd {{program_dir}} && cargo build
+    cd {{program_dir}} && cargo build --features idl
     @echo "✓ IDL: {{idl_file}}"
 
 generate-client: generate-idl
@@ -70,6 +72,12 @@ test: test-program
 
 test-program:
     cd {{program_dir}} && cargo test-sbf
+
+# Focused event-engine end-to-end run (litesvm). Loads the compiled .so
+# and exercises the self-CPI Anchor-event wire format via the `open`
+# instruction plus the `emit_event` validation surface.
+events-e2e:
+    cd {{program_dir}} && cargo test-sbf --test event_engine_e2e
 
 # ---------- quality ----------
 

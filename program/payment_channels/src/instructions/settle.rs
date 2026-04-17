@@ -1,14 +1,16 @@
+#[cfg(feature = "idl")]
 use codama::CodamaType;
 use core::mem::size_of;
-use pinocchio::{AccountView, ProgramResult, error::ProgramError};
+use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 
 use crate::errors::PaymentChannelsError;
 use crate::instructions::VoucherArgs;
 
 pub const DISCRIMINATOR: u8 = 1;
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy, CodamaType)]
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct SettleArgs {
     pub voucher: VoucherArgs,
 }
@@ -45,8 +47,11 @@ impl<'a> TryFrom<&'a [AccountView]> for SettleAccounts<'a> {
     }
 }
 
-pub fn process(accounts: &[AccountView], data: &[u8]) -> ProgramResult {
-    let _args = SettleArgs::load(data)?;
+pub fn process(
+    _program_id: &Address,
+    accounts: &[AccountView],
+    _args: &SettleArgs,
+) -> ProgramResult {
     let _accs = SettleAccounts::try_from(accounts)?;
     Err(PaymentChannelsError::NotImplemented.into())
 }

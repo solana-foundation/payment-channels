@@ -1,4 +1,4 @@
-use pinocchio::{AccountView, ProgramResult, error::ProgramError};
+use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 
 use crate::errors::PaymentChannelsError;
 
@@ -48,7 +48,7 @@ impl<'a> TryFrom<&'a [AccountView]> for WithdrawPayeeAccounts<'a> {
     }
 }
 
-pub fn process(accounts: &[AccountView], _data: &[u8]) -> ProgramResult {
+pub fn process(_program_id: &Address, accounts: &[AccountView]) -> ProgramResult {
     let _accs = WithdrawPayeeAccounts::try_from(accounts)?;
     Err(PaymentChannelsError::NotImplemented.into())
 }
