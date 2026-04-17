@@ -33,7 +33,7 @@ thiserror                          = { version = "2", default-features = false }
 [dev-dependencies]
 litesvm                  = "^0.10"
 litesvm-token            = { version = "^0.10", features = ["token-2022"] }
-payment_channels_client  = { path = "../../clients/rust" }
+payment_channels_client  = { workspace = true }
 solana-account           = "^3"
 solana-instruction       = "^3"
 solana-keypair           = "^3"
