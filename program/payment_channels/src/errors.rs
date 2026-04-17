@@ -1,3 +1,4 @@
+#[cfg(feature = "idl")]
 use codama::CodamaErrors;
 use pinocchio::error::ProgramError;
 use thiserror::Error;
@@ -8,14 +9,17 @@ impl From<PaymentChannelsError> for ProgramError {
     }
 }
 
-#[derive(Debug, Copy, Clone, Error, CodamaErrors)]
+#[derive(Debug, Copy, Clone, Error)]
+#[cfg_attr(feature = "idl", derive(CodamaErrors))]
 pub enum PaymentChannelsError {
     #[error("Not implemented")]
     NotImplemented = 0,
     #[error("Invalid channel status")]
-    InvalidChannelStatus,
+    InvalidChannelStatus = 1,
     #[error("Invalid event authority")]
-    InvalidEventAuthority,
-    #[error("Invalid event data")]
-    InvalidEventData,
+    InvalidEventAuthority = 2,
+    #[error("Invalid account discriminator")]
+    InvalidAccountDiscriminator = 3,
+    #[error("Unsupported channel version")]
+    UnsupportedChannelVersion = 4,
 }

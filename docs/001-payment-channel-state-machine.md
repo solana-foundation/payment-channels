@@ -22,32 +22,46 @@ Instructions whose destinations are fully determined by PDA seeds are **permissi
 ```rust
 #[repr(u8)]
 pub enum ChannelStatus {
-    Uninitialized = 0,  // sentinel: zero-initialized account; rejected by every ix
-    Open          = 1,
-    Finalized     = 2,
-    Closing       = 3,
+    Open      = 0,
+    Finalized = 1,
+    Closing   = 2,
+}
+```
+
+Zero-initialized accounts are rejected at load time by the byte-0
+`AccountDiscriminator` check (see below), not by a status sentinel.
+
+### Account discriminator
+
+```rust
+#[repr(u8)]
+pub enum AccountDiscriminator {
+    Channel = 1,                    // starts at 1 so zero-init accounts fail load
+    // ClosedChannel = 2,           // reserved for tombstone shape per TBD
 }
 ```
 
 ### Channel PDA
 
 ```rust
-/// Active channel account. 190 bytes.
+/// Active channel account. 208 bytes.
 #[repr(C, packed)]
 pub struct Channel {
-    pub deposit:            u64,       // [  0..8  )  Initial escrow amount
-    pub settled:            u64,       // [  8..16 )  Cumulative authorized watermark
-    pub paid_out:           u64,       // [ 16..24 )  Cumulative tokens distributed to merchant; paid_out ≤ settled
-    pub closure_started_at: i64,       // [ 24..32 )  Unix ts; see footnote ‡ for dual semantics
-    pub payer_withdrawn_at: i64,       // [ 32..40 )  Unix ts; 0 = payer has not withdrawn
-    pub grace_period:       u32,       // [ 40..44 )  Seconds; per-channel grace duration set at `open`
-    pub distribution_hash:  [u8; 16],  // [ 44..60 )  Blake3-truncated commitment to splits config
-    pub payer:              [u8; 32],  // [ 60..92 )  Payer pubkey (refund destination + payer-authority signer check)
-    pub payee:              [u8; 32],  // [ 92..124)  Fallback destination for withdraw_payee
-    pub authorized_signer:  [u8; 32],  // [124..156)  Voucher signer pubkey; equals `payer` when no delegate is bound
-    pub mint:               [u8; 32],  // [156..188)  Token mint
-    pub status:             u8,        // [188..189)  ChannelStatus
-    pub bump:               u8,        // [189..190)  Canonical PDA bump
+    pub discriminator:      u8,        // [  0..1  )  AccountDiscriminator::Channel
+    pub version:            u8,        // [  1..2  )  CURRENT_CHANNEL_VERSION
+    pub bump:               u8,        // [  2..3  )  Canonical PDA bump
+    pub status:             u8,        // [  3..4  )  ChannelStatus
+    pub deposit:            u64,       // [  4..12 )  Initial escrow amount
+    pub settled:            u64,       // [ 12..20 )  Cumulative authorized watermark
+    pub paid_out:           u64,       // [ 20..28 )  Cumulative tokens distributed to merchant; paid_out ≤ settled
+    pub closure_started_at: i64,       // [ 28..36 )  Unix ts; see footnote ‡ for dual semantics
+    pub payer_withdrawn_at: i64,       // [ 36..44 )  Unix ts; 0 = payer has not withdrawn
+    pub grace_period:       u32,       // [ 44..48 )  Seconds; per-channel grace duration set at `open`
+    pub distribution_hash:  [u8; 32],  // [ 48..80 )  Blake3 commitment to splits config
+    pub payer:              Address,   // [ 80..112)  Payer pubkey (refund destination + payer-authority signer check)
+    pub payee:              Address,   // [112..144)  Fallback destination for withdraw_payee
+    pub authorized_signer:  Address,   // [144..176)  Voucher signer pubkey; equals `payer` when no delegate is bound
+    pub mint:               Address,   // [176..208)  Token mint
 }
 ```
 
