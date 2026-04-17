@@ -1,0 +1,97 @@
+# Core CI: build, lint, unit tests. Supply-chain checks live in security.yml.
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: ./.github/actions/setup
+        with:
+          save-rust-cache: "true"
+          solana-version: "stable"
+
+      - name: Build program
+        run: just build-program
+
+      - name: Build client
+        run: just build-client
+
+      - name: Upload program SO
+        uses: actions/upload-artifact@v4
+        with:
+          name: program-so
+          path: target/deploy/payment_channels.so
+          retention-days: 1
+
+      - name: Upload program keypair
+        uses: actions/upload-artifact@v4
+        with:
+          name: program-keypair
+          path: target/deploy/payment_channels-keypair.json
+          retention-days: 1
+
+      - name: Upload client dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-dist
+          path: clients/typescript/dist/
+          retention-days: 1
+
+      - name: Upload generated clients
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-clients
+          path: |
+            clients/typescript/src/generated/
+            clients/rust/src/generated/
+          retention-days: 1
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: ./.github/actions/setup
+        with:
+          install-solana: "false"
+
+      - name: Check formatting and linting
+        run: just check
+
+  unit-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: ./.github/actions/setup
+        with:
+          solana-version: "stable"
+          rust-cache-key: "unit-test"
+          save-rust-cache: "true"
+
+      - name: Test program
+        run: just test-program
