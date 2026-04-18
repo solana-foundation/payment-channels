@@ -97,7 +97,7 @@ impl Channel {
     }
 
     pub fn from_account_mut<'a>(
-        account: &'a AccountView,
+        account: &'a mut AccountView,
     ) -> Result<RefMut<'a, Self>, ProgramError> {
         if !account.owned_by(&crate::ID) {
             return Err(ProgramError::InvalidAccountOwner);

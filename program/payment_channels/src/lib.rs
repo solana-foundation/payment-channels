@@ -48,7 +48,7 @@ declare_id!("GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc");
 
 fn process_instruction(
     program_id: &Address,
-    accounts: &[AccountView],
+    accounts: &mut [AccountView],
     instruction_data: &[u8],
 ) -> ProgramResult {
     match PaymentChannelsInstruction::from_bytes(instruction_data)? {
