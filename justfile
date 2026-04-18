@@ -70,7 +70,7 @@ build-client: generate-client
 
 test: test-program
 
-test-program:
+test-program: generate-client
     cd {{program_dir}} && cargo test-sbf
 
 # Focused event-engine end-to-end run (litesvm). Loads the compiled .so
@@ -81,7 +81,7 @@ events-e2e:
 
 # ---------- quality ----------
 
-check:
+check: generate-client
     cargo fmt --all -- --check
     cargo clippy --all-targets -- -D warnings
     cd {{ts_client_dir}} && bun run typecheck

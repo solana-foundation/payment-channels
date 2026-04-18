@@ -50,7 +50,7 @@ runs:
       if: inputs.enable-rust-cache == 'true'
       uses: Swatinem/rust-cache@v2
       with:
-        save-if: ${{ inputs.save-rust-cache == 'true' }}
+        save-if: ${{ inputs.save-rust-cache == 'true' && github.ref == 'refs/heads/main' }}
         key: ${{ inputs.rust-cache-key }}
 
     - name: Install JS deps

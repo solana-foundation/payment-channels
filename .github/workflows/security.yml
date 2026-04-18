@@ -31,7 +31,7 @@ jobs:
           - advisories
           - bans licenses sources
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check ${{ matrix.checks }}
@@ -41,8 +41,8 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-geiger
         run: cargo install --locked cargo-geiger
-      - run: cargo geiger --all-features --output-format GitHubMarkdown
+      - run: cd program/payment_channels && cargo geiger --all-features --output-format GitHubMarkdown
