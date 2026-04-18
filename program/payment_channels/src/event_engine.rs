@@ -10,10 +10,10 @@
 //! derivation stock `@coral-xyz/anchor`'s `EventParser` uses — so published
 //! events round-trip through any Anchor client without custom decoders.
 //!
-//! Event structs must serialize only primitives and fixed-size arrays of
-//! primitives (e.g. `[u8; 32]` for pubkeys). Heap-backed Borsh types
-//! (`Vec`, `String`, `Option<T>`) would cross the runtime allocator
-//! boundary under Pinocchio's `no_allocator!()` and panic at runtime.
+//! Event structs use Borsh, but only its stack-only subset: primitives
+//! and fixed-size arrays of primitives (e.g. `[u8; 32]` for pubkeys).
+//! Heap-backed types (`Vec`, `String`, `Option<T>`) panic under
+//! Pinocchio's `no_allocator!()`.
 
 use borsh::BorshSerialize;
 use const_crypto::ed25519;

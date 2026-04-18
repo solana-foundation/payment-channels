@@ -1,9 +1,8 @@
 //! On-chain events emitted via Anchor-compatible self-CPI.
 //!
-//! Event structs in this module must serialize only primitives and
-//! fixed-size arrays of primitives; heap-backed Borsh types
-//! (`Vec`, `String`, `Option<T>`) would cross Pinocchio's
-//! `no_allocator!()` boundary and panic at runtime.
+//! Events use Borsh, but only its stack-only subset: primitives and
+//! fixed-size arrays of primitives. Heap-backed types (`Vec`, `String`,
+//! `Option<T>`, `Box<T>`) panic under Pinocchio's `no_allocator!()`.
 
 pub mod opened;
 pub use opened::Opened;
