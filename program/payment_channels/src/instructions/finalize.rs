@@ -3,7 +3,7 @@ use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 use crate::errors::PaymentChannelsError;
 
 /// Instruction discriminator byte for `finalize`.
-pub const DISCRIMINATOR: u8 = 5;
+pub const DISCRIMINATOR: u8 = 6;
 
 /// Timer-gated on `now ≥`
 /// [`closure_started_at`](crate::Channel::closure_started_at) `+`

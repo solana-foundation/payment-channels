@@ -6,7 +6,7 @@ use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 use crate::errors::PaymentChannelsError;
 
 /// Instruction discriminator byte for `distribute`.
-pub const DISCRIMINATOR: u8 = 6;
+pub const DISCRIMINATOR: u8 = 7;
 
 /// Upper bound on the serialized splits blob.
 pub const MAX_DISTRIBUTE_PREIMAGE: usize = 512;

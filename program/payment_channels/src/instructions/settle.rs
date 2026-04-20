@@ -7,7 +7,7 @@ use crate::errors::PaymentChannelsError;
 use crate::instructions::VoucherArgs;
 
 /// Instruction discriminator byte for `settle`.
-pub const DISCRIMINATOR: u8 = 1;
+pub const DISCRIMINATOR: u8 = 2;
 
 /// Mid-session watermark advance. Carries exactly one voucher; no token
 /// movement — only [`Channel::settled`](crate::Channel::settled) is updated.

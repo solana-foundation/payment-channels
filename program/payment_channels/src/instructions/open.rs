@@ -8,7 +8,7 @@ use crate::event_engine::emit_event;
 use crate::events::Opened;
 
 /// Instruction discriminator byte for `open`.
-pub const DISCRIMINATOR: u8 = 0;
+pub const DISCRIMINATOR: u8 = 1;
 
 /// Init payload. Fields land in the [`Channel`](crate::Channel) PDA either
 /// directly ([`Self::deposit`], [`Self::grace_period`],

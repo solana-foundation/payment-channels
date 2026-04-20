@@ -3,7 +3,7 @@ use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 use crate::errors::PaymentChannelsError;
 
 /// Instruction discriminator byte for `requestClose`.
-pub const DISCRIMINATOR: u8 = 4;
+pub const DISCRIMINATOR: u8 = 5;
 
 pub struct RequestCloseAccounts<'a> {
     /// Must equal [`Channel::payer`](crate::Channel::payer).

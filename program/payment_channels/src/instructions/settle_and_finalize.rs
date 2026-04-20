@@ -7,7 +7,7 @@ use crate::errors::PaymentChannelsError;
 use crate::instructions::VoucherArgs;
 
 /// Instruction discriminator byte for `settleAndFinalize`.
-pub const DISCRIMINATOR: u8 = 3;
+pub const DISCRIMINATOR: u8 = 4;
 
 /// Cooperative-close payload. Holds a stable wire size (voucher + tag) so
 /// the struct is `#[repr(C, packed)]`-loadable; [`Self::has_voucher`] is
