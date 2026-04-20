@@ -211,3 +211,66 @@ impl<'a> PaymentChannelsInstruction<'a> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // `#[repr(u8)]` lays the discriminant as the leading byte; reading
+    // it back requires a raw-pointer cast because `mem::discriminant`
+    // is opaque and variants with payloads can't `as u8`.
+    fn tag(v: &PaymentChannelsInstruction<'_>) -> u8 {
+        unsafe { *(v as *const _ as *const u8) }
+    }
+
+    #[test]
+    fn discriminators_match_variants() {
+        let open: open::OpenArgs = unsafe { core::mem::zeroed() };
+        let settle: settle::SettleArgs = unsafe { core::mem::zeroed() };
+        let top_up: top_up::TopUpArgs = unsafe { core::mem::zeroed() };
+        let saf: settle_and_finalize::SettleAndFinalizeArgs =
+            unsafe { core::mem::zeroed() };
+        let distribute: distribute::DistributeArgs = unsafe { core::mem::zeroed() };
+
+        assert_eq!(
+            tag(&PaymentChannelsInstruction::Open(&open)),
+            open::DISCRIMINATOR,
+        );
+        assert_eq!(
+            tag(&PaymentChannelsInstruction::Settle(&settle)),
+            settle::DISCRIMINATOR,
+        );
+        assert_eq!(
+            tag(&PaymentChannelsInstruction::TopUp(&top_up)),
+            top_up::DISCRIMINATOR,
+        );
+        assert_eq!(
+            tag(&PaymentChannelsInstruction::SettleAndFinalize(&saf)),
+            settle_and_finalize::DISCRIMINATOR,
+        );
+        assert_eq!(
+            tag(&PaymentChannelsInstruction::RequestClose),
+            request_close::DISCRIMINATOR,
+        );
+        assert_eq!(
+            tag(&PaymentChannelsInstruction::Finalize),
+            finalize::DISCRIMINATOR,
+        );
+        assert_eq!(
+            tag(&PaymentChannelsInstruction::Distribute(&distribute)),
+            distribute::DISCRIMINATOR,
+        );
+        assert_eq!(
+            tag(&PaymentChannelsInstruction::WithdrawPayer),
+            withdraw_payer::DISCRIMINATOR,
+        );
+        assert_eq!(
+            tag(&PaymentChannelsInstruction::WithdrawPayee),
+            withdraw_payee::DISCRIMINATOR,
+        );
+        assert_eq!(
+            tag(&PaymentChannelsInstruction::EmitEvent),
+            emit_event::DISCRIMINATOR,
+        );
+    }
+}
