@@ -4,9 +4,7 @@ use crate::event_engine::verify_event_authority;
 
 pub const DISCRIMINATOR: u8 = crate::event_engine::EMIT_EVENT_IX_DISC;
 
-/// No-op self-CPI target. Event data is carried in the ix data; indexers
-/// read it from the inner-instruction log. Only the event authority PDA
-/// may invoke this instruction.
+/// No-op self-CPI target; only the event authority PDA may invoke.
 pub fn process(_program_id: &Address, accounts: &[AccountView]) -> ProgramResult {
     let [event_authority] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);

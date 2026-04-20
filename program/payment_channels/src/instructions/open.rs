@@ -9,9 +9,6 @@ use crate::events::Opened;
 
 pub const DISCRIMINATOR: u8 = 0;
 
-// `packed` (over plain `repr(C)`) so `&[u8]` can be reinterpreted as
-// `&Self` after the dispatcher splits off the 1-byte discriminator,
-// without an alignment copy.
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
@@ -86,10 +83,6 @@ impl<'a> TryFrom<&'a [AccountView]> for OpenAccounts<'a> {
     }
 }
 
-/// Validate-and-emit stub. Real business logic (PDA creation, token
-/// transfers, Channel state initialization) lands with the full `open`
-/// implementation. For now this proves the event-emission path end-to-end
-/// against the compiled .so by emitting an `Opened` event on success.
 pub fn process(program_id: &Address, accounts: &[AccountView], _args: &OpenArgs) -> ProgramResult {
     let accs = OpenAccounts::try_from(accounts)?;
 

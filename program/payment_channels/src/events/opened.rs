@@ -5,7 +5,6 @@ use pinocchio::Address;
 
 use crate::event_engine::{EventDiscriminator, EventSerialize};
 
-/// Emitted when a payment channel is opened.
 #[derive(BorshSerialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct Opened {

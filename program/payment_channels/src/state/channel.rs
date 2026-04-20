@@ -85,9 +85,8 @@ impl Channel {
         )
     }
 
-    /// Owner-checked borrow — the only path to a `&Channel`. `load` is
-    /// module-private, so callers cannot bypass the owner/discriminator
-    /// checks.
+    /// Owner-checked borrow. `load` is module-private so callers cannot
+    /// bypass the owner/discriminator/version checks.
     pub fn from_account<'a>(account: &'a AccountView) -> Result<Ref<'a, Self>, ProgramError> {
         if !account.owned_by(&crate::ID) {
             return Err(ProgramError::InvalidAccountOwner);

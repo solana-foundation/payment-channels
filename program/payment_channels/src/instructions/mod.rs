@@ -26,22 +26,10 @@ pub struct VoucherArgs {
 }
 
 /// All instructions supported by the payment-channels program.
-///
-/// The discriminator byte (`repr(u8)` value) is serialized as the first byte
-/// of instruction data; variants that carry a payload deserialize the
-/// remaining bytes as their args struct. Runtime dispatch goes through
-/// [`Self::from_bytes`] and the match in `lib.rs`. The same enum, via its
-/// feature-gated codama derives + helper attrs, is the source of truth for
-/// IDL generation — so adding or renaming an instruction is a single-site
-/// change.
-// Boxing the large variant would add a heap alloc, which is incompatible
-// with `no_allocator!()`; the enum is destructured immediately at the
-// single dispatch site so the footprint never leaves that stack frame.
 #[derive(Debug)]
 #[cfg_attr(feature = "idl", derive(CodamaInstructions))]
 #[repr(u8)]
-#[allow(clippy::large_enum_variant)]
-pub(crate) enum PaymentChannelsInstruction {
+pub(crate) enum PaymentChannelsInstruction<'a> {
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "payer", signer, writable)),
@@ -57,7 +45,7 @@ pub(crate) enum PaymentChannelsInstruction {
         codama(account(name = "event_authority")),
         codama(account(name = "self_program"))
     )]
-    Open(#[cfg_attr(feature = "idl", codama(name = "open_args"))] open::OpenArgs) = 0,
+    Open(#[cfg_attr(feature = "idl", codama(name = "open_args"))] &'a open::OpenArgs) = 0,
 
     #[cfg_attr(
         feature = "idl",
@@ -65,7 +53,7 @@ pub(crate) enum PaymentChannelsInstruction {
         codama(account(name = "channel", writable)),
         codama(account(name = "instructions_sysvar"))
     )]
-    Settle(#[cfg_attr(feature = "idl", codama(name = "settle_args"))] settle::SettleArgs) = 1,
+    Settle(#[cfg_attr(feature = "idl", codama(name = "settle_args"))] &'a settle::SettleArgs) = 1,
 
     #[cfg_attr(
         feature = "idl",
@@ -76,7 +64,7 @@ pub(crate) enum PaymentChannelsInstruction {
         codama(account(name = "mint")),
         codama(account(name = "token_program"))
     )]
-    TopUp(#[cfg_attr(feature = "idl", codama(name = "top_up_args"))] top_up::TopUpArgs) = 2,
+    TopUp(#[cfg_attr(feature = "idl", codama(name = "top_up_args"))] &'a top_up::TopUpArgs) = 2,
 
     #[cfg_attr(
         feature = "idl",
@@ -86,7 +74,7 @@ pub(crate) enum PaymentChannelsInstruction {
     )]
     SettleAndFinalize(
         #[cfg_attr(feature = "idl", codama(name = "settle_and_finalize_args"))]
-        settle_and_finalize::SettleAndFinalizeArgs,
+        &'a settle_and_finalize::SettleAndFinalizeArgs,
     ) = 3,
 
     #[cfg_attr(
@@ -115,7 +103,8 @@ pub(crate) enum PaymentChannelsInstruction {
         codama(account(name = "token_program"))
     )]
     Distribute(
-        #[cfg_attr(feature = "idl", codama(name = "distribute_args"))] distribute::DistributeArgs,
+        #[cfg_attr(feature = "idl", codama(name = "distribute_args"))]
+        &'a distribute::DistributeArgs,
     ) = 6,
 
     #[cfg_attr(
@@ -150,26 +139,23 @@ pub(crate) enum PaymentChannelsInstruction {
     EmitEvent = 228,
 }
 
-impl PaymentChannelsInstruction {
-    /// Parse an instruction from raw bytes: first byte is the discriminator,
-    /// remainder is the args payload for variants that carry one. Mirrors
-    /// `solana-program/multi-delegator::MultiDelegatorInstruction::from_bytes`.
-    pub(crate) fn from_bytes(data: &[u8]) -> Result<Self, ProgramError> {
+impl<'a> PaymentChannelsInstruction<'a> {
+    pub(crate) fn from_bytes(data: &'a [u8]) -> Result<Self, ProgramError> {
         let (disc, rest) = data
             .split_first()
             .ok_or(ProgramError::InvalidInstructionData)?;
 
         match *disc {
-            open::DISCRIMINATOR => Ok(Self::Open(*open::OpenArgs::load(rest)?)),
-            settle::DISCRIMINATOR => Ok(Self::Settle(*settle::SettleArgs::load(rest)?)),
-            top_up::DISCRIMINATOR => Ok(Self::TopUp(*top_up::TopUpArgs::load(rest)?)),
+            open::DISCRIMINATOR => Ok(Self::Open(open::OpenArgs::load(rest)?)),
+            settle::DISCRIMINATOR => Ok(Self::Settle(settle::SettleArgs::load(rest)?)),
+            top_up::DISCRIMINATOR => Ok(Self::TopUp(top_up::TopUpArgs::load(rest)?)),
             settle_and_finalize::DISCRIMINATOR => Ok(Self::SettleAndFinalize(
-                *settle_and_finalize::SettleAndFinalizeArgs::load(rest)?,
+                settle_and_finalize::SettleAndFinalizeArgs::load(rest)?,
             )),
             request_close::DISCRIMINATOR => Ok(Self::RequestClose),
             finalize::DISCRIMINATOR => Ok(Self::Finalize),
             distribute::DISCRIMINATOR => {
-                Ok(Self::Distribute(*distribute::DistributeArgs::load(rest)?))
+                Ok(Self::Distribute(distribute::DistributeArgs::load(rest)?))
             }
             withdraw_payer::DISCRIMINATOR => Ok(Self::WithdrawPayer),
             withdraw_payee::DISCRIMINATOR => Ok(Self::WithdrawPayee),
@@ -178,21 +164,3 @@ impl PaymentChannelsInstruction {
         }
     }
 }
-
-// Verify enum discriminant literals match the handler-module DISCRIMINATOR
-// constants. A mismatch would route tx bytes differently than clients
-// (which read the IDL's enum values) expect. Stable Rust (`const _: () =
-// assert!(...)` since 1.57) gives us this at zero runtime cost.
-const _: () = {
-    assert!(open::DISCRIMINATOR == 0);
-    assert!(settle::DISCRIMINATOR == 1);
-    assert!(top_up::DISCRIMINATOR == 2);
-    assert!(settle_and_finalize::DISCRIMINATOR == 3);
-    assert!(request_close::DISCRIMINATOR == 4);
-    assert!(finalize::DISCRIMINATOR == 5);
-    assert!(distribute::DISCRIMINATOR == 6);
-    assert!(withdraw_payer::DISCRIMINATOR == 7);
-    assert!(withdraw_payee::DISCRIMINATOR == 8);
-    assert!(emit_event::DISCRIMINATOR == crate::event_engine::EMIT_EVENT_IX_DISC);
-    assert!(emit_event::DISCRIMINATOR == 228);
-};

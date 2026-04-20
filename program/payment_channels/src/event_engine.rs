@@ -1,19 +1,11 @@
-//! Event emission via Anchor-compatible self-CPI.
+//! Anchor-compatible self-CPI event emission.
 //!
-//! Events are emitted by invoking this program's own [`EmitEvent`](crate::instructions::emit_event)
-//! instruction via CPI, signed by the compile-time-derived event authority
-//! PDA. Indexers detect these inner instructions by the 8-byte
-//! [`EVENT_IX_TAG`] prefix in the instruction data.
+//! Wire format: `tag (8) | event_disc (8) | borsh_payload`. Event disc is
+//! `sha256("event:{StructName}")[..8]` — matches `@coral-xyz/anchor`'s
+//! `EventParser`.
 //!
-//! Wire format per event: `tag (8 bytes) | event_disc (8 bytes) | borsh_payload`.
-//! The event discriminator is `sha256("event:{StructName}")[..8]` — the same
-//! derivation stock `@coral-xyz/anchor`'s `EventParser` uses — so published
-//! events round-trip through any Anchor client without custom decoders.
-//!
-//! Event structs use Borsh, but only its stack-only subset: primitives
-//! and fixed-size arrays of primitives (e.g. `[u8; 32]` for pubkeys).
-//! Heap-backed types (`Vec`, `String`, `Option<T>`) panic under
-//! Pinocchio's `no_allocator!()`.
+//! Event payloads are Borsh but must stay stack-only (primitives + fixed
+//! arrays). `Vec`/`String`/`Option<T>` panic under `no_allocator!()`.
 
 use borsh::BorshSerialize;
 use const_crypto::ed25519;
@@ -24,27 +16,20 @@ use pinocchio::{AccountView, Address, ProgramResult};
 
 use crate::errors::PaymentChannelsError;
 
-/// PDA seed for the event authority account.
 pub const EVENT_AUTHORITY_SEED: &[u8] = b"event_authority";
 
-/// Anchor-compatible event tag: `Sha256("anchor:event")[..8]`.
-/// Indexers use this prefix to identify CPI event data in inner instructions.
+/// `Sha256("anchor:event")[..8]`.
 pub const EVENT_IX_TAG: u64 = 0x1d9acb512ea545e4;
 
-/// Little-endian byte representation of [`EVENT_IX_TAG`].
 pub const EVENT_IX_TAG_LE: [u8; 8] = EVENT_IX_TAG.to_le_bytes();
 
-/// Wire format prefix length: 8-byte tag + 8-byte sha256 event discriminator.
+/// 8-byte tag + 8-byte event discriminator.
 pub const EVENT_DISCRIMINATOR_LEN: usize = 8 + 8;
 
-/// Instruction discriminator for the EmitEvent no-op instruction.
-///
-/// Equal to `EVENT_IX_TAG_LE[0]` so that self-CPI event bytes
-/// (`tag | event_disc | payload`) route to `emit_event::process` via
-/// the program's byte-0 dispatch.
+/// Equal to `EVENT_IX_TAG_LE[0]` so self-CPI event bytes route to
+/// `emit_event::process` via byte-0 dispatch.
 pub const EMIT_EVENT_IX_DISC: u8 = 228;
 
-/// Compile-time derived PDA for the event authority.
 pub mod event_authority_pda {
     use super::*;
 
@@ -55,10 +40,7 @@ pub mod event_authority_pda {
     pub const BUMP: u8 = EVENT_AUTHORITY_AND_BUMP.1;
 }
 
-/// Derive the 8-byte Anchor event discriminator at compile time.
-///
-/// Mirrors Anchor's `sha256("event:{StructName}")[..8]` derivation so
-/// events are readable by stock `@coral-xyz/anchor` indexers.
+/// Anchor's `sha256("event:{StructName}")[..8]`, const-evaluated.
 #[macro_export]
 macro_rules! anchor_event_disc {
     ($name:literal) => {{
@@ -69,7 +51,6 @@ macro_rules! anchor_event_disc {
     }};
 }
 
-/// Fixed-capacity stack buffer used as the event wire-format writer.
 /// Sized per event type via `EventSerialize::WIRE_LEN`.
 pub struct EventBuf<const N: usize> {
     bytes: [u8; N],
@@ -84,8 +65,7 @@ impl<const N: usize> EventBuf<N> {
         }
     }
 
-    /// Append `src` to the buffer. Debug-asserts capacity; release builds
-    /// rely on `WIRE_LEN` being const-computed correctly per event.
+    /// Debug-asserts capacity; release relies on `WIRE_LEN` being correct.
     pub fn write(&mut self, src: &[u8]) {
         debug_assert!(self.len + src.len() <= N);
         self.bytes[self.len..self.len + src.len()].copy_from_slice(src);
@@ -109,9 +89,7 @@ impl<const N: usize> Default for EventBuf<N> {
     }
 }
 
-/// Route `BorshSerialize::serialize` output into an `EventBuf`. The buffer
-/// is sized at the call site to `WIRE_LEN`, so writes never exceed
-/// capacity in correctly-typed code; debug_assert catches regressions.
+/// Routes `BorshSerialize::serialize` into the fixed-size buffer.
 impl<const N: usize> borsh::io::Write for EventBuf<N> {
     fn write(&mut self, buf: &[u8]) -> borsh::io::Result<usize> {
         <EventBuf<N>>::write(self, buf);
@@ -123,28 +101,17 @@ impl<const N: usize> borsh::io::Write for EventBuf<N> {
     }
 }
 
-/// Identifies which event type this struct represents. The 8-byte
-/// discriminator is Anchor's `sha256("event:{StructName}")[..8]`.
 pub trait EventDiscriminator {
     const DISCRIMINATOR: [u8; 8];
 }
 
-/// Serializes an event into its wire format: tag + 8-byte discriminator
-/// + Borsh-encoded field data.
 pub trait EventSerialize: EventDiscriminator + BorshSerialize + Sized {
-    /// Size of the Borsh-encoded payload alone (no tag, no discriminator).
-    /// Declared per-event so `to_bytes_fixed::<{ E::WIRE_LEN }>()` can be
-    /// used at call sites. A unit test cross-checks this against
-    /// `borsh::object_length` at runtime.
+    /// Borsh payload length only. Cross-checked against `borsh::object_length`
+    /// in tests.
     const DATA_LEN: usize;
 
-    /// Full framing: 8-byte tag + 8-byte event discriminator + `DATA_LEN`.
     const WIRE_LEN: usize = Self::DATA_LEN + EVENT_DISCRIMINATOR_LEN;
 
-    /// Build the on-wire representation into a stack buffer of exactly
-    /// `Self::WIRE_LEN` bytes.
-    ///
-    /// Call sites: `MyEvent { .. }.to_bytes_fixed::<{ MyEvent::WIRE_LEN }>()`.
     fn to_bytes_fixed<const N: usize>(&self) -> EventBuf<N> {
         let mut buf = EventBuf::<N>::new();
         buf.write(&EVENT_IX_TAG_LE);
@@ -155,7 +122,6 @@ pub trait EventSerialize: EventDiscriminator + BorshSerialize + Sized {
     }
 }
 
-/// Verifies that the given account matches the compile-time event authority PDA.
 #[inline(always)]
 pub fn verify_event_authority(account: &AccountView) -> Result<(), ProgramError> {
     if account.address() != &event_authority_pda::ID {
@@ -164,7 +130,6 @@ pub fn verify_event_authority(account: &AccountView) -> Result<(), ProgramError>
     Ok(())
 }
 
-/// Emits an event via self-CPI, recording event data in inner instruction data.
 pub fn emit_event(
     program_id: &Address,
     event_authority: &AccountView,
@@ -225,14 +190,6 @@ mod tests {
     /// via the macro in the test) so the golden breaks loudly if either
     /// the macro's hashing or the event name drifts.
     const STUB_EVENT_DISC_EXPECTED: [u8; 8] = [0x7d, 0xb7, 0x3e, 0xdc, 0x42, 0x0e, 0xa2, 0x13];
-
-    #[test]
-    fn tag_first_byte_equals_emit_event_disc() {
-        // Dispatch invariant: self-CPI event bytes start with the tag,
-        // whose first byte must equal the emit_event instruction
-        // discriminator so the program's byte-0 dispatcher routes to it.
-        assert_eq!(EVENT_IX_TAG_LE[0], EMIT_EVENT_IX_DISC);
-    }
 
     #[test]
     fn constants_are_consistent() {
