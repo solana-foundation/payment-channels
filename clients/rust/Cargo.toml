@@ -32,5 +32,4 @@ solana-cpi = "^3"
 
 [features]
 default = [ ]
-fetch = [ ]
-
+fetch = [ "dep:solana-client" ]
