@@ -15,7 +15,7 @@ default = []
 idl = ["dep:codama"]
 
 [build-dependencies]
-codama     = "0.7.2"
+codama     = "0.9.1"
 serde_json = "1"
 
 [dependencies]
@@ -25,14 +25,14 @@ pinocchio-associated-token-account = "0.4.0"
 pinocchio-system                   = "0.6.0"
 pinocchio-token                    = "0.6.0"
 pinocchio-token-2022               = "0.3.1"
-codama                             = { version = "0.7.2", optional = true }
+codama                             = { version = "0.9.1", optional = true }
 const-crypto                       = "0.3"
 borsh                              = { version = "1", default-features = false, features = ["derive"] }
 thiserror                          = { version = "2", default-features = false }
 
 [dev-dependencies]
-litesvm                  = "^0.10"
-litesvm-token            = { version = "^0.10", features = ["token-2022"] }
+litesvm                  = "0.11"
+litesvm-token            = { version = "0.11", features = ["token-2022"] }
 payment_channels_client  = { workspace = true }
 solana-account           = "^3"
 solana-instruction       = "^3"
@@ -43,7 +43,7 @@ solana-signer            = "^3"
 solana-transaction       = "^3"
 solana-transaction-error = "^3"
 serde_json               = "1"
-rstest                   = "0.24"
+rstest                   = "0.26"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

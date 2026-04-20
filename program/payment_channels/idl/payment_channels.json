@@ -460,6 +460,7 @@
         "name": "unsupportedChannelVersion"
       }
     ],
+    "events": [],
     "instructions": [
       {
         "accounts": [

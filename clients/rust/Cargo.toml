@@ -5,7 +5,7 @@ edition = "2024"
 license = "MIT"
 
 [dependencies]
-thiserror = "1.0"
+thiserror = "2"
 num-derive = "0.4"
 num-traits = "0.2"
 solana-account = "^3"
@@ -19,7 +19,7 @@ solana-cpi = "^3"
   features = [ "derive" ]
 
   [dependencies.solana-address]
-  version = "~2.2"
+  version = "2"
   features = [ "borsh", "curve25519" ]
 
   [dependencies.solana-client]
@@ -28,7 +28,7 @@ solana-cpi = "^3"
 
   [dependencies.anchor-lang]
   optional = true
-  version = "~0.31"
+  version = "1"
 
 [features]
 default = [ ]
