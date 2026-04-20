@@ -3,7 +3,7 @@
 use codama::Codama;
 use std::{env, fs, path::Path};
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=src/");
     println!("cargo:rerun-if-env-changed=GENERATE_IDL");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_IDL");
@@ -15,12 +15,10 @@ fn main() {
     // degraded JSON — skip entirely so plain `cargo build` stays
     // idempotent and the committed IDL isn't clobbered.
     if std::env::var_os("CARGO_FEATURE_IDL").is_none() {
-        return;
+        return Ok(());
     }
 
-    if let Err(e) = generate_idl() {
-        println!("cargo:warning=Failed to generate IDL: {}", e);
-    }
+    generate_idl()
 }
 
 fn generate_idl() -> Result<(), Box<dyn std::error::Error>> {
