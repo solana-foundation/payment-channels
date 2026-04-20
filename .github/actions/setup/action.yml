@@ -32,7 +32,7 @@ runs:
         components: rustfmt, clippy
 
     - name: Install just
-      uses: extractions/setup-just@v5
+      uses: extractions/setup-just@v4
 
     - name: Install Solana (Anza) CLI
       if: inputs.install-solana == 'true'
