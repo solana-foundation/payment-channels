@@ -30,7 +30,7 @@ export type PaymentChannelsError =
 let paymentChannelsErrorMessages:
   | Record<PaymentChannelsError, string>
   | undefined;
-if (process.env.NODE_ENV !== "production") {
+if (process.env["NODE_ENV"] !== "production") {
   paymentChannelsErrorMessages = {
     [PAYMENT_CHANNELS_ERROR__INVALID_ACCOUNT_DISCRIMINATOR]: `Invalid account discriminator`,
     [PAYMENT_CHANNELS_ERROR__INVALID_CHANNEL_STATUS]: `Invalid channel status`,
@@ -43,7 +43,7 @@ if (process.env.NODE_ENV !== "production") {
 export function getPaymentChannelsErrorMessage(
   code: PaymentChannelsError,
 ): string {
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env["NODE_ENV"] !== "production") {
     return (
       paymentChannelsErrorMessages as Record<PaymentChannelsError, string>
     )[code];

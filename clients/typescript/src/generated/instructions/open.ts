@@ -45,7 +45,7 @@ import {
 
 export const OPEN_DISCRIMINATOR = 0;
 
-export function getOpenDiscriminatorBytes() {
+export function getOpenDiscriminatorBytes(): ReadonlyUint8Array {
   return getU8Encoder().encode(OPEN_DISCRIMINATOR);
 }
 

@@ -37,7 +37,7 @@ import { PAYMENT_CHANNELS_PROGRAM_ADDRESS } from "../programs";
 
 export const REQUEST_CLOSE_DISCRIMINATOR = 4;
 
-export function getRequestCloseDiscriminatorBytes() {
+export function getRequestCloseDiscriminatorBytes(): ReadonlyUint8Array {
   return getU8Encoder().encode(REQUEST_CLOSE_DISCRIMINATOR);
 }
 

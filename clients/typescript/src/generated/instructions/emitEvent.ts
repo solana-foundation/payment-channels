@@ -37,7 +37,7 @@ import { PAYMENT_CHANNELS_PROGRAM_ADDRESS } from "../programs";
 
 export const EMIT_EVENT_DISCRIMINATOR = 228;
 
-export function getEmitEventDiscriminatorBytes() {
+export function getEmitEventDiscriminatorBytes(): ReadonlyUint8Array {
   return getU8Encoder().encode(EMIT_EVENT_DISCRIMINATOR);
 }
 

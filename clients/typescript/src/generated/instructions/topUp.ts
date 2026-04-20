@@ -44,7 +44,7 @@ import {
 
 export const TOP_UP_DISCRIMINATOR = 2;
 
-export function getTopUpDiscriminatorBytes() {
+export function getTopUpDiscriminatorBytes(): ReadonlyUint8Array {
   return getU8Encoder().encode(TOP_UP_DISCRIMINATOR);
 }
 

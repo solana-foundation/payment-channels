@@ -44,7 +44,7 @@ import {
 
 export const SETTLE_AND_FINALIZE_DISCRIMINATOR = 3;
 
-export function getSettleAndFinalizeDiscriminatorBytes() {
+export function getSettleAndFinalizeDiscriminatorBytes(): ReadonlyUint8Array {
   return getU8Encoder().encode(SETTLE_AND_FINALIZE_DISCRIMINATOR);
 }
 

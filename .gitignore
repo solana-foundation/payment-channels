@@ -3,7 +3,7 @@
 dist
 .idea
 .DS_Store
-bun.lockb
+pnpm-debug.log
 
 # Local validator ledgers and logs
 .surfpool/

@@ -9,6 +9,7 @@
 import {
   assertIsInstructionWithAccounts,
   containsBytes,
+  extendClient,
   getU8Encoder,
   SOLANA_ERROR__PROGRAM_CLIENTS__FAILED_TO_IDENTIFY_INSTRUCTION,
   SOLANA_ERROR__PROGRAM_CLIENTS__UNRECOGNIZED_INSTRUCTION_TYPE,
@@ -313,9 +314,12 @@ export type PaymentChannelsPluginRequirements = ClientWithRpc<
   ClientWithTransactionSending;
 
 export function paymentChannelsProgram() {
-  return <T extends PaymentChannelsPluginRequirements>(client: T) => {
-    return {
-      ...client,
+  return <T extends PaymentChannelsPluginRequirements>(
+    client: T,
+  ): Omit<T, "paymentChannels"> & {
+    paymentChannels: PaymentChannelsPlugin;
+  } => {
+    return extendClient(client, {
       paymentChannels: <PaymentChannelsPlugin>{
         accounts: { channel: addSelfFetchFunctions(client, getChannelCodec()) },
         instructions: {
@@ -360,6 +364,6 @@ export function paymentChannelsProgram() {
         },
         pdas: { eventAuthority: findEventAuthorityPda },
       },
-    };
+    });
   };
 }

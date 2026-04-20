@@ -17,10 +17,10 @@ default:
 setup: init-keys
     #!/usr/bin/env bash
     set -euo pipefail
-    for cmd in bun cargo solana-keygen just; do
+    for cmd in pnpm cargo solana-keygen just; do
         command -v "$cmd" >/dev/null || { echo "missing: $cmd"; exit 1; }
     done
-    bun install
+    pnpm install
     echo "✓ setup complete; program id: $(solana-keygen pubkey {{deploy_key}})"
 
 program-id:
@@ -59,11 +59,11 @@ generate-idl:
     @echo "✓ IDL: {{idl_file}}"
 
 generate-client: generate-idl
-    bun run generate
+    pnpm run generate
     @echo "✓ clients generated"
 
 build-client: generate-client
-    cd {{ts_client_dir}} && bun run build
+    cd {{ts_client_dir}} && pnpm run build
     @echo "✓ ts client built"
 
 # ---------- test ----------
@@ -84,11 +84,11 @@ events-e2e:
 check: generate-client
     cargo fmt --all -- --check
     cargo clippy --all-targets -- -D warnings
-    cd {{ts_client_dir}} && bun run typecheck
+    cd {{ts_client_dir}} && pnpm run typecheck
 
 fmt:
     cargo fmt --all
-    cd {{ts_client_dir}} && bun run format || true
+    cd {{ts_client_dir}} && pnpm run format || true
 
 # ---------- misc ----------
 

@@ -35,7 +35,7 @@ import { PAYMENT_CHANNELS_PROGRAM_ADDRESS } from "../programs";
 
 export const WITHDRAW_PAYEE_DISCRIMINATOR = 8;
 
-export function getWithdrawPayeeDiscriminatorBytes() {
+export function getWithdrawPayeeDiscriminatorBytes(): ReadonlyUint8Array {
   return getU8Encoder().encode(WITHDRAW_PAYEE_DISCRIMINATOR);
 }
 

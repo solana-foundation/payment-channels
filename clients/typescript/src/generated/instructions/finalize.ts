@@ -34,7 +34,7 @@ import { PAYMENT_CHANNELS_PROGRAM_ADDRESS } from "../programs";
 
 export const FINALIZE_DISCRIMINATOR = 5;
 
-export function getFinalizeDiscriminatorBytes() {
+export function getFinalizeDiscriminatorBytes(): ReadonlyUint8Array {
   return getU8Encoder().encode(FINALIZE_DISCRIMINATOR);
 }
 

@@ -44,7 +44,7 @@ import {
 
 export const SETTLE_DISCRIMINATOR = 1;
 
-export function getSettleDiscriminatorBytes() {
+export function getSettleDiscriminatorBytes(): ReadonlyUint8Array {
   return getU8Encoder().encode(SETTLE_DISCRIMINATOR);
 }
 

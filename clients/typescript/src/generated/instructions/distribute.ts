@@ -41,7 +41,7 @@ import {
 
 export const DISTRIBUTE_DISCRIMINATOR = 6;
 
-export function getDistributeDiscriminatorBytes() {
+export function getDistributeDiscriminatorBytes(): ReadonlyUint8Array {
   return getU8Encoder().encode(DISTRIBUTE_DISCRIMINATOR);
 }
 
