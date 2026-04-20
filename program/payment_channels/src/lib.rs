@@ -49,7 +49,6 @@ fn process_instruction(
             distribute::process(program_id, accounts, args)
         }
         PaymentChannelsInstruction::WithdrawPayer => withdraw_payer::process(program_id, accounts),
-        PaymentChannelsInstruction::WithdrawPayee => withdraw_payee::process(program_id, accounts),
         PaymentChannelsInstruction::EmitEvent => emit_event::process(program_id, accounts),
     }
 }

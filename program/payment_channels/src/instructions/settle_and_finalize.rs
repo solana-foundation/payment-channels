@@ -64,11 +64,10 @@ impl<'a> TryFrom<&'a [AccountView]> for SettleAndFinalizeAccounts<'a> {
     }
 }
 
-/// Merchant-signed cooperative close: optionally commits a final voucher,
-/// locks the watermark, and moves to `FINALIZED`. From `OPEN`, sets
-/// [`closure_started_at`](crate::Channel::closure_started_at) to `now`
-/// (fresh grace for the merchant to `distribute`); from `CLOSING`,
-/// callable only mid-grace and resets
+/// Merchant-signed cooperative close: optionally commits a final
+/// voucher, locks the watermark, and moves to `FINALIZED`. From `OPEN`,
+/// [`closure_started_at`](crate::Channel::closure_started_at) stays 0.
+/// From `CLOSING`, callable only mid-grace and resets
 /// [`closure_started_at`](crate::Channel::closure_started_at) to 0.
 pub fn process(
     _program_id: &Address,

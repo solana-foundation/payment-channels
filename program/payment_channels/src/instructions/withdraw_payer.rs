@@ -8,8 +8,8 @@ pub const DISCRIMINATOR: u8 = 7;
 pub struct WithdrawPayerAccounts<'a> {
     /// Must equal [`Channel::payer`](crate::Channel::payer).
     pub payer: &'a AccountView,
-    /// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) stamped;
-    /// not tombstoned (payee payout still needs the PDA).
+    /// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at)
+    /// stamped; not tombstoned.
     pub channel: &'a AccountView,
     pub channel_token_account: &'a AccountView,
     pub payer_token_account: &'a AccountView,

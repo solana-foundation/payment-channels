@@ -7,7 +7,6 @@ pub mod request_close;
 pub mod settle;
 pub mod settle_and_finalize;
 pub mod top_up;
-pub mod withdraw_payee;
 pub mod withdraw_payer;
 
 #[cfg(feature = "idl")]
@@ -95,8 +94,9 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
 
     /// Merchant-signed cooperative close: optionally applies a final
     /// voucher, locks the watermark, and moves to `FINALIZED`. `OPEN →
-    /// FINALIZED` sets a fresh grace; `CLOSING → FINALIZED` is only valid
-    /// mid-grace and resets
+    /// FINALIZED` leaves
+    /// [`closure_started_at`](crate::Channel::closure_started_at) at 0;
+    /// `CLOSING → FINALIZED` is only valid mid-grace and resets
     /// [`closure_started_at`](crate::Channel::closure_started_at) to 0.
     #[cfg_attr(
         feature = "idl",
@@ -158,26 +158,6 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
     )]
     WithdrawPayer = 7,
 
-    /// Post-grace permissionless crank. Pays
-    /// [`settled`](crate::Channel::settled) `−`
-    /// [`paid_out`](crate::Channel::paid_out) to
-    /// [`Channel::payee`](crate::Channel::payee) and, if
-    /// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `== 0`,
-    /// atomically refunds [`deposit`](crate::Channel::deposit) `−`
-    /// [`settled`](crate::Channel::settled) to the payer in the same ix.
-    /// Tombstones the PDA; rent returns to the payer.
-    #[cfg_attr(
-        feature = "idl",
-        codama(account(name = "channel", writable)),
-        codama(account(name = "channel_token_account", writable)),
-        codama(account(name = "payee_token_account", writable)),
-        codama(account(name = "payer_token_account", writable)),
-        codama(account(name = "payer", writable)),
-        codama(account(name = "mint")),
-        codama(account(name = "token_program"))
-    )]
-    WithdrawPayee = 8,
-
     /// Self-CPI target for the event pipeline; not part of the public
     /// instruction set. `228 = EVENT_IX_TAG_LE[0]`: self-CPI event data
     /// starts with this byte, so byte-0 dispatch routes straight to
@@ -205,7 +185,6 @@ impl<'a> PaymentChannelsInstruction<'a> {
                 Ok(Self::Distribute(distribute::DistributeArgs::load(rest)?))
             }
             withdraw_payer::DISCRIMINATOR => Ok(Self::WithdrawPayer),
-            withdraw_payee::DISCRIMINATOR => Ok(Self::WithdrawPayee),
             emit_event::DISCRIMINATOR => Ok(Self::EmitEvent),
             _ => Err(ProgramError::InvalidInstructionData),
         }
@@ -262,10 +241,6 @@ mod tests {
         assert_eq!(
             tag(&PaymentChannelsInstruction::WithdrawPayer),
             withdraw_payer::DISCRIMINATOR,
-        );
-        assert_eq!(
-            tag(&PaymentChannelsInstruction::WithdrawPayee),
-            withdraw_payee::DISCRIMINATOR,
         );
         assert_eq!(
             tag(&PaymentChannelsInstruction::EmitEvent),

@@ -32,7 +32,7 @@ pub enum ChannelStatus {
     /// [`Closing`](Self::Closing).
     Open = 0,
     /// Watermark locked. Awaits `distribute` (splits + optional payer
-    /// refund + tombstone) and/or `withdraw_payer` / `withdraw_payee`.
+    /// refund + tombstone) and/or a standalone `withdraw_payer`.
     Finalized = 1,
     /// `requestClose` has started the grace window. Exits to
     /// [`Finalized`](Self::Finalized) cooperatively (merchant
@@ -86,25 +86,25 @@ pub struct Channel {
     /// `paid_out` ≤ [`Self::settled`]. Lets mid-session `distribute`
     /// run without double-paying.
     pub paid_out: u64, //  20..28
-    /// Dual semantics: set to `now` by `requestClose` (starts grace) and
-    /// by `settleAndFinalize` from `OPEN` (fresh grace for the merchant
-    /// to `distribute` before `withdraw_payee` unlocks). Reset to 0 on
-    /// `CLOSING → FINALIZED` because the grace was already consumed.
+    /// Set to `now` by `requestClose` (starts grace) and reset to 0 on
+    /// `CLOSING → FINALIZED` via either `settleAndFinalize` (mid-grace)
+    /// or `finalize` (post-grace). Always 0 in `OPEN` and `FINALIZED`;
+    /// only `CLOSING` carries a live timestamp.
     pub closure_started_at: i64, //  28..36
     /// Unix ts of the payer's one-shot refund via `withdraw_payer`; 0
-    /// means not yet withdrawn. Gates the refund leg of `withdraw_payee`.
+    /// means not yet withdrawn. Gates the atomic refund leg inside
+    /// `distribute` when it runs from `FINALIZED`.
     pub payer_withdrawn_at: i64, //  36..44
-    /// Per-channel grace duration in seconds, set at `open`. Governs the
-    /// `CLOSING → FINALIZED` unlock for `finalize` and the post-grace
-    /// permissionless `withdraw_payee`.
+    /// Per-channel grace duration in seconds, set at `open`. Governs
+    /// the `CLOSING → FINALIZED` unlock for permissionless `finalize`.
     pub grace_period: u32, //  44..48
     /// Blake3 commitment to the distribution preimage.
     pub distribution_hash: [u8; 32], //  48..80
     /// Refund destination and payer-side authority signer (required for
     /// `topUp`, `requestClose`, `withdraw_payer`).
     pub payer: Address, //  80..112
-    /// Fallback payout destination for `withdraw_payee` when splits
-    /// never run.
+    /// PDA seed binding; retained on-struct because every ix that
+    /// re-derives the channel address needs the original pubkey.
     pub payee: Address, // 112..144
     /// Pubkey that signs vouchers; equals [`Self::payer`] unless a
     /// delegate was bound at `open`. Every voucher's

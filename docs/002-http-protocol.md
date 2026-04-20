@@ -30,12 +30,11 @@ Actors: **C** = client (payer). **S** = server (merchant).
 | C → S | `POST /channel/close` | `{ action: "close", tx: <base64> }` | `requestClose` | Submit payer-signed partial `requestClose` tx |
 | C → S | `POST /channel/withdraw_payer` | `{ action: "withdraw_payer", tx: <base64> }` | `withdraw_payer` | Submit payer-signed partial `withdraw_payer` tx |
 | C → S | `POST /channel/finalize` | — | `finalize` | Crank post-grace freeze of the watermark |
-| C → S | `POST /channel/withdraw_payee` | — | `withdraw_payee` | Crank payee payout (`(settled − paid_out) → channel.payee`) |
 
 Two categories:
 
 - **Credential endpoints** (`/open`, `/topup`, `/close`, `/withdraw_payer`) carry a **partially-signed Solana transaction** (base64). Payer signs the authority portion; the server co-signs as fee payer and submits. Required because these ixs need payer authority.
-- **Crank endpoints** (`/finalize`, `/withdraw_payee`) have **empty bodies**. The underlying on-chain ixs are permissionless; the server submits as fee payer purely as a convenience for clients that don't want to manage an RPC connection. A client may equivalently submit these ixs **directly to Solana RPC** without the server's cooperation — this is the escape hatch when the server is unresponsive.
+- **Crank endpoints** (`/finalize`) have an **empty body**. The underlying on-chain ix is permissionless; the server submits as fee payer purely as a convenience for clients that don't want to manage an RPC connection. A client may equivalently submit it **directly to Solana RPC** without the server's cooperation — this is the escape hatch when the server is unresponsive.
 
 Server-submitted ixs (`settle`, `settleAndFinalize`, `distribute`) are never exposed over HTTP; the server submits them on its own schedule. `distribute` is technically permissionless (preimage is the authority), but in practice only the server holds the preimage, so it acts as the de-facto caller — including for mid-session distributes from `OPEN` state when the server wants to realize accumulated `settled` revenue without closing the channel.
 
@@ -97,7 +96,7 @@ sequenceDiagram
 
     Note over S: Server decides to close
     S->>P: submit `settleAndFinalize` ix (final voucher)
-    P->>P: verify voucher, set settled<br/>closureStartedAt = now<br/>state = FINALIZED
+    P->>P: verify voucher, set settled<br/>state = FINALIZED
     P-->>S: OK
 
     S->>P: submit `distribute` ix (preimage)
@@ -137,10 +136,13 @@ sequenceDiagram
         P->>P: freeze watermark<br/>closureStartedAt = 0<br/>state = FINALIZED
         P-->>A: OK
 
-        A->>P: submit `withdraw_payee` ix
-        P->>P: transfer (settled − paid_out) → channel.payee<br/>(if payerWithdrawnAt == 0) transfer (deposit − settled) → payer<br/>realloc to 8 bytes<br/>state = CLOSED<br/>rent → payer
-        P-->>A: OK
+        C->>S: POST withdraw_payer credential<br/>(payer-signed partial `withdraw_payer` tx)
+        S->>P: submit `withdraw_payer` ix
+        P->>P: transfer (deposit − settled) → payer<br/>payerWithdrawnAt = now
+        P-->>S: OK
+
+        Note over S,P: Merchant still needs `distribute` preimage to collect `settled`.<br/>Until revealed, `settled − paid_out` stays in escrow and the PDA is not tombstoned.
     end
 ```
 
-The client POSTs a close credential (payer-signed `requestClose` tx); the server submits it and grace begins. **Within grace**, the server finalizes cooperatively via `settleAndFinalize` + `distribute`. **Post-grace**, anyone cranks `finalize` (permissionless, voucher-free) to move `CLOSING → FINALIZED`, then `withdraw_payee` to atomically pay `settled → channel.payee`, refund `deposit − settled → payer` (if not already withdrawn), and tombstone the PDA. The payer may also pull their refund early at any point during `FINALIZED` via the standalone `withdraw_payer` ix.
+The client POSTs a close credential (payer-signed `requestClose` tx); the server submits it and grace begins. **Within grace**, the server finalizes cooperatively via `settleAndFinalize` + `distribute`. **Post-grace**, anyone cranks `finalize` (permissionless, voucher-free) to move `CLOSING → FINALIZED`. The payer recovers `deposit − settled` at any time during `FINALIZED` via the standalone `withdraw_payer` ix. There is **no preimage-free payee payout**: to collect `settled` and tombstone the PDA, the merchant must submit `distribute` with the committed preimage — if they never do, the `settled` tranche stays in escrow indefinitely.

@@ -26,7 +26,7 @@ pub struct OpenArgs {
     /// `topUp`).
     pub deposit: u64,
     /// Grace duration (seconds). Governs the `CLOSING → FINALIZED`
-    /// unlock for `finalize` and the `withdraw_payee` timer.
+    /// unlock for permissionless `finalize`.
     pub grace_period: u32,
     /// Blake3 commitment to the `distribute` splits preimage.
     pub distribution_hash: [u8; 32],
