@@ -67,7 +67,7 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
         codama(account(name = "event_authority")),
         codama(account(name = "self_program"))
     )]
-    Open(#[cfg_attr(feature = "idl", codama(name = "open_args"))] &'a open::OpenArgs) = 0,
+    Open(#[cfg_attr(feature = "idl", codama(name = "open_args"))] &'a open::OpenArgs) = 1,
 
     /// Advances the on-chain [`settled`](crate::Channel::settled) watermark
     /// against a payer-signed voucher. `OPEN → OPEN`.
@@ -77,7 +77,7 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
         codama(account(name = "channel", writable)),
         codama(account(name = "instructions_sysvar"))
     )]
-    Settle(#[cfg_attr(feature = "idl", codama(name = "settle_args"))] &'a settle::SettleArgs) = 1,
+    Settle(#[cfg_attr(feature = "idl", codama(name = "settle_args"))] &'a settle::SettleArgs) = 2,
 
     /// Extends [`deposit`](crate::Channel::deposit) while `OPEN` and
     /// pre-`requestClose`. `OPEN → OPEN`.
@@ -90,7 +90,7 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
         codama(account(name = "mint")),
         codama(account(name = "token_program"))
     )]
-    TopUp(#[cfg_attr(feature = "idl", codama(name = "top_up_args"))] &'a top_up::TopUpArgs) = 2,
+    TopUp(#[cfg_attr(feature = "idl", codama(name = "top_up_args"))] &'a top_up::TopUpArgs) = 3,
 
     /// Merchant-signed cooperative close: optionally applies a final
     /// voucher, locks the watermark, and moves to `FINALIZED`. `OPEN →
@@ -107,7 +107,7 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
     SettleAndFinalize(
         #[cfg_attr(feature = "idl", codama(name = "settle_and_finalize_args"))]
         &'a settle_and_finalize::SettleAndFinalizeArgs,
-    ) = 3,
+    ) = 4,
 
     /// Payer-signed: starts the grace period by setting
     /// [`closure_started_at`](crate::Channel::closure_started_at) to `now`.
@@ -117,13 +117,13 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
         codama(account(name = "payer", signer)),
         codama(account(name = "channel", writable))
     )]
-    RequestClose = 4,
+    RequestClose = 5,
 
     /// Permissionless post-grace crank: freezes the watermark and moves
     /// `CLOSING → FINALIZED` once the grace has elapsed; resets
     /// [`closure_started_at`](crate::Channel::closure_started_at) to 0.
     #[cfg_attr(feature = "idl", codama(account(name = "channel", writable)))]
-    Finalize = 5,
+    Finalize = 6,
 
     /// Permissionless crank. Verifies the committed preimage and pays
     /// [`settled`](crate::Channel::settled) `−`
@@ -141,7 +141,7 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
     Distribute(
         #[cfg_attr(feature = "idl", codama(name = "distribute_args"))]
         &'a distribute::DistributeArgs,
-    ) = 6,
+    ) = 7,
 
     /// Payer-signed one-shot refund of [`deposit`](crate::Channel::deposit)
     /// `−` [`settled`](crate::Channel::settled) during `FINALIZED`;
@@ -156,7 +156,7 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
         codama(account(name = "mint")),
         codama(account(name = "token_program"))
     )]
-    WithdrawPayer = 7,
+    WithdrawPayer = 8,
 
     /// Self-CPI target for the event pipeline; not part of the public
     /// instruction set. `228 = EVENT_IX_TAG_LE[0]`: self-CPI event data

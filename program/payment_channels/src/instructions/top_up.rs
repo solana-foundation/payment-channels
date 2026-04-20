@@ -6,7 +6,7 @@ use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 use crate::errors::PaymentChannelsError;
 
 /// Instruction discriminator byte for `topUp`.
-pub const DISCRIMINATOR: u8 = 2;
+pub const DISCRIMINATOR: u8 = 3;
 
 /// Extends an `OPEN` channel's escrow. The full [`Self::amount`] is
 /// transferred from [`TopUpAccounts::payer_token_account`] to
