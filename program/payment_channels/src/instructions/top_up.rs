@@ -5,12 +5,22 @@ use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 
 use crate::errors::PaymentChannelsError;
 
+/// Byte-0 selector for `topUp`. Payer-signed; extends
+/// [`Channel::deposit`](crate::Channel::deposit) by [`TopUpArgs::amount`].
+/// `OPEN` only — disallowed once
+/// [`closure_started_at`](crate::Channel::closure_started_at) `> 0`.
 pub const DISCRIMINATOR: u8 = 2;
 
+/// Extends an `OPEN` channel's escrow. The full [`Self::amount`] is
+/// transferred from [`TopUpAccounts::payer_token_account`] to
+/// [`TopUpAccounts::channel_token_account`] and added to
+/// [`Channel::deposit`](crate::Channel::deposit), raising the ceiling on
+/// future [`settled`](crate::Channel::settled) growth.
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct TopUpArgs {
+    /// Base-unit amount to pull from the payer's token account into escrow.
     pub amount: u64,
 }
 
@@ -26,9 +36,12 @@ impl TopUpArgs {
 }
 
 pub struct TopUpAccounts<'a> {
+    /// Must equal [`Channel::payer`](crate::Channel::payer).
     pub payer: &'a AccountView,
+    /// [`deposit`](crate::Channel::deposit) grows by [`TopUpArgs::amount`].
     pub channel: &'a AccountView,
     pub payer_token_account: &'a AccountView,
+    /// Escrow ATA owned by the channel PDA.
     pub channel_token_account: &'a AccountView,
     pub mint: &'a AccountView,
     pub token_program: &'a AccountView,

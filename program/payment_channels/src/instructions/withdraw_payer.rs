@@ -2,10 +2,18 @@ use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 
 use crate::errors::PaymentChannelsError;
 
+/// Byte-0 selector for `withdrawPayer`. Payer-only refund of
+/// [`deposit`](crate::Channel::deposit) `−`
+/// [`settled`](crate::Channel::settled) during `FINALIZED`; records
+/// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `= now` and
+/// does **not** tombstone the PDA.
 pub const DISCRIMINATOR: u8 = 7;
 
 pub struct WithdrawPayerAccounts<'a> {
+    /// Must equal [`Channel::payer`](crate::Channel::payer).
     pub payer: &'a AccountView,
+    /// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) stamped;
+    /// not tombstoned (payee payout still needs the PDA).
     pub channel: &'a AccountView,
     pub channel_token_account: &'a AccountView,
     pub payer_token_account: &'a AccountView,

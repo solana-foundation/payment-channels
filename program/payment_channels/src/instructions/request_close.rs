@@ -2,10 +2,18 @@ use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 
 use crate::errors::PaymentChannelsError;
 
+/// Byte-0 selector for `requestClose`. Payer-signed, no Args. Starts the
+/// grace period by setting
+/// [`Channel::closure_started_at`](crate::Channel::closure_started_at) to
+/// `now` and moves `OPEN → CLOSING`.
 pub const DISCRIMINATOR: u8 = 4;
 
 pub struct RequestCloseAccounts<'a> {
+    /// Must equal [`Channel::payer`](crate::Channel::payer).
     pub payer: &'a AccountView,
+    /// [`status`](crate::Channel::status) →
+    /// [`Closing`](crate::ChannelStatus::Closing),
+    /// [`closure_started_at`](crate::Channel::closure_started_at) → `now`.
     pub channel: &'a AccountView,
     pub clock: &'a AccountView,
 }

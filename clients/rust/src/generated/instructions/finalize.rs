@@ -13,8 +13,6 @@ pub const FINALIZE_DISCRIMINATOR: u8 = 5;
 /// Accounts.
 #[derive(Debug)]
 pub struct Finalize {
-    pub cranker: solana_address::Address,
-
     pub channel: solana_address::Address,
 
     pub clock: solana_address::Address,
@@ -30,11 +28,7 @@ impl Finalize {
         &self,
         remaining_accounts: &[solana_instruction::AccountMeta],
     ) -> solana_instruction::Instruction {
-        let mut accounts = Vec::with_capacity(3 + remaining_accounts.len());
-        accounts.push(solana_instruction::AccountMeta::new_readonly(
-            self.cranker,
-            false,
-        ));
+        let mut accounts = Vec::with_capacity(2 + remaining_accounts.len());
         accounts.push(solana_instruction::AccountMeta::new(self.channel, false));
         accounts.push(solana_instruction::AccountMeta::new_readonly(
             self.clock, false,
@@ -75,12 +69,10 @@ impl Default for FinalizeInstructionData {
 ///
 /// ### Accounts:
 ///
-///   0. `[]` cranker
-///   1. `[writable]` channel
-///   2. `[]` clock
+///   0. `[writable]` channel
+///   1. `[]` clock
 #[derive(Clone, Debug, Default)]
 pub struct FinalizeBuilder {
-    cranker: Option<solana_address::Address>,
     channel: Option<solana_address::Address>,
     clock: Option<solana_address::Address>,
     __remaining_accounts: Vec<solana_instruction::AccountMeta>,
@@ -89,11 +81,6 @@ pub struct FinalizeBuilder {
 impl FinalizeBuilder {
     pub fn new() -> Self {
         Self::default()
-    }
-    #[inline(always)]
-    pub fn cranker(&mut self, cranker: solana_address::Address) -> &mut Self {
-        self.cranker = Some(cranker);
-        self
     }
     #[inline(always)]
     pub fn channel(&mut self, channel: solana_address::Address) -> &mut Self {
@@ -123,7 +110,6 @@ impl FinalizeBuilder {
     #[allow(clippy::clone_on_copy)]
     pub fn instruction(&self) -> solana_instruction::Instruction {
         let accounts = Finalize {
-            cranker: self.cranker.expect("cranker is not set"),
             channel: self.channel.expect("channel is not set"),
             clock: self.clock.expect("clock is not set"),
         };
@@ -134,8 +120,6 @@ impl FinalizeBuilder {
 
 /// `finalize` CPI accounts.
 pub struct FinalizeCpiAccounts<'a, 'b> {
-    pub cranker: &'b solana_account_info::AccountInfo<'a>,
-
     pub channel: &'b solana_account_info::AccountInfo<'a>,
 
     pub clock: &'b solana_account_info::AccountInfo<'a>,
@@ -145,8 +129,6 @@ pub struct FinalizeCpiAccounts<'a, 'b> {
 pub struct FinalizeCpi<'a, 'b> {
     /// The program to invoke.
     pub __program: &'b solana_account_info::AccountInfo<'a>,
-
-    pub cranker: &'b solana_account_info::AccountInfo<'a>,
 
     pub channel: &'b solana_account_info::AccountInfo<'a>,
 
@@ -160,7 +142,6 @@ impl<'a, 'b> FinalizeCpi<'a, 'b> {
     ) -> Self {
         Self {
             __program: program,
-            cranker: accounts.cranker,
             channel: accounts.channel,
             clock: accounts.clock,
         }
@@ -188,11 +169,7 @@ impl<'a, 'b> FinalizeCpi<'a, 'b> {
         signers_seeds: &[&[&[u8]]],
         remaining_accounts: &[(&'b solana_account_info::AccountInfo<'a>, bool, bool)],
     ) -> solana_program_error::ProgramResult {
-        let mut accounts = Vec::with_capacity(3 + remaining_accounts.len());
-        accounts.push(solana_instruction::AccountMeta::new_readonly(
-            *self.cranker.key,
-            false,
-        ));
+        let mut accounts = Vec::with_capacity(2 + remaining_accounts.len());
         accounts.push(solana_instruction::AccountMeta::new(
             *self.channel.key,
             false,
@@ -215,9 +192,8 @@ impl<'a, 'b> FinalizeCpi<'a, 'b> {
             accounts,
             data,
         };
-        let mut account_infos = Vec::with_capacity(4 + remaining_accounts.len());
+        let mut account_infos = Vec::with_capacity(3 + remaining_accounts.len());
         account_infos.push(self.__program.clone());
-        account_infos.push(self.cranker.clone());
         account_infos.push(self.channel.clone());
         account_infos.push(self.clock.clone());
         remaining_accounts
@@ -236,9 +212,8 @@ impl<'a, 'b> FinalizeCpi<'a, 'b> {
 ///
 /// ### Accounts:
 ///
-///   0. `[]` cranker
-///   1. `[writable]` channel
-///   2. `[]` clock
+///   0. `[writable]` channel
+///   1. `[]` clock
 #[derive(Clone, Debug)]
 pub struct FinalizeCpiBuilder<'a, 'b> {
     instruction: Box<FinalizeCpiBuilderInstruction<'a, 'b>>,
@@ -248,17 +223,11 @@ impl<'a, 'b> FinalizeCpiBuilder<'a, 'b> {
     pub fn new(program: &'b solana_account_info::AccountInfo<'a>) -> Self {
         let instruction = Box::new(FinalizeCpiBuilderInstruction {
             __program: program,
-            cranker: None,
             channel: None,
             clock: None,
             __remaining_accounts: Vec::new(),
         });
         Self { instruction }
-    }
-    #[inline(always)]
-    pub fn cranker(&mut self, cranker: &'b solana_account_info::AccountInfo<'a>) -> &mut Self {
-        self.instruction.cranker = Some(cranker);
-        self
     }
     #[inline(always)]
     pub fn channel(&mut self, channel: &'b solana_account_info::AccountInfo<'a>) -> &mut Self {
@@ -307,8 +276,6 @@ impl<'a, 'b> FinalizeCpiBuilder<'a, 'b> {
         let instruction = FinalizeCpi {
             __program: self.instruction.__program,
 
-            cranker: self.instruction.cranker.expect("cranker is not set"),
-
             channel: self.instruction.channel.expect("channel is not set"),
 
             clock: self.instruction.clock.expect("clock is not set"),
@@ -323,7 +290,6 @@ impl<'a, 'b> FinalizeCpiBuilder<'a, 'b> {
 #[derive(Clone, Debug)]
 struct FinalizeCpiBuilderInstruction<'a, 'b> {
     __program: &'b solana_account_info::AccountInfo<'a>,
-    cranker: Option<&'b solana_account_info::AccountInfo<'a>>,
     channel: Option<&'b solana_account_info::AccountInfo<'a>>,
     clock: Option<&'b solana_account_info::AccountInfo<'a>>,
     /// Additional instruction accounts `(AccountInfo, is_writable, is_signer)`.

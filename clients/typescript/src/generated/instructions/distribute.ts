@@ -47,7 +47,6 @@ export function getDistributeDiscriminatorBytes() {
 
 export type DistributeInstruction<
   TProgram extends string = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
-  TAccountCranker extends string | AccountMeta<string> = string,
   TAccountChannel extends string | AccountMeta<string> = string,
   TAccountChannelTokenAccount extends string | AccountMeta<string> = string,
   TAccountPayerTokenAccount extends string | AccountMeta<string> = string,
@@ -58,9 +57,6 @@ export type DistributeInstruction<
   InstructionWithData<ReadonlyUint8Array> &
   InstructionWithAccounts<
     [
-      TAccountCranker extends string
-        ? ReadonlyAccount<TAccountCranker>
-        : TAccountCranker,
       TAccountChannel extends string
         ? WritableAccount<TAccountChannel>
         : TAccountChannel,
@@ -117,14 +113,12 @@ export function getDistributeInstructionDataCodec(): FixedSizeCodec<
 }
 
 export type DistributeInput<
-  TAccountCranker extends string = string,
   TAccountChannel extends string = string,
   TAccountChannelTokenAccount extends string = string,
   TAccountPayerTokenAccount extends string = string,
   TAccountMint extends string = string,
   TAccountTokenProgram extends string = string,
 > = {
-  cranker: Address<TAccountCranker>;
   channel: Address<TAccountChannel>;
   channelTokenAccount: Address<TAccountChannelTokenAccount>;
   payerTokenAccount: Address<TAccountPayerTokenAccount>;
@@ -134,7 +128,6 @@ export type DistributeInput<
 };
 
 export function getDistributeInstruction<
-  TAccountCranker extends string,
   TAccountChannel extends string,
   TAccountChannelTokenAccount extends string,
   TAccountPayerTokenAccount extends string,
@@ -143,7 +136,6 @@ export function getDistributeInstruction<
   TProgramAddress extends Address = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
 >(
   input: DistributeInput<
-    TAccountCranker,
     TAccountChannel,
     TAccountChannelTokenAccount,
     TAccountPayerTokenAccount,
@@ -153,7 +145,6 @@ export function getDistributeInstruction<
   config?: { programAddress?: TProgramAddress },
 ): DistributeInstruction<
   TProgramAddress,
-  TAccountCranker,
   TAccountChannel,
   TAccountChannelTokenAccount,
   TAccountPayerTokenAccount,
@@ -166,7 +157,6 @@ export function getDistributeInstruction<
 
   // Original accounts.
   const originalAccounts = {
-    cranker: { value: input.cranker ?? null, isWritable: false },
     channel: { value: input.channel ?? null, isWritable: true },
     channelTokenAccount: {
       value: input.channelTokenAccount ?? null,
@@ -190,7 +180,6 @@ export function getDistributeInstruction<
   const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
   return Object.freeze({
     accounts: [
-      getAccountMeta("cranker", accounts.cranker),
       getAccountMeta("channel", accounts.channel),
       getAccountMeta("channelTokenAccount", accounts.channelTokenAccount),
       getAccountMeta("payerTokenAccount", accounts.payerTokenAccount),
@@ -203,7 +192,6 @@ export function getDistributeInstruction<
     programAddress,
   } as DistributeInstruction<
     TProgramAddress,
-    TAccountCranker,
     TAccountChannel,
     TAccountChannelTokenAccount,
     TAccountPayerTokenAccount,
@@ -218,12 +206,11 @@ export type ParsedDistributeInstruction<
 > = {
   programAddress: Address<TProgram>;
   accounts: {
-    cranker: TAccountMetas[0];
-    channel: TAccountMetas[1];
-    channelTokenAccount: TAccountMetas[2];
-    payerTokenAccount: TAccountMetas[3];
-    mint: TAccountMetas[4];
-    tokenProgram: TAccountMetas[5];
+    channel: TAccountMetas[0];
+    channelTokenAccount: TAccountMetas[1];
+    payerTokenAccount: TAccountMetas[2];
+    mint: TAccountMetas[3];
+    tokenProgram: TAccountMetas[4];
   };
   data: DistributeInstructionData;
 };
@@ -236,12 +223,12 @@ export function parseDistributeInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedDistributeInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 6) {
+  if (instruction.accounts.length < 5) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 6,
+        expectedAccountMetas: 5,
       },
     );
   }
@@ -254,7 +241,6 @@ export function parseDistributeInstruction<
   return {
     programAddress: instruction.programAddress,
     accounts: {
-      cranker: getNextAccount(),
       channel: getNextAccount(),
       channelTokenAccount: getNextAccount(),
       payerTokenAccount: getNextAccount(),

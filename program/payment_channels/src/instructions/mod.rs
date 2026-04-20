@@ -14,22 +14,45 @@ pub mod withdraw_payer;
 use codama::{CodamaInstructions, CodamaType};
 use pinocchio::{Address, error::ProgramError};
 
+/// On-chain wire encoding of the voucher. Field order is re-packed vs.
+/// the off-chain JSON shape to make the struct zero-copy loadable.
+/// Ed25519-only; signature verification is offloaded to a caller-bundled
+/// Ed25519 native-program ix whose message bytes are read back via the
+/// Instructions sysvar.
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct VoucherArgs {
+    /// Monotonic watermark. Must satisfy
+    /// [`settled`](crate::Channel::settled) `< cumulative_amount ≤`
+    /// [`deposit`](crate::Channel::deposit); the strict increase also
+    /// serves as the implicit nonce.
     pub cumulative_amount: u64,
+    /// Unix-seconds TTL; `0` means no expiry (packed wire cannot carry
+    /// `Option`). Freshness: `expires_at == 0 || now < expires_at`.
     pub expires_at: i64,
+    /// Replay scope; must equal the [`Channel`](crate::Channel) PDA.
     pub channel_id: Address,
+    /// Voucher author. Must equal
+    /// [`Channel::authorized_signer`](crate::Channel::authorized_signer).
     pub signer: Address,
+    /// Ed25519 signature over the JCS canonicalization (RFC 8785) of the
+    /// logical voucher payload. Verified by matching the Ed25519
+    /// native-program ix's message bytes against the JCS re-encoding of
+    /// these fields.
     pub signature: [u8; 64],
 }
 
-/// All instructions supported by the payment-channels program.
+/// Byte-0-dispatched instruction codomain. Each variant's discriminant
+/// matches the `DISCRIMINATOR` const in the corresponding sibling module;
+/// [`from_bytes`](Self::from_bytes) peels the first byte and routes to the
+/// matching `Args::load`.
 #[derive(Debug)]
 #[cfg_attr(feature = "idl", derive(CodamaInstructions))]
 #[repr(u8)]
 pub(crate) enum PaymentChannelsInstruction<'a> {
+    /// Payer-signed; creates the channel PDA, locks the deposit, and
+    /// commits the distribution hash. `NONEXISTENT → OPEN`.
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "payer", signer, writable)),
@@ -47,6 +70,8 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
     )]
     Open(#[cfg_attr(feature = "idl", codama(name = "open_args"))] &'a open::OpenArgs) = 0,
 
+    /// Advances the on-chain [`settled`](crate::Channel::settled) watermark
+    /// against a payer-signed voucher. `OPEN → OPEN`.
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "merchant", signer)),
@@ -55,6 +80,8 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
     )]
     Settle(#[cfg_attr(feature = "idl", codama(name = "settle_args"))] &'a settle::SettleArgs) = 1,
 
+    /// Extends [`deposit`](crate::Channel::deposit) while `OPEN` and
+    /// pre-`requestClose`. `OPEN → OPEN`.
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "payer", signer, writable)),
@@ -66,6 +93,11 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
     )]
     TopUp(#[cfg_attr(feature = "idl", codama(name = "top_up_args"))] &'a top_up::TopUpArgs) = 2,
 
+    /// Merchant-signed cooperative close: optionally applies a final
+    /// voucher, locks the watermark, and moves to `FINALIZED`. `OPEN →
+    /// FINALIZED` sets a fresh grace; `CLOSING → FINALIZED` is only valid
+    /// mid-grace and resets
+    /// [`closure_started_at`](crate::Channel::closure_started_at) to 0.
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "merchant", signer)),
@@ -77,6 +109,9 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
         &'a settle_and_finalize::SettleAndFinalizeArgs,
     ) = 3,
 
+    /// Payer-signed: starts the grace period by setting
+    /// [`closure_started_at`](crate::Channel::closure_started_at) to `now`.
+    /// `OPEN → CLOSING`.
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "payer", signer)),
@@ -85,17 +120,23 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
     )]
     RequestClose = 4,
 
+    /// Permissionless post-grace crank: freezes the watermark and moves
+    /// `CLOSING → FINALIZED` once the grace has elapsed; resets
+    /// [`closure_started_at`](crate::Channel::closure_started_at) to 0.
     #[cfg_attr(
         feature = "idl",
-        codama(account(name = "cranker")),
         codama(account(name = "channel", writable)),
         codama(account(name = "clock"))
     )]
     Finalize = 5,
 
+    /// Permissionless crank. Verifies the committed preimage and pays
+    /// [`settled`](crate::Channel::settled) `−`
+    /// [`paid_out`](crate::Channel::paid_out) to merchant splits; from
+    /// `FINALIZED` also refunds the payer (if not already withdrawn) and
+    /// tombstones the PDA.
     #[cfg_attr(
         feature = "idl",
-        codama(account(name = "cranker")),
         codama(account(name = "channel", writable)),
         codama(account(name = "channel_token_account", writable)),
         codama(account(name = "payer_token_account", writable)),
@@ -107,6 +148,10 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
         &'a distribute::DistributeArgs,
     ) = 6,
 
+    /// Payer-signed one-shot refund of [`deposit`](crate::Channel::deposit)
+    /// `−` [`settled`](crate::Channel::settled) during `FINALIZED`;
+    /// records [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at)
+    /// `= now`. Does not tombstone.
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "payer", signer)),
@@ -119,9 +164,16 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
     )]
     WithdrawPayer = 7,
 
+    /// Post-grace permissionless crank. Pays
+    /// [`settled`](crate::Channel::settled) `−`
+    /// [`paid_out`](crate::Channel::paid_out) to
+    /// [`Channel::payee`](crate::Channel::payee) and, if
+    /// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `== 0`,
+    /// atomically refunds [`deposit`](crate::Channel::deposit) `−`
+    /// [`settled`](crate::Channel::settled) to the payer in the same ix.
+    /// Tombstones the PDA; rent returns to the payer.
     #[cfg_attr(
         feature = "idl",
-        codama(account(name = "cranker")),
         codama(account(name = "channel", writable)),
         codama(account(name = "channel_token_account", writable)),
         codama(account(name = "payee_token_account", writable)),
@@ -133,8 +185,10 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
     )]
     WithdrawPayee = 8,
 
-    // `228 = EVENT_IX_TAG_LE[0]`; self-CPI event data starts with this byte
-    // so byte-0 dispatch routes straight to `emit_event::process`.
+    /// Self-CPI target for the event pipeline; not part of the public
+    /// instruction set. `228 = EVENT_IX_TAG_LE[0]`: self-CPI event data
+    /// starts with this byte, so byte-0 dispatch routes straight to
+    /// [`emit_event::process`](crate::instructions::emit_event::process).
     #[cfg_attr(feature = "idl", codama(account(name = "event_authority", signer)))]
     EmitEvent = 228,
 }

@@ -6,12 +6,21 @@ use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 use crate::errors::PaymentChannelsError;
 use crate::instructions::VoucherArgs;
 
+/// Byte-0 selector for `settle`. Merchant-signed; advances
+/// [`Channel::settled`](crate::Channel::settled) against a payer-signed
+/// voucher. `OPEN` only —
+/// [`settled`](crate::Channel::settled) `<`
+/// [`voucher.cumulative_amount`](VoucherArgs::cumulative_amount) `≤`
+/// [`deposit`](crate::Channel::deposit) and voucher must be fresh.
 pub const DISCRIMINATOR: u8 = 1;
 
+/// Mid-session watermark advance. Carries exactly one voucher; no token
+/// movement — only [`Channel::settled`](crate::Channel::settled) is updated.
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct SettleArgs {
+    /// Payer-signed authorization. See [`VoucherArgs`].
     pub voucher: VoucherArgs,
 }
 
@@ -28,7 +37,9 @@ impl SettleArgs {
 
 pub struct SettleAccounts<'a> {
     pub merchant: &'a AccountView,
+    /// [`settled`](crate::Channel::settled) is advanced in place.
     pub channel: &'a AccountView,
+    /// Source for locating the bundled Ed25519 ix that covers the voucher.
     pub instructions_sysvar: &'a AccountView,
 }
 

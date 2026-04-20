@@ -10,16 +10,12 @@ import {
   combineCodec,
   fixDecoderSize,
   fixEncoderSize,
-  getArrayDecoder,
-  getArrayEncoder,
   getBytesDecoder,
   getBytesEncoder,
   getStructDecoder,
   getStructEncoder,
   getU16Decoder,
   getU16Encoder,
-  getU8Decoder,
-  getU8Encoder,
   type FixedSizeCodec,
   type FixedSizeDecoder,
   type FixedSizeEncoder,
@@ -28,7 +24,6 @@ import {
 
 export type DistributeArgs = {
   preimageLen: number;
-  pad: Array<number>;
   preimage: ReadonlyUint8Array;
 };
 
@@ -37,7 +32,6 @@ export type DistributeArgsArgs = DistributeArgs;
 export function getDistributeArgsEncoder(): FixedSizeEncoder<DistributeArgsArgs> {
   return getStructEncoder([
     ["preimageLen", getU16Encoder()],
-    ["pad", getArrayEncoder(getU8Encoder(), { size: 6 })],
     ["preimage", fixEncoderSize(getBytesEncoder(), 512)],
   ]);
 }
@@ -45,7 +39,6 @@ export function getDistributeArgsEncoder(): FixedSizeEncoder<DistributeArgsArgs>
 export function getDistributeArgsDecoder(): FixedSizeDecoder<DistributeArgs> {
   return getStructDecoder([
     ["preimageLen", getU16Decoder()],
-    ["pad", getArrayDecoder(getU8Decoder(), { size: 6 })],
     ["preimage", fixDecoderSize(getBytesDecoder(), 512)],
   ]);
 }

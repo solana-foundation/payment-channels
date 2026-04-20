@@ -41,7 +41,6 @@ export function getFinalizeDiscriminatorBytes() {
 
 export type FinalizeInstruction<
   TProgram extends string = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
-  TAccountCranker extends string | AccountMeta<string> = string,
   TAccountChannel extends string | AccountMeta<string> = string,
   TAccountClock extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
@@ -49,9 +48,6 @@ export type FinalizeInstruction<
   InstructionWithData<ReadonlyUint8Array> &
   InstructionWithAccounts<
     [
-      TAccountCranker extends string
-        ? ReadonlyAccount<TAccountCranker>
-        : TAccountCranker,
       TAccountChannel extends string
         ? WritableAccount<TAccountChannel>
         : TAccountChannel,
@@ -88,36 +84,27 @@ export function getFinalizeInstructionDataCodec(): FixedSizeCodec<
 }
 
 export type FinalizeInput<
-  TAccountCranker extends string = string,
   TAccountChannel extends string = string,
   TAccountClock extends string = string,
 > = {
-  cranker: Address<TAccountCranker>;
   channel: Address<TAccountChannel>;
   clock: Address<TAccountClock>;
 };
 
 export function getFinalizeInstruction<
-  TAccountCranker extends string,
   TAccountChannel extends string,
   TAccountClock extends string,
   TProgramAddress extends Address = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
 >(
-  input: FinalizeInput<TAccountCranker, TAccountChannel, TAccountClock>,
+  input: FinalizeInput<TAccountChannel, TAccountClock>,
   config?: { programAddress?: TProgramAddress },
-): FinalizeInstruction<
-  TProgramAddress,
-  TAccountCranker,
-  TAccountChannel,
-  TAccountClock
-> {
+): FinalizeInstruction<TProgramAddress, TAccountChannel, TAccountClock> {
   // Program address.
   const programAddress =
     config?.programAddress ?? PAYMENT_CHANNELS_PROGRAM_ADDRESS;
 
   // Original accounts.
   const originalAccounts = {
-    cranker: { value: input.cranker ?? null, isWritable: false },
     channel: { value: input.channel ?? null, isWritable: true },
     clock: { value: input.clock ?? null, isWritable: false },
   };
@@ -129,18 +116,12 @@ export function getFinalizeInstruction<
   const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
   return Object.freeze({
     accounts: [
-      getAccountMeta("cranker", accounts.cranker),
       getAccountMeta("channel", accounts.channel),
       getAccountMeta("clock", accounts.clock),
     ],
     data: getFinalizeInstructionDataEncoder().encode({}),
     programAddress,
-  } as FinalizeInstruction<
-    TProgramAddress,
-    TAccountCranker,
-    TAccountChannel,
-    TAccountClock
-  >);
+  } as FinalizeInstruction<TProgramAddress, TAccountChannel, TAccountClock>);
 }
 
 export type ParsedFinalizeInstruction<
@@ -149,9 +130,8 @@ export type ParsedFinalizeInstruction<
 > = {
   programAddress: Address<TProgram>;
   accounts: {
-    cranker: TAccountMetas[0];
-    channel: TAccountMetas[1];
-    clock: TAccountMetas[2];
+    channel: TAccountMetas[0];
+    clock: TAccountMetas[1];
   };
   data: FinalizeInstructionData;
 };
@@ -164,12 +144,12 @@ export function parseFinalizeInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedFinalizeInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 3) {
+  if (instruction.accounts.length < 2) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 3,
+        expectedAccountMetas: 2,
       },
     );
   }
@@ -181,11 +161,7 @@ export function parseFinalizeInstruction<
   };
   return {
     programAddress: instruction.programAddress,
-    accounts: {
-      cranker: getNextAccount(),
-      channel: getNextAccount(),
-      clock: getNextAccount(),
-    },
+    accounts: { channel: getNextAccount(), clock: getNextAccount() },
     data: getFinalizeInstructionDataDecoder().decode(instruction.data),
   };
 }

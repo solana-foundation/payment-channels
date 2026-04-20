@@ -41,7 +41,6 @@ export function getWithdrawPayeeDiscriminatorBytes() {
 
 export type WithdrawPayeeInstruction<
   TProgram extends string = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
-  TAccountCranker extends string | AccountMeta<string> = string,
   TAccountChannel extends string | AccountMeta<string> = string,
   TAccountChannelTokenAccount extends string | AccountMeta<string> = string,
   TAccountPayeeTokenAccount extends string | AccountMeta<string> = string,
@@ -55,9 +54,6 @@ export type WithdrawPayeeInstruction<
   InstructionWithData<ReadonlyUint8Array> &
   InstructionWithAccounts<
     [
-      TAccountCranker extends string
-        ? ReadonlyAccount<TAccountCranker>
-        : TAccountCranker,
       TAccountChannel extends string
         ? WritableAccount<TAccountChannel>
         : TAccountChannel,
@@ -112,7 +108,6 @@ export function getWithdrawPayeeInstructionDataCodec(): FixedSizeCodec<
 }
 
 export type WithdrawPayeeInput<
-  TAccountCranker extends string = string,
   TAccountChannel extends string = string,
   TAccountChannelTokenAccount extends string = string,
   TAccountPayeeTokenAccount extends string = string,
@@ -122,7 +117,6 @@ export type WithdrawPayeeInput<
   TAccountTokenProgram extends string = string,
   TAccountClock extends string = string,
 > = {
-  cranker: Address<TAccountCranker>;
   channel: Address<TAccountChannel>;
   channelTokenAccount: Address<TAccountChannelTokenAccount>;
   payeeTokenAccount: Address<TAccountPayeeTokenAccount>;
@@ -134,7 +128,6 @@ export type WithdrawPayeeInput<
 };
 
 export function getWithdrawPayeeInstruction<
-  TAccountCranker extends string,
   TAccountChannel extends string,
   TAccountChannelTokenAccount extends string,
   TAccountPayeeTokenAccount extends string,
@@ -146,7 +139,6 @@ export function getWithdrawPayeeInstruction<
   TProgramAddress extends Address = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
 >(
   input: WithdrawPayeeInput<
-    TAccountCranker,
     TAccountChannel,
     TAccountChannelTokenAccount,
     TAccountPayeeTokenAccount,
@@ -159,7 +151,6 @@ export function getWithdrawPayeeInstruction<
   config?: { programAddress?: TProgramAddress },
 ): WithdrawPayeeInstruction<
   TProgramAddress,
-  TAccountCranker,
   TAccountChannel,
   TAccountChannelTokenAccount,
   TAccountPayeeTokenAccount,
@@ -175,7 +166,6 @@ export function getWithdrawPayeeInstruction<
 
   // Original accounts.
   const originalAccounts = {
-    cranker: { value: input.cranker ?? null, isWritable: false },
     channel: { value: input.channel ?? null, isWritable: true },
     channelTokenAccount: {
       value: input.channelTokenAccount ?? null,
@@ -202,7 +192,6 @@ export function getWithdrawPayeeInstruction<
   const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
   return Object.freeze({
     accounts: [
-      getAccountMeta("cranker", accounts.cranker),
       getAccountMeta("channel", accounts.channel),
       getAccountMeta("channelTokenAccount", accounts.channelTokenAccount),
       getAccountMeta("payeeTokenAccount", accounts.payeeTokenAccount),
@@ -216,7 +205,6 @@ export function getWithdrawPayeeInstruction<
     programAddress,
   } as WithdrawPayeeInstruction<
     TProgramAddress,
-    TAccountCranker,
     TAccountChannel,
     TAccountChannelTokenAccount,
     TAccountPayeeTokenAccount,
@@ -234,15 +222,14 @@ export type ParsedWithdrawPayeeInstruction<
 > = {
   programAddress: Address<TProgram>;
   accounts: {
-    cranker: TAccountMetas[0];
-    channel: TAccountMetas[1];
-    channelTokenAccount: TAccountMetas[2];
-    payeeTokenAccount: TAccountMetas[3];
-    payerTokenAccount: TAccountMetas[4];
-    payer: TAccountMetas[5];
-    mint: TAccountMetas[6];
-    tokenProgram: TAccountMetas[7];
-    clock: TAccountMetas[8];
+    channel: TAccountMetas[0];
+    channelTokenAccount: TAccountMetas[1];
+    payeeTokenAccount: TAccountMetas[2];
+    payerTokenAccount: TAccountMetas[3];
+    payer: TAccountMetas[4];
+    mint: TAccountMetas[5];
+    tokenProgram: TAccountMetas[6];
+    clock: TAccountMetas[7];
   };
   data: WithdrawPayeeInstructionData;
 };
@@ -255,12 +242,12 @@ export function parseWithdrawPayeeInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedWithdrawPayeeInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 9) {
+  if (instruction.accounts.length < 8) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 9,
+        expectedAccountMetas: 8,
       },
     );
   }
@@ -273,7 +260,6 @@ export function parseWithdrawPayeeInstruction<
   return {
     programAddress: instruction.programAddress,
     accounts: {
-      cranker: getNextAccount(),
       channel: getNextAccount(),
       channelTokenAccount: getNextAccount(),
       payeeTokenAccount: getNextAccount(),

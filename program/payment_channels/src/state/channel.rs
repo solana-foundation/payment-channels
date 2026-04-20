@@ -10,20 +10,34 @@ use pinocchio::{
 use crate::errors::PaymentChannelsError;
 use crate::state::common::{AccountDiscriminator, CURRENT_CHANNEL_VERSION};
 
+/// Fixed on-chain byte length of the [`Channel`] PDA. Asserted at compile
+/// time (see below).
 pub const CHANNEL_LEN: usize = size_of::<Channel>();
 
 /// PDA seed prefix. Full seeds:
 /// `[CHANNEL_SEED, payer, payee, mint, authorized_signer, salt.to_le_bytes()]`.
 pub const CHANNEL_SEED: &[u8] = b"channel";
 
-/// Starts at 0 because `AccountDiscriminator` at byte 0 already rejects
-/// zero-initialized accounts before `status` is read.
+/// Current position of a [`Channel`] in the FSM.
+/// [`Open = 0`](ChannelStatus::Open) is deliberate: [`AccountDiscriminator`]
+/// at byte 0 already rejects zero-initialized accounts before
+/// [`Channel::status`] is read, so the status field can safely reuse 0 as
+/// a real variant.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub enum ChannelStatus {
+    /// Active channel: accepts `settle`, `topUp`, and the cooperative or
+    /// adversarial transitions that exit toward [`Finalized`](Self::Finalized) /
+    /// [`Closing`](Self::Closing).
     Open = 0,
+    /// Watermark locked. Awaits `distribute` (splits + optional payer
+    /// refund + tombstone) and/or `withdraw_payer` / `withdraw_payee`.
     Finalized = 1,
+    /// `requestClose` has started the grace window. Exits to
+    /// [`Finalized`](Self::Finalized) cooperatively (merchant
+    /// `settleAndFinalize` mid-grace) or permissionlessly (`finalize`
+    /// post-grace).
     Closing = 2,
 }
 
@@ -40,26 +54,65 @@ impl TryFrom<u8> for ChannelStatus {
     }
 }
 
+/// Active channel PDA: escrowed deposit, settled watermark, closure
+/// timestamps, distribution commitment, and participant bindings. Fixed
+/// 208-byte `#[repr(C, packed)]` layout for zero-copy load.
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaAccount))]
 pub struct Channel {
-    pub discriminator: u8,       //   0..1    AccountDiscriminator::Channel
-    pub version: u8,             //   1..2    CURRENT_CHANNEL_VERSION
-    pub bump: u8,                //   2..3    PDA bump
-    pub status: u8,              //   3..4    ChannelStatus
-    pub deposit: u64,            //   4..12
-    pub settled: u64,            //  12..20
-    pub paid_out: u64,           //  20..28
+    /// [`AccountDiscriminator::Channel`]. First byte so zero-initialized
+    /// account bytes fail load before any field is interpreted.
+    pub discriminator: u8, //   0..1
+    /// [`CURRENT_CHANNEL_VERSION`] at `open`. Any other value is rejected
+    /// on load, gating future PDA-layout migrations.
+    pub version: u8, //   1..2
+    /// Canonical bump from `find_program_address` at `open`. Reused
+    /// verbatim by subsequent ixs via `create_program_address`, avoiding
+    /// rederivation cost.
+    pub bump: u8, //   2..3
+    /// [`ChannelStatus`] discriminant.
+    pub status: u8, //   3..4
+    /// Initial escrow; immutable ceiling on [`Self::settled`]. Grows only
+    /// via `topUp` while [`Self::status`] == [`ChannelStatus::Open`] and
+    /// [`Self::closure_started_at`] == 0.
+    pub deposit: u64, //   4..12
+    /// Cumulative authorized watermark. Advanced monotonically by signed
+    /// vouchers in `settle` / `settleAndFinalize`; capped by
+    /// [`Self::deposit`].
+    pub settled: u64, //  12..20
+    /// Cumulative tokens already paid out to merchant splits across
+    /// `distribute` calls. Invariant:
+    /// `paid_out` ≤ [`Self::settled`]. Lets mid-session `distribute`
+    /// run without double-paying.
+    pub paid_out: u64, //  20..28
+    /// Dual semantics: set to `now` by `requestClose` (starts grace) and
+    /// by `settleAndFinalize` from `OPEN` (fresh grace for the merchant
+    /// to `distribute` before `withdraw_payee` unlocks). Reset to 0 on
+    /// `CLOSING → FINALIZED` because the grace was already consumed.
     pub closure_started_at: i64, //  28..36
+    /// Unix ts of the payer's one-shot refund via `withdraw_payer`; 0
+    /// means not yet withdrawn. Gates the refund leg of `withdraw_payee`.
     pub payer_withdrawn_at: i64, //  36..44
-    pub grace_period: u32,       //  44..48
-    /// Blake3 commitment to the distribution preimage; see ADR-001 §Channel PDA.
+    /// Per-channel grace duration in seconds, set at `open`. Governs the
+    /// `CLOSING → FINALIZED` unlock for `finalize` and the post-grace
+    /// permissionless `withdraw_payee`.
+    pub grace_period: u32, //  44..48
+    /// Blake3 commitment to the distribution preimage.
     pub distribution_hash: [u8; 32], //  48..80
-    pub payer: Address,          //  80..112
-    pub payee: Address,          // 112..144
+    /// Refund destination and payer-side authority signer (required for
+    /// `topUp`, `requestClose`, `withdraw_payer`).
+    pub payer: Address, //  80..112
+    /// Fallback payout destination for `withdraw_payee` when splits
+    /// never run.
+    pub payee: Address, // 112..144
+    /// Pubkey that signs vouchers; equals [`Self::payer`] unless a
+    /// delegate was bound at `open`. Every voucher's
+    /// [`signer`](crate::VoucherArgs::signer) field must match this value.
     pub authorized_signer: Address, // 144..176
-    pub mint: Address,           // 176..208
+    /// Token mint bound at `open`. All escrow and payout transfers ride
+    /// this mint.
+    pub mint: Address, // 176..208
 }
 
 impl Channel {

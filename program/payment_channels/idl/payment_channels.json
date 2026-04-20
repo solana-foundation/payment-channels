@@ -180,22 +180,6 @@
             },
             {
               "kind": "structFieldTypeNode",
-              "name": "pad",
-              "type": {
-                "count": {
-                  "kind": "fixedCountNode",
-                  "value": 6
-                },
-                "item": {
-                  "endian": "le",
-                  "format": "u8",
-                  "kind": "numberTypeNode"
-                },
-                "kind": "arrayTypeNode"
-              }
-            },
-            {
-              "kind": "structFieldTypeNode",
               "name": "preimage",
               "type": {
                 "kind": "fixedSizeTypeNode",
@@ -809,12 +793,6 @@
         "accounts": [
           {
             "isSigner": false,
-            "isWritable": false,
-            "kind": "instructionAccountNode",
-            "name": "cranker"
-          },
-          {
-            "isSigner": false,
             "isWritable": true,
             "kind": "instructionAccountNode",
             "name": "channel"
@@ -854,12 +832,6 @@
       },
       {
         "accounts": [
-          {
-            "isSigner": false,
-            "isWritable": false,
-            "kind": "instructionAccountNode",
-            "name": "cranker"
-          },
           {
             "isSigner": false,
             "isWritable": true,
@@ -998,12 +970,6 @@
       },
       {
         "accounts": [
-          {
-            "isSigner": false,
-            "isWritable": false,
-            "kind": "instructionAccountNode",
-            "name": "cranker"
-          },
           {
             "isSigner": false,
             "isWritable": true,

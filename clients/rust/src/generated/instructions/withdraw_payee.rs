@@ -13,8 +13,6 @@ pub const WITHDRAW_PAYEE_DISCRIMINATOR: u8 = 8;
 /// Accounts.
 #[derive(Debug)]
 pub struct WithdrawPayee {
-    pub cranker: solana_address::Address,
-
     pub channel: solana_address::Address,
 
     pub channel_token_account: solana_address::Address,
@@ -42,11 +40,7 @@ impl WithdrawPayee {
         &self,
         remaining_accounts: &[solana_instruction::AccountMeta],
     ) -> solana_instruction::Instruction {
-        let mut accounts = Vec::with_capacity(9 + remaining_accounts.len());
-        accounts.push(solana_instruction::AccountMeta::new_readonly(
-            self.cranker,
-            false,
-        ));
+        let mut accounts = Vec::with_capacity(8 + remaining_accounts.len());
         accounts.push(solana_instruction::AccountMeta::new(self.channel, false));
         accounts.push(solana_instruction::AccountMeta::new(
             self.channel_token_account,
@@ -107,18 +101,16 @@ impl Default for WithdrawPayeeInstructionData {
 ///
 /// ### Accounts:
 ///
-///   0. `[]` cranker
-///   1. `[writable]` channel
-///   2. `[writable]` channel_token_account
-///   3. `[writable]` payee_token_account
-///   4. `[writable]` payer_token_account
-///   5. `[writable]` payer
-///   6. `[]` mint
-///   7. `[]` token_program
-///   8. `[]` clock
+///   0. `[writable]` channel
+///   1. `[writable]` channel_token_account
+///   2. `[writable]` payee_token_account
+///   3. `[writable]` payer_token_account
+///   4. `[writable]` payer
+///   5. `[]` mint
+///   6. `[]` token_program
+///   7. `[]` clock
 #[derive(Clone, Debug, Default)]
 pub struct WithdrawPayeeBuilder {
-    cranker: Option<solana_address::Address>,
     channel: Option<solana_address::Address>,
     channel_token_account: Option<solana_address::Address>,
     payee_token_account: Option<solana_address::Address>,
@@ -133,11 +125,6 @@ pub struct WithdrawPayeeBuilder {
 impl WithdrawPayeeBuilder {
     pub fn new() -> Self {
         Self::default()
-    }
-    #[inline(always)]
-    pub fn cranker(&mut self, cranker: solana_address::Address) -> &mut Self {
-        self.cranker = Some(cranker);
-        self
     }
     #[inline(always)]
     pub fn channel(&mut self, channel: solana_address::Address) -> &mut Self {
@@ -206,7 +193,6 @@ impl WithdrawPayeeBuilder {
     #[allow(clippy::clone_on_copy)]
     pub fn instruction(&self) -> solana_instruction::Instruction {
         let accounts = WithdrawPayee {
-            cranker: self.cranker.expect("cranker is not set"),
             channel: self.channel.expect("channel is not set"),
             channel_token_account: self
                 .channel_token_account
@@ -229,8 +215,6 @@ impl WithdrawPayeeBuilder {
 
 /// `withdraw_payee` CPI accounts.
 pub struct WithdrawPayeeCpiAccounts<'a, 'b> {
-    pub cranker: &'b solana_account_info::AccountInfo<'a>,
-
     pub channel: &'b solana_account_info::AccountInfo<'a>,
 
     pub channel_token_account: &'b solana_account_info::AccountInfo<'a>,
@@ -252,8 +236,6 @@ pub struct WithdrawPayeeCpiAccounts<'a, 'b> {
 pub struct WithdrawPayeeCpi<'a, 'b> {
     /// The program to invoke.
     pub __program: &'b solana_account_info::AccountInfo<'a>,
-
-    pub cranker: &'b solana_account_info::AccountInfo<'a>,
 
     pub channel: &'b solana_account_info::AccountInfo<'a>,
 
@@ -279,7 +261,6 @@ impl<'a, 'b> WithdrawPayeeCpi<'a, 'b> {
     ) -> Self {
         Self {
             __program: program,
-            cranker: accounts.cranker,
             channel: accounts.channel,
             channel_token_account: accounts.channel_token_account,
             payee_token_account: accounts.payee_token_account,
@@ -313,11 +294,7 @@ impl<'a, 'b> WithdrawPayeeCpi<'a, 'b> {
         signers_seeds: &[&[&[u8]]],
         remaining_accounts: &[(&'b solana_account_info::AccountInfo<'a>, bool, bool)],
     ) -> solana_program_error::ProgramResult {
-        let mut accounts = Vec::with_capacity(9 + remaining_accounts.len());
-        accounts.push(solana_instruction::AccountMeta::new_readonly(
-            *self.cranker.key,
-            false,
-        ));
+        let mut accounts = Vec::with_capacity(8 + remaining_accounts.len());
         accounts.push(solana_instruction::AccountMeta::new(
             *self.channel.key,
             false,
@@ -361,9 +338,8 @@ impl<'a, 'b> WithdrawPayeeCpi<'a, 'b> {
             accounts,
             data,
         };
-        let mut account_infos = Vec::with_capacity(10 + remaining_accounts.len());
+        let mut account_infos = Vec::with_capacity(9 + remaining_accounts.len());
         account_infos.push(self.__program.clone());
-        account_infos.push(self.cranker.clone());
         account_infos.push(self.channel.clone());
         account_infos.push(self.channel_token_account.clone());
         account_infos.push(self.payee_token_account.clone());
@@ -388,15 +364,14 @@ impl<'a, 'b> WithdrawPayeeCpi<'a, 'b> {
 ///
 /// ### Accounts:
 ///
-///   0. `[]` cranker
-///   1. `[writable]` channel
-///   2. `[writable]` channel_token_account
-///   3. `[writable]` payee_token_account
-///   4. `[writable]` payer_token_account
-///   5. `[writable]` payer
-///   6. `[]` mint
-///   7. `[]` token_program
-///   8. `[]` clock
+///   0. `[writable]` channel
+///   1. `[writable]` channel_token_account
+///   2. `[writable]` payee_token_account
+///   3. `[writable]` payer_token_account
+///   4. `[writable]` payer
+///   5. `[]` mint
+///   6. `[]` token_program
+///   7. `[]` clock
 #[derive(Clone, Debug)]
 pub struct WithdrawPayeeCpiBuilder<'a, 'b> {
     instruction: Box<WithdrawPayeeCpiBuilderInstruction<'a, 'b>>,
@@ -406,7 +381,6 @@ impl<'a, 'b> WithdrawPayeeCpiBuilder<'a, 'b> {
     pub fn new(program: &'b solana_account_info::AccountInfo<'a>) -> Self {
         let instruction = Box::new(WithdrawPayeeCpiBuilderInstruction {
             __program: program,
-            cranker: None,
             channel: None,
             channel_token_account: None,
             payee_token_account: None,
@@ -418,11 +392,6 @@ impl<'a, 'b> WithdrawPayeeCpiBuilder<'a, 'b> {
             __remaining_accounts: Vec::new(),
         });
         Self { instruction }
-    }
-    #[inline(always)]
-    pub fn cranker(&mut self, cranker: &'b solana_account_info::AccountInfo<'a>) -> &mut Self {
-        self.instruction.cranker = Some(cranker);
-        self
     }
     #[inline(always)]
     pub fn channel(&mut self, channel: &'b solana_account_info::AccountInfo<'a>) -> &mut Self {
@@ -513,8 +482,6 @@ impl<'a, 'b> WithdrawPayeeCpiBuilder<'a, 'b> {
         let instruction = WithdrawPayeeCpi {
             __program: self.instruction.__program,
 
-            cranker: self.instruction.cranker.expect("cranker is not set"),
-
             channel: self.instruction.channel.expect("channel is not set"),
 
             channel_token_account: self
@@ -553,7 +520,6 @@ impl<'a, 'b> WithdrawPayeeCpiBuilder<'a, 'b> {
 #[derive(Clone, Debug)]
 struct WithdrawPayeeCpiBuilderInstruction<'a, 'b> {
     __program: &'b solana_account_info::AccountInfo<'a>,
-    cranker: Option<&'b solana_account_info::AccountInfo<'a>>,
     channel: Option<&'b solana_account_info::AccountInfo<'a>>,
     channel_token_account: Option<&'b solana_account_info::AccountInfo<'a>>,
     payee_token_account: Option<&'b solana_account_info::AccountInfo<'a>>,

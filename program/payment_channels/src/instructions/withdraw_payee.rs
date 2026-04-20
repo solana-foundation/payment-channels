@@ -2,14 +2,31 @@ use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 
 use crate::errors::PaymentChannelsError;
 
+/// Byte-0 selector for `withdrawPayee`. Post-grace permissionless crank:
+/// pays [`settled`](crate::Channel::settled) `−`
+/// [`paid_out`](crate::Channel::paid_out) to
+/// [`Channel::payee`](crate::Channel::payee) and, if
+/// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `== 0`,
+/// atomically refunds [`deposit`](crate::Channel::deposit) `−`
+/// [`settled`](crate::Channel::settled) to the payer in the same ix;
+/// tombstones the PDA and returns rent to the payer.
 pub const DISCRIMINATOR: u8 = 8;
 
+/// Post-grace timer-gated; tombstones the PDA.
 pub struct WithdrawPayeeAccounts<'a> {
-    pub cranker: &'a AccountView,
     pub channel: &'a AccountView,
+    /// Escrow; source for both the payee payout and the payer refund.
     pub channel_token_account: &'a AccountView,
+    /// Destination for [`settled`](crate::Channel::settled) `−`
+    /// [`paid_out`](crate::Channel::paid_out).
     pub payee_token_account: &'a AccountView,
+    /// Destination for [`deposit`](crate::Channel::deposit) `−`
+    /// [`settled`](crate::Channel::settled); populated only when
+    /// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `== 0`
+    /// at ix time.
     pub payer_token_account: &'a AccountView,
+    /// Receives the PDA's lamport balance on close. Must equal
+    /// [`Channel::payer`](crate::Channel::payer).
     pub payer: &'a AccountView,
     pub mint: &'a AccountView,
     pub token_program: &'a AccountView,
@@ -21,7 +38,6 @@ impl<'a> TryFrom<&'a [AccountView]> for WithdrawPayeeAccounts<'a> {
 
     fn try_from(accounts: &'a [AccountView]) -> Result<Self, Self::Error> {
         let [
-            cranker,
             channel,
             channel_token_account,
             payee_token_account,
@@ -35,7 +51,6 @@ impl<'a> TryFrom<&'a [AccountView]> for WithdrawPayeeAccounts<'a> {
             return Err(ProgramError::NotEnoughAccountKeys);
         };
         Ok(Self {
-            cranker,
             channel,
             channel_token_account,
             payee_token_account,
