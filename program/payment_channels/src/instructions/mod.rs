@@ -228,8 +228,7 @@ mod tests {
         let open: open::OpenArgs = unsafe { core::mem::zeroed() };
         let settle: settle::SettleArgs = unsafe { core::mem::zeroed() };
         let top_up: top_up::TopUpArgs = unsafe { core::mem::zeroed() };
-        let saf: settle_and_finalize::SettleAndFinalizeArgs =
-            unsafe { core::mem::zeroed() };
+        let saf: settle_and_finalize::SettleAndFinalizeArgs = unsafe { core::mem::zeroed() };
         let distribute: distribute::DistributeArgs = unsafe { core::mem::zeroed() };
 
         assert_eq!(
