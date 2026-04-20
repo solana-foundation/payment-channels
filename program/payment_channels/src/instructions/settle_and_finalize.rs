@@ -6,13 +6,7 @@ use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 use crate::errors::PaymentChannelsError;
 use crate::instructions::VoucherArgs;
 
-/// Byte-0 selector for `settleAndFinalize`. Merchant-signed cooperative
-/// close: optionally commits a final voucher, locks the watermark, and
-/// moves to `FINALIZED`. From `OPEN`, sets
-/// [`closure_started_at`](crate::Channel::closure_started_at) to `now`
-/// (fresh grace for the merchant to `distribute`); from `CLOSING`,
-/// callable only mid-grace and resets
-/// [`closure_started_at`](crate::Channel::closure_started_at) to 0.
+/// Instruction discriminator byte for `settleAndFinalize`.
 pub const DISCRIMINATOR: u8 = 3;
 
 /// Cooperative-close payload. Holds a stable wire size (voucher + tag) so
@@ -70,6 +64,12 @@ impl<'a> TryFrom<&'a [AccountView]> for SettleAndFinalizeAccounts<'a> {
     }
 }
 
+/// Merchant-signed cooperative close: optionally commits a final voucher,
+/// locks the watermark, and moves to `FINALIZED`. From `OPEN`, sets
+/// [`closure_started_at`](crate::Channel::closure_started_at) to `now`
+/// (fresh grace for the merchant to `distribute`); from `CLOSING`,
+/// callable only mid-grace and resets
+/// [`closure_started_at`](crate::Channel::closure_started_at) to 0.
 pub fn process(
     _program_id: &Address,
     accounts: &[AccountView],

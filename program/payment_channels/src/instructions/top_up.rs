@@ -5,10 +5,7 @@ use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 
 use crate::errors::PaymentChannelsError;
 
-/// Byte-0 selector for `topUp`. Payer-signed; extends
-/// [`Channel::deposit`](crate::Channel::deposit) by [`TopUpArgs::amount`].
-/// `OPEN` only — disallowed once
-/// [`closure_started_at`](crate::Channel::closure_started_at) `> 0`.
+/// Instruction discriminator byte for `topUp`.
 pub const DISCRIMINATOR: u8 = 2;
 
 /// Extends an `OPEN` channel's escrow. The full [`Self::amount`] is
@@ -73,6 +70,10 @@ impl<'a> TryFrom<&'a [AccountView]> for TopUpAccounts<'a> {
     }
 }
 
+/// Payer-signed; extends
+/// [`Channel::deposit`](crate::Channel::deposit) by [`TopUpArgs::amount`].
+/// `OPEN` only — disallowed once
+/// [`closure_started_at`](crate::Channel::closure_started_at) `> 0`.
 pub fn process(
     _program_id: &Address,
     accounts: &[AccountView],

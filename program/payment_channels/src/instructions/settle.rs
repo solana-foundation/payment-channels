@@ -6,12 +6,7 @@ use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 use crate::errors::PaymentChannelsError;
 use crate::instructions::VoucherArgs;
 
-/// Byte-0 selector for `settle`. Merchant-signed; advances
-/// [`Channel::settled`](crate::Channel::settled) against a payer-signed
-/// voucher. `OPEN` only —
-/// [`settled`](crate::Channel::settled) `<`
-/// [`voucher.cumulative_amount`](VoucherArgs::cumulative_amount) `≤`
-/// [`deposit`](crate::Channel::deposit) and voucher must be fresh.
+/// Instruction discriminator byte for `settle`.
 pub const DISCRIMINATOR: u8 = 1;
 
 /// Mid-session watermark advance. Carries exactly one voucher; no token
@@ -58,6 +53,12 @@ impl<'a> TryFrom<&'a [AccountView]> for SettleAccounts<'a> {
     }
 }
 
+/// Merchant-signed; advances
+/// [`Channel::settled`](crate::Channel::settled) against a payer-signed
+/// voucher. `OPEN` only —
+/// [`settled`](crate::Channel::settled) `<`
+/// [`voucher.cumulative_amount`](VoucherArgs::cumulative_amount) `≤`
+/// [`deposit`](crate::Channel::deposit) and voucher must be fresh.
 pub fn process(
     _program_id: &Address,
     accounts: &[AccountView],

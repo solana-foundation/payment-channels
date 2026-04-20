@@ -2,14 +2,7 @@ use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 
 use crate::errors::PaymentChannelsError;
 
-/// Byte-0 selector for `withdrawPayee`. Post-grace permissionless crank:
-/// pays [`settled`](crate::Channel::settled) `−`
-/// [`paid_out`](crate::Channel::paid_out) to
-/// [`Channel::payee`](crate::Channel::payee) and, if
-/// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `== 0`,
-/// atomically refunds [`deposit`](crate::Channel::deposit) `−`
-/// [`settled`](crate::Channel::settled) to the payer in the same ix;
-/// tombstones the PDA and returns rent to the payer.
+/// Instruction discriminator byte for `withdrawPayee`.
 pub const DISCRIMINATOR: u8 = 8;
 
 /// Post-grace timer-gated; tombstones the PDA.
@@ -60,6 +53,14 @@ impl<'a> TryFrom<&'a [AccountView]> for WithdrawPayeeAccounts<'a> {
     }
 }
 
+/// Post-grace permissionless crank: pays
+/// [`settled`](crate::Channel::settled) `−`
+/// [`paid_out`](crate::Channel::paid_out) to
+/// [`Channel::payee`](crate::Channel::payee) and, if
+/// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `== 0`,
+/// atomically refunds [`deposit`](crate::Channel::deposit) `−`
+/// [`settled`](crate::Channel::settled) to the payer in the same ix;
+/// tombstones the PDA and returns rent to the payer.
 pub fn process(_program_id: &Address, accounts: &[AccountView]) -> ProgramResult {
     let _accs = WithdrawPayeeAccounts::try_from(accounts)?;
     Err(PaymentChannelsError::NotImplemented.into())

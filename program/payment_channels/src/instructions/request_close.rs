@@ -2,10 +2,7 @@ use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 
 use crate::errors::PaymentChannelsError;
 
-/// Byte-0 selector for `requestClose`. Payer-signed, no Args. Starts the
-/// grace period by setting
-/// [`Channel::closure_started_at`](crate::Channel::closure_started_at) to
-/// `now` and moves `OPEN → CLOSING`.
+/// Instruction discriminator byte for `requestClose`.
 pub const DISCRIMINATOR: u8 = 4;
 
 pub struct RequestCloseAccounts<'a> {
@@ -28,6 +25,9 @@ impl<'a> TryFrom<&'a [AccountView]> for RequestCloseAccounts<'a> {
     }
 }
 
+/// Payer-signed, no Args. Starts the grace period by setting
+/// [`Channel::closure_started_at`](crate::Channel::closure_started_at) to
+/// `now` and moves `OPEN → CLOSING`.
 pub fn process(_program_id: &Address, accounts: &[AccountView]) -> ProgramResult {
     let _accs = RequestCloseAccounts::try_from(accounts)?;
     Err(PaymentChannelsError::NotImplemented.into())

@@ -5,15 +5,7 @@ use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 
 use crate::errors::PaymentChannelsError;
 
-/// Byte-0 selector for `distribute`. Permissionless crank: verifies the
-/// committed preimage and pays splits
-/// [`settled`](crate::Channel::settled) `−`
-/// [`paid_out`](crate::Channel::paid_out) to merchant destinations. From
-/// `OPEN`, advances [`paid_out`](crate::Channel::paid_out) and stays
-/// open; from `FINALIZED`, also refunds
-/// [`deposit`](crate::Channel::deposit) `−`
-/// [`settled`](crate::Channel::settled) to the payer (when not already
-/// withdrawn) and tombstones the PDA.
+/// Instruction discriminator byte for `distribute`.
 pub const DISCRIMINATOR: u8 = 6;
 
 /// Upper bound on the serialized splits blob.
@@ -83,6 +75,14 @@ impl<'a> TryFrom<&'a [AccountView]> for DistributeAccounts<'a> {
     }
 }
 
+/// Permissionless crank: verifies the committed preimage and pays splits
+/// [`settled`](crate::Channel::settled) `−`
+/// [`paid_out`](crate::Channel::paid_out) to merchant destinations. From
+/// `OPEN`, advances [`paid_out`](crate::Channel::paid_out) and stays
+/// open; from `FINALIZED`, also refunds
+/// [`deposit`](crate::Channel::deposit) `−`
+/// [`settled`](crate::Channel::settled) to the payer (when not already
+/// withdrawn) and tombstones the PDA.
 pub fn process(
     _program_id: &Address,
     accounts: &[AccountView],

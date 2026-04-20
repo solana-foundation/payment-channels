@@ -2,11 +2,7 @@ use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 
 use crate::errors::PaymentChannelsError;
 
-/// Byte-0 selector for `withdrawPayer`. Payer-only refund of
-/// [`deposit`](crate::Channel::deposit) `−`
-/// [`settled`](crate::Channel::settled) during `FINALIZED`; records
-/// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `= now` and
-/// does **not** tombstone the PDA.
+/// Instruction discriminator byte for `withdrawPayer`.
 pub const DISCRIMINATOR: u8 = 7;
 
 pub struct WithdrawPayerAccounts<'a> {
@@ -47,6 +43,10 @@ impl<'a> TryFrom<&'a [AccountView]> for WithdrawPayerAccounts<'a> {
     }
 }
 
+/// Payer-only refund of [`deposit`](crate::Channel::deposit) `−`
+/// [`settled`](crate::Channel::settled) during `FINALIZED`; records
+/// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `= now` and
+/// does **not** tombstone the PDA.
 pub fn process(_program_id: &Address, accounts: &[AccountView]) -> ProgramResult {
     let _accs = WithdrawPayerAccounts::try_from(accounts)?;
     Err(PaymentChannelsError::NotImplemented.into())

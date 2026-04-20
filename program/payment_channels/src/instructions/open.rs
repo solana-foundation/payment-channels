@@ -7,9 +7,7 @@ use crate::event_engine::EventSerialize;
 use crate::event_engine::emit_event;
 use crate::events::Opened;
 
-/// Byte-0 selector for `open`. Payer-signed; creates the
-/// [`Channel`](crate::Channel) PDA, locks the deposit, and commits the
-/// distribution hash.
+/// Instruction discriminator byte for `open`.
 pub const DISCRIMINATOR: u8 = 0;
 
 /// Init payload. Fields land in the [`Channel`](crate::Channel) PDA either
@@ -110,6 +108,8 @@ impl<'a> TryFrom<&'a [AccountView]> for OpenAccounts<'a> {
     }
 }
 
+/// Payer-signed; creates the [`Channel`](crate::Channel) PDA, locks the
+/// deposit, and commits the distribution hash.
 pub fn process(program_id: &Address, accounts: &[AccountView], _args: &OpenArgs) -> ProgramResult {
     let accs = OpenAccounts::try_from(accounts)?;
 
