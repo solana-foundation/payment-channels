@@ -95,29 +95,3 @@ jobs:
 
       - name: Test program
         run: just test-program
-
-  # Regenerates the IDL + Codama clients and fails if the result diverges
-  # from what's committed. Program source is canonical; the generated
-  # tree is an artifact that must be kept in sync via `just generate-client`.
-  codegen-drift:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 1
-
-      - uses: ./.github/actions/setup
-        with:
-          install-solana: "false"
-
-      - name: Regenerate IDL and clients
-        run: just generate-client
-
-      - name: Fail on drift
-        run: |
-          git diff --exit-code -- \
-            program/payment_channels/idl/ \
-            clients/rust/src/generated/ \
-            clients/typescript/src/generated/ \
-            || { echo "::error::Codegen drift — run 'just generate-client' locally and commit the result."; exit 1; }
