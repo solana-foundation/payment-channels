@@ -1,0 +1,76 @@
+name: Setup
+description: Install Rust, optionally Solana, and pnpm; optionally prime a shared rust-cache.
+
+inputs:
+  solana-version:
+    description: Anza CLI channel or version to install (e.g. "stable", "1.18.22").
+    required: false
+    default: stable
+  install-solana:
+    description: Install the Solana/Anza CLI. Set to "false" for pure-lint jobs.
+    required: false
+    default: "true"
+  enable-rust-cache:
+    description: Enable Swatinem/rust-cache.
+    required: false
+    default: "true"
+  save-rust-cache:
+    description: Allow the cache action to write a new entry (only set "true" on one job per key).
+    required: false
+    default: "false"
+  rust-cache-key:
+    description: Extra key for the rust-cache entry, used to scope caches between jobs.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+
+    - name: Install just
+      uses: extractions/setup-just@v4
+
+    - name: Install Solana (Anza) CLI
+      if: inputs.install-solana == 'true'
+      shell: bash
+      run: |
+        sh -c "$(curl -sSfL https://release.anza.xyz/${{ inputs.solana-version }}/install)"
+        echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+    - name: Rust cache
+      if: inputs.enable-rust-cache == 'true'
+      uses: Swatinem/rust-cache@v2
+      with:
+        save-if: ${{ inputs.save-rust-cache == 'true' && github.ref == 'refs/heads/main' }}
+        key: ${{ inputs.rust-cache-key }}
+
+    - name: Install pnpm
+      uses: pnpm/action-setup@v6
+      with:
+        version: 10
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v5
+      with:
+        node-version: 22
+
+    - name: Get pnpm store directory
+      id: pnpm-store
+      shell: bash
+      run: echo "path=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+    - name: Cache pnpm store
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.pnpm-store.outputs.path }}
+        key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: |
+          ${{ runner.os }}-pnpm-
+
+    - name: Install JS deps
+      shell: bash
+      run: pnpm install --frozen-lockfile

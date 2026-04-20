@@ -11,7 +11,7 @@ This ADR specifies the channel lifecycle, instruction set, and on-chain PDA layo
 The program implements **unidirectional payment channels** over SPL Token and Token-2022. Each channel is a PDA holding escrowed tokens; payer-signed off-chain vouchers carry a monotonically increasing cumulative amount that on-chain instructions commit to a `settled` watermark. Actual token movement only occurs at closure, via one of two paths:
 
 - **Happy path — `settleAndFinalize` + `distribute`**: the merchant commits the final voucher (locks the watermark, transitions to `FINALIZED`) and then executes the hash-committed multi-destination payout, refunding `deposit − settled` to the payer in the same `distribute` instruction.
-- **Unhappy path — post-grace permissionless escape**: after `requestClose` starts the grace period, if the merchant never submits a voucher via `settleAndFinalize`, anyone may call `finalize` post-grace to freeze the watermark and transition `CLOSING → FINALIZED`. From there `withdraw_payee` (post-grace, permissionless) atomically pays `settled` to `channel.payee` and refunds `deposit − settled` to the payer if `payerWithdrawnAt == 0`, then tombstones the PDA. Payer may also pull their refund early at any point during `FINALIZED` via the standalone `withdraw_payer` ix.
+- **Unhappy path — post-grace permissionless finalize**: after `requestClose` starts the grace period, if the merchant never submits a voucher via `settleAndFinalize`, anyone may call `finalize` post-grace to freeze the watermark and transition `CLOSING → FINALIZED`. From `FINALIZED` the payer recovers `deposit − settled` at any time via the standalone `withdraw_payer` ix (does not tombstone). There is **no preimage-free payee payout**: to collect `settled`, the merchant must still reveal the `distribute` preimage — `distribute` from `FINALIZED` pays the splits, atomically refunds `deposit − settled` to the payer if `payerWithdrawnAt == 0`, and tombstones the PDA. If the merchant never reveals the preimage, the `settled` tranche sits in escrow indefinitely.
 
 Instructions whose destinations are fully determined by PDA seeds are **permissionless cranks** — anyone can submit the transaction; the authority is encoded in the seeds, the timer, or a preimage, not in the signer.
 
@@ -22,32 +22,46 @@ Instructions whose destinations are fully determined by PDA seeds are **permissi
 ```rust
 #[repr(u8)]
 pub enum ChannelStatus {
-    Uninitialized = 0,  // sentinel: zero-initialized account; rejected by every ix
-    Open          = 1,
-    Finalized     = 2,
-    Closing       = 3,
+    Open      = 0,
+    Finalized = 1,
+    Closing   = 2,
+}
+```
+
+Zero-initialized accounts are rejected at load time by the byte-0
+`AccountDiscriminator` check (see below), not by a status sentinel.
+
+### Account discriminator
+
+```rust
+#[repr(u8)]
+pub enum AccountDiscriminator {
+    Channel = 1,                    // starts at 1 so zero-init accounts fail load
+    // ClosedChannel = 2,           // reserved for tombstone shape per TBD
 }
 ```
 
 ### Channel PDA
 
 ```rust
-/// Active channel account. 190 bytes.
+/// Active channel account. 208 bytes.
 #[repr(C, packed)]
 pub struct Channel {
-    pub deposit:            u64,       // [  0..8  )  Initial escrow amount
-    pub settled:            u64,       // [  8..16 )  Cumulative authorized watermark
-    pub paid_out:           u64,       // [ 16..24 )  Cumulative tokens distributed to merchant; paid_out ≤ settled
-    pub closure_started_at: i64,       // [ 24..32 )  Unix ts; see footnote ‡ for dual semantics
-    pub payer_withdrawn_at: i64,       // [ 32..40 )  Unix ts; 0 = payer has not withdrawn
-    pub grace_period:       u32,       // [ 40..44 )  Seconds; per-channel grace duration set at `open`
-    pub distribution_hash:  [u8; 16],  // [ 44..60 )  Blake3-truncated commitment to splits config
-    pub payer:              [u8; 32],  // [ 60..92 )  Payer pubkey (refund destination + payer-authority signer check)
-    pub payee:              [u8; 32],  // [ 92..124)  Fallback destination for withdraw_payee
-    pub authorized_signer:  [u8; 32],  // [124..156)  Voucher signer pubkey; equals `payer` when no delegate is bound
-    pub mint:               [u8; 32],  // [156..188)  Token mint
-    pub status:             u8,        // [188..189)  ChannelStatus
-    pub bump:               u8,        // [189..190)  Canonical PDA bump
+    pub discriminator:      u8,        // [  0..1  )  AccountDiscriminator::Channel
+    pub version:            u8,        // [  1..2  )  CURRENT_CHANNEL_VERSION
+    pub bump:               u8,        // [  2..3  )  Canonical PDA bump
+    pub status:             u8,        // [  3..4  )  ChannelStatus
+    pub deposit:            u64,       // [  4..12 )  Initial escrow amount
+    pub settled:            u64,       // [ 12..20 )  Cumulative authorized watermark
+    pub paid_out:           u64,       // [ 20..28 )  Cumulative tokens distributed to merchant; paid_out ≤ settled
+    pub closure_started_at: i64,       // [ 28..36 )  Unix ts; see footnote ‡ for dual semantics
+    pub payer_withdrawn_at: i64,       // [ 36..44 )  Unix ts; 0 = payer has not withdrawn
+    pub grace_period:       u32,       // [ 44..48 )  Seconds; per-channel grace duration set at `open`
+    pub distribution_hash:  [u8; 32],  // [ 48..80 )  Blake3 commitment to splits config
+    pub payer:              Address,   // [ 80..112)  Payer pubkey (refund destination + payer-authority signer check)
+    pub payee:              Address,   // [112..144)  PDA seed binding (not otherwise consumed on-chain)
+    pub authorized_signer:  Address,   // [144..176)  Voucher signer pubkey; equals `payer` when no delegate is bound
+    pub mint:               Address,   // [176..208)  Token mint
 }
 ```
 
@@ -108,18 +122,17 @@ pub enum SigType {
 | `open` | `NONEXISTENT → OPEN` | PDA does not exist |
 | `settle` | `OPEN → OPEN` | `settled < voucher.cumulative ≤ deposit` & voucher fresh† |
 | `topUp` | `OPEN → OPEN` | — |
-| `settleAndFinalize` | `OPEN → FINALIZED` | merchant signer; voucher optional (if present: `settled ≤ voucher.cumulative ≤ deposit` & voucher fresh†); sets `closureStartedAt = now` |
+| `settleAndFinalize` | `OPEN → FINALIZED` | merchant signer; voucher optional (if present: `settled ≤ voucher.cumulative ≤ deposit` & voucher fresh†); leaves `closureStartedAt = 0` |
 | `requestClose` | `OPEN → CLOSING` | sets `closureStartedAt = now` |
 | `settleAndFinalize` | `CLOSING → FINALIZED` | merchant signer & `now < closureStartedAt + GRACE`; voucher optional (if present: `settled ≤ voucher.cumulative ≤ deposit` & voucher fresh†); resets `closureStartedAt = 0` |
 | `finalize` | `CLOSING → FINALIZED` | `now ≥ closureStartedAt + GRACE`; resets `closureStartedAt = 0` |
 | `distribute` | `OPEN → OPEN` | hash(preimage) == distributionHash & `settled > paid_out` |
 | `distribute` | `FINALIZED → CLOSED` | hash(preimage) == distributionHash |
 | `withdraw_payer` | `FINALIZED → FINALIZED` | `payerWithdrawnAt == 0` |
-| `withdraw_payee` | `FINALIZED → CLOSED` | `now ≥ closureStartedAt + GRACE` |
 
 † **voucher fresh** = `voucher.expires_at == None` OR `now < voucher.expires_at`. Expired vouchers MUST be rejected to prevent merchants from settling stale authorizations after the payer's TTL has passed.
 
-‡ **`closureStartedAt` dual semantics.** Set to `now` on `requestClose` and on `OPEN → FINALIZED` via `settleAndFinalize` (gives merchant a fresh `grace_period` window in `FINALIZED` to call `distribute` with splits before `withdraw_payee` unlocks). **Reset to `0`** on `CLOSING → FINALIZED` via either ix (the grace was already consumed during `CLOSING` — `Finalize` required it to elapse, and `SettleAndFinalize` cooperatively closed mid-grace). With `closureStartedAt == 0`, the `withdraw_payee` guard `now ≥ closureStartedAt + grace_period` is trivially true — by design, no further wait. Merchant SHOULD bundle `settleAndFinalize` + `distribute` atomically in a single tx on the cooperative happy path to avoid racing `withdraw_payee` after the reset.
+‡ **`closureStartedAt` semantics.** Set to `now` on `requestClose`; reset to `0` on `CLOSING → FINALIZED` via either `settleAndFinalize` (mid-grace) or `finalize` (post-grace). Always `0` in `OPEN` and `FINALIZED` — only `CLOSING` carries a live timestamp.
 
 ## Instructions
 
@@ -128,12 +141,11 @@ pub enum SigType {
 | `open` | Creates the channel PDA, locks the deposit, and commits to the distribution hash.                                                   | anyone | payer |
 | `settle` | Advances the on-chain `settled` watermark against a payer-signed voucher. `OPEN` only.                                              | merchant | merchant |
 | `topUp` | Adds to `deposit`. `OPEN` only — disallowed once `closureStartedAt > 0`.                                                            | payer | payer |
-| `settleAndFinalize` | Optionally commits a final voucher, locks the watermark, and transitions to `FINALIZED`. Sets `closureStartedAt = now` when called from `OPEN`. From `CLOSING`, callable only while the grace period is open. | merchant | merchant |
+| `settleAndFinalize` | Optionally commits a final voucher, locks the watermark, and transitions to `FINALIZED`. Leaves `closureStartedAt = 0` when called from `OPEN`. From `CLOSING`, callable only while the grace period is open. | merchant | merchant |
 | `requestClose` | Starts the grace period by setting `closureStartedAt = now`.                                                                        | payer | payer |
 | `finalize` | Freezes the current watermark and transitions `CLOSING → FINALIZED`. Permissionless, voucher-free; callable only after the grace period has expired. | anyone | any |
 | `distribute` | Verifies the distribution-hash preimage and pays `settled − paid_out` to merchant splits per the preimage; updates `paid_out`. From `OPEN`: channel stays open (mid-session settlement). From `FINALIZED`: also refunds `deposit − settled` to the payer when `payerWithdrawnAt == 0` and tombstones the PDA. | anyone | any |
 | `withdraw_payer` | Refunds `deposit − settled` to the payer and sets `payerWithdrawnAt = now`. Callable any time the channel is `FINALIZED`. Does not tombstone. | payer | payer |
-| `withdraw_payee` | Post-grace only. Sends `settled − paid_out` to the stored `channel.payee` and, if `payerWithdrawnAt == 0`, atomically refunds `deposit − settled` to the payer in the same ix. Tombstones the PDA. Rent refunded to the payer. | anyone | any |
 
 **Signers** lists only transaction-level signers (verified by the Solana runtime). Voucher signatures (payer-signed off-chain, verified inside the program via Ed25519 syscall over ix data) are **not** transaction-level signers. `any` means no specific account signature is required — the transaction needs only a fee payer.
 
