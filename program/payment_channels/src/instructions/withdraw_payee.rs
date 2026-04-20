@@ -30,7 +30,6 @@ pub struct WithdrawPayeeAccounts<'a> {
     pub payer: &'a AccountView,
     pub mint: &'a AccountView,
     pub token_program: &'a AccountView,
-    pub clock: &'a AccountView,
 }
 
 impl<'a> TryFrom<&'a [AccountView]> for WithdrawPayeeAccounts<'a> {
@@ -45,7 +44,6 @@ impl<'a> TryFrom<&'a [AccountView]> for WithdrawPayeeAccounts<'a> {
             payer,
             mint,
             token_program,
-            clock,
         ] = accounts
         else {
             return Err(ProgramError::NotEnoughAccountKeys);
@@ -58,7 +56,6 @@ impl<'a> TryFrom<&'a [AccountView]> for WithdrawPayeeAccounts<'a> {
             payer,
             mint,
             token_program,
-            clock,
         })
     }
 }

@@ -755,12 +755,6 @@
             "isWritable": true,
             "kind": "instructionAccountNode",
             "name": "channel"
-          },
-          {
-            "isSigner": false,
-            "isWritable": false,
-            "kind": "instructionAccountNode",
-            "name": "clock"
           }
         ],
         "arguments": [
@@ -796,12 +790,6 @@
             "isWritable": true,
             "kind": "instructionAccountNode",
             "name": "channel"
-          },
-          {
-            "isSigner": false,
-            "isWritable": false,
-            "kind": "instructionAccountNode",
-            "name": "clock"
           }
         ],
         "arguments": [
@@ -934,12 +922,6 @@
             "isWritable": false,
             "kind": "instructionAccountNode",
             "name": "tokenProgram"
-          },
-          {
-            "isSigner": false,
-            "isWritable": false,
-            "kind": "instructionAccountNode",
-            "name": "clock"
           }
         ],
         "arguments": [
@@ -1011,12 +993,6 @@
             "isWritable": false,
             "kind": "instructionAccountNode",
             "name": "tokenProgram"
-          },
-          {
-            "isSigner": false,
-            "isWritable": false,
-            "kind": "instructionAccountNode",
-            "name": "clock"
           }
         ],
         "arguments": [

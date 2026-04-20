@@ -24,7 +24,6 @@ import {
   type Instruction,
   type InstructionWithAccounts,
   type InstructionWithData,
-  type ReadonlyAccount,
   type ReadonlySignerAccount,
   type ReadonlyUint8Array,
   type TransactionSigner,
@@ -46,7 +45,6 @@ export type RequestCloseInstruction<
   TProgram extends string = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
   TAccountPayer extends string | AccountMeta<string> = string,
   TAccountChannel extends string | AccountMeta<string> = string,
-  TAccountClock extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
 > = Instruction<TProgram> &
   InstructionWithData<ReadonlyUint8Array> &
@@ -59,9 +57,6 @@ export type RequestCloseInstruction<
       TAccountChannel extends string
         ? WritableAccount<TAccountChannel>
         : TAccountChannel,
-      TAccountClock extends string
-        ? ReadonlyAccount<TAccountClock>
-        : TAccountClock,
       ...TRemainingAccounts,
     ]
   >;
@@ -94,27 +89,19 @@ export function getRequestCloseInstructionDataCodec(): FixedSizeCodec<
 export type RequestCloseInput<
   TAccountPayer extends string = string,
   TAccountChannel extends string = string,
-  TAccountClock extends string = string,
 > = {
   payer: TransactionSigner<TAccountPayer>;
   channel: Address<TAccountChannel>;
-  clock: Address<TAccountClock>;
 };
 
 export function getRequestCloseInstruction<
   TAccountPayer extends string,
   TAccountChannel extends string,
-  TAccountClock extends string,
   TProgramAddress extends Address = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
 >(
-  input: RequestCloseInput<TAccountPayer, TAccountChannel, TAccountClock>,
+  input: RequestCloseInput<TAccountPayer, TAccountChannel>,
   config?: { programAddress?: TProgramAddress },
-): RequestCloseInstruction<
-  TProgramAddress,
-  TAccountPayer,
-  TAccountChannel,
-  TAccountClock
-> {
+): RequestCloseInstruction<TProgramAddress, TAccountPayer, TAccountChannel> {
   // Program address.
   const programAddress =
     config?.programAddress ?? PAYMENT_CHANNELS_PROGRAM_ADDRESS;
@@ -123,7 +110,6 @@ export function getRequestCloseInstruction<
   const originalAccounts = {
     payer: { value: input.payer ?? null, isWritable: false },
     channel: { value: input.channel ?? null, isWritable: true },
-    clock: { value: input.clock ?? null, isWritable: false },
   };
   const accounts = originalAccounts as Record<
     keyof typeof originalAccounts,
@@ -135,15 +121,13 @@ export function getRequestCloseInstruction<
     accounts: [
       getAccountMeta("payer", accounts.payer),
       getAccountMeta("channel", accounts.channel),
-      getAccountMeta("clock", accounts.clock),
     ],
     data: getRequestCloseInstructionDataEncoder().encode({}),
     programAddress,
   } as RequestCloseInstruction<
     TProgramAddress,
     TAccountPayer,
-    TAccountChannel,
-    TAccountClock
+    TAccountChannel
   >);
 }
 
@@ -155,7 +139,6 @@ export type ParsedRequestCloseInstruction<
   accounts: {
     payer: TAccountMetas[0];
     channel: TAccountMetas[1];
-    clock: TAccountMetas[2];
   };
   data: RequestCloseInstructionData;
 };
@@ -168,12 +151,12 @@ export function parseRequestCloseInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedRequestCloseInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 3) {
+  if (instruction.accounts.length < 2) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 3,
+        expectedAccountMetas: 2,
       },
     );
   }
@@ -185,11 +168,7 @@ export function parseRequestCloseInstruction<
   };
   return {
     programAddress: instruction.programAddress,
-    accounts: {
-      payer: getNextAccount(),
-      channel: getNextAccount(),
-      clock: getNextAccount(),
-    },
+    accounts: { payer: getNextAccount(), channel: getNextAccount() },
     data: getRequestCloseInstructionDataDecoder().decode(instruction.data),
   };
 }

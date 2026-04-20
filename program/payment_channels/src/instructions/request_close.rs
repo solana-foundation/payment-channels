@@ -15,21 +15,16 @@ pub struct RequestCloseAccounts<'a> {
     /// [`Closing`](crate::ChannelStatus::Closing),
     /// [`closure_started_at`](crate::Channel::closure_started_at) → `now`.
     pub channel: &'a AccountView,
-    pub clock: &'a AccountView,
 }
 
 impl<'a> TryFrom<&'a [AccountView]> for RequestCloseAccounts<'a> {
     type Error = ProgramError;
 
     fn try_from(accounts: &'a [AccountView]) -> Result<Self, Self::Error> {
-        let [payer, channel, clock] = accounts else {
+        let [payer, channel] = accounts else {
             return Err(ProgramError::NotEnoughAccountKeys);
         };
-        Ok(Self {
-            payer,
-            channel,
-            clock,
-        })
+        Ok(Self { payer, channel })
     }
 }
 

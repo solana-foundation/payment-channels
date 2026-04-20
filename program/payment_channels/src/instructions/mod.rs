@@ -115,19 +115,14 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "payer", signer)),
-        codama(account(name = "channel", writable)),
-        codama(account(name = "clock"))
+        codama(account(name = "channel", writable))
     )]
     RequestClose = 4,
 
     /// Permissionless post-grace crank: freezes the watermark and moves
     /// `CLOSING → FINALIZED` once the grace has elapsed; resets
     /// [`closure_started_at`](crate::Channel::closure_started_at) to 0.
-    #[cfg_attr(
-        feature = "idl",
-        codama(account(name = "channel", writable)),
-        codama(account(name = "clock"))
-    )]
+    #[cfg_attr(feature = "idl", codama(account(name = "channel", writable)))]
     Finalize = 5,
 
     /// Permissionless crank. Verifies the committed preimage and pays
@@ -159,8 +154,7 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
         codama(account(name = "channel_token_account", writable)),
         codama(account(name = "payer_token_account", writable)),
         codama(account(name = "mint")),
-        codama(account(name = "token_program")),
-        codama(account(name = "clock"))
+        codama(account(name = "token_program"))
     )]
     WithdrawPayer = 7,
 
@@ -180,8 +174,7 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
         codama(account(name = "payer_token_account", writable)),
         codama(account(name = "payer", writable)),
         codama(account(name = "mint")),
-        codama(account(name = "token_program")),
-        codama(account(name = "clock"))
+        codama(account(name = "token_program"))
     )]
     WithdrawPayee = 8,
 

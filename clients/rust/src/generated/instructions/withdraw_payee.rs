@@ -26,8 +26,6 @@ pub struct WithdrawPayee {
     pub mint: solana_address::Address,
 
     pub token_program: solana_address::Address,
-
-    pub clock: solana_address::Address,
 }
 
 impl WithdrawPayee {
@@ -40,7 +38,7 @@ impl WithdrawPayee {
         &self,
         remaining_accounts: &[solana_instruction::AccountMeta],
     ) -> solana_instruction::Instruction {
-        let mut accounts = Vec::with_capacity(8 + remaining_accounts.len());
+        let mut accounts = Vec::with_capacity(7 + remaining_accounts.len());
         accounts.push(solana_instruction::AccountMeta::new(self.channel, false));
         accounts.push(solana_instruction::AccountMeta::new(
             self.channel_token_account,
@@ -61,9 +59,6 @@ impl WithdrawPayee {
         accounts.push(solana_instruction::AccountMeta::new_readonly(
             self.token_program,
             false,
-        ));
-        accounts.push(solana_instruction::AccountMeta::new_readonly(
-            self.clock, false,
         ));
         accounts.extend_from_slice(remaining_accounts);
         let data = WithdrawPayeeInstructionData::new().try_to_vec().unwrap();
@@ -108,7 +103,6 @@ impl Default for WithdrawPayeeInstructionData {
 ///   4. `[writable]` payer
 ///   5. `[]` mint
 ///   6. `[]` token_program
-///   7. `[]` clock
 #[derive(Clone, Debug, Default)]
 pub struct WithdrawPayeeBuilder {
     channel: Option<solana_address::Address>,
@@ -118,7 +112,6 @@ pub struct WithdrawPayeeBuilder {
     payer: Option<solana_address::Address>,
     mint: Option<solana_address::Address>,
     token_program: Option<solana_address::Address>,
-    clock: Option<solana_address::Address>,
     __remaining_accounts: Vec<solana_instruction::AccountMeta>,
 }
 
@@ -170,11 +163,6 @@ impl WithdrawPayeeBuilder {
         self.token_program = Some(token_program);
         self
     }
-    #[inline(always)]
-    pub fn clock(&mut self, clock: solana_address::Address) -> &mut Self {
-        self.clock = Some(clock);
-        self
-    }
     /// Add an additional account to the instruction.
     #[inline(always)]
     pub fn add_remaining_account(&mut self, account: solana_instruction::AccountMeta) -> &mut Self {
@@ -206,7 +194,6 @@ impl WithdrawPayeeBuilder {
             payer: self.payer.expect("payer is not set"),
             mint: self.mint.expect("mint is not set"),
             token_program: self.token_program.expect("token_program is not set"),
-            clock: self.clock.expect("clock is not set"),
         };
 
         accounts.instruction_with_remaining_accounts(&self.__remaining_accounts)
@@ -228,8 +215,6 @@ pub struct WithdrawPayeeCpiAccounts<'a, 'b> {
     pub mint: &'b solana_account_info::AccountInfo<'a>,
 
     pub token_program: &'b solana_account_info::AccountInfo<'a>,
-
-    pub clock: &'b solana_account_info::AccountInfo<'a>,
 }
 
 /// `withdraw_payee` CPI instruction.
@@ -250,8 +235,6 @@ pub struct WithdrawPayeeCpi<'a, 'b> {
     pub mint: &'b solana_account_info::AccountInfo<'a>,
 
     pub token_program: &'b solana_account_info::AccountInfo<'a>,
-
-    pub clock: &'b solana_account_info::AccountInfo<'a>,
 }
 
 impl<'a, 'b> WithdrawPayeeCpi<'a, 'b> {
@@ -268,7 +251,6 @@ impl<'a, 'b> WithdrawPayeeCpi<'a, 'b> {
             payer: accounts.payer,
             mint: accounts.mint,
             token_program: accounts.token_program,
-            clock: accounts.clock,
         }
     }
     #[inline(always)]
@@ -294,7 +276,7 @@ impl<'a, 'b> WithdrawPayeeCpi<'a, 'b> {
         signers_seeds: &[&[&[u8]]],
         remaining_accounts: &[(&'b solana_account_info::AccountInfo<'a>, bool, bool)],
     ) -> solana_program_error::ProgramResult {
-        let mut accounts = Vec::with_capacity(8 + remaining_accounts.len());
+        let mut accounts = Vec::with_capacity(7 + remaining_accounts.len());
         accounts.push(solana_instruction::AccountMeta::new(
             *self.channel.key,
             false,
@@ -320,10 +302,6 @@ impl<'a, 'b> WithdrawPayeeCpi<'a, 'b> {
             *self.token_program.key,
             false,
         ));
-        accounts.push(solana_instruction::AccountMeta::new_readonly(
-            *self.clock.key,
-            false,
-        ));
         remaining_accounts.iter().for_each(|remaining_account| {
             accounts.push(solana_instruction::AccountMeta {
                 pubkey: *remaining_account.0.key,
@@ -338,7 +316,7 @@ impl<'a, 'b> WithdrawPayeeCpi<'a, 'b> {
             accounts,
             data,
         };
-        let mut account_infos = Vec::with_capacity(9 + remaining_accounts.len());
+        let mut account_infos = Vec::with_capacity(8 + remaining_accounts.len());
         account_infos.push(self.__program.clone());
         account_infos.push(self.channel.clone());
         account_infos.push(self.channel_token_account.clone());
@@ -347,7 +325,6 @@ impl<'a, 'b> WithdrawPayeeCpi<'a, 'b> {
         account_infos.push(self.payer.clone());
         account_infos.push(self.mint.clone());
         account_infos.push(self.token_program.clone());
-        account_infos.push(self.clock.clone());
         remaining_accounts
             .iter()
             .for_each(|remaining_account| account_infos.push(remaining_account.0.clone()));
@@ -371,7 +348,6 @@ impl<'a, 'b> WithdrawPayeeCpi<'a, 'b> {
 ///   4. `[writable]` payer
 ///   5. `[]` mint
 ///   6. `[]` token_program
-///   7. `[]` clock
 #[derive(Clone, Debug)]
 pub struct WithdrawPayeeCpiBuilder<'a, 'b> {
     instruction: Box<WithdrawPayeeCpiBuilderInstruction<'a, 'b>>,
@@ -388,7 +364,6 @@ impl<'a, 'b> WithdrawPayeeCpiBuilder<'a, 'b> {
             payer: None,
             mint: None,
             token_program: None,
-            clock: None,
             __remaining_accounts: Vec::new(),
         });
         Self { instruction }
@@ -438,11 +413,6 @@ impl<'a, 'b> WithdrawPayeeCpiBuilder<'a, 'b> {
         token_program: &'b solana_account_info::AccountInfo<'a>,
     ) -> &mut Self {
         self.instruction.token_program = Some(token_program);
-        self
-    }
-    #[inline(always)]
-    pub fn clock(&mut self, clock: &'b solana_account_info::AccountInfo<'a>) -> &mut Self {
-        self.instruction.clock = Some(clock);
         self
     }
     /// Add an additional account to the instruction.
@@ -507,8 +477,6 @@ impl<'a, 'b> WithdrawPayeeCpiBuilder<'a, 'b> {
                 .instruction
                 .token_program
                 .expect("token_program is not set"),
-
-            clock: self.instruction.clock.expect("clock is not set"),
         };
         instruction.invoke_signed_with_remaining_accounts(
             signers_seeds,
@@ -527,7 +495,6 @@ struct WithdrawPayeeCpiBuilderInstruction<'a, 'b> {
     payer: Option<&'b solana_account_info::AccountInfo<'a>>,
     mint: Option<&'b solana_account_info::AccountInfo<'a>>,
     token_program: Option<&'b solana_account_info::AccountInfo<'a>>,
-    clock: Option<&'b solana_account_info::AccountInfo<'a>>,
     /// Additional instruction accounts `(AccountInfo, is_writable, is_signer)`.
     __remaining_accounts: Vec<(&'b solana_account_info::AccountInfo<'a>, bool, bool)>,
 }

@@ -23,7 +23,6 @@ import {
   type Instruction,
   type InstructionWithAccounts,
   type InstructionWithData,
-  type ReadonlyAccount,
   type ReadonlyUint8Array,
   type WritableAccount,
 } from "@solana/kit";
@@ -42,7 +41,6 @@ export function getFinalizeDiscriminatorBytes() {
 export type FinalizeInstruction<
   TProgram extends string = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
   TAccountChannel extends string | AccountMeta<string> = string,
-  TAccountClock extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
 > = Instruction<TProgram> &
   InstructionWithData<ReadonlyUint8Array> &
@@ -51,9 +49,6 @@ export type FinalizeInstruction<
       TAccountChannel extends string
         ? WritableAccount<TAccountChannel>
         : TAccountChannel,
-      TAccountClock extends string
-        ? ReadonlyAccount<TAccountClock>
-        : TAccountClock,
       ...TRemainingAccounts,
     ]
   >;
@@ -83,22 +78,17 @@ export function getFinalizeInstructionDataCodec(): FixedSizeCodec<
   );
 }
 
-export type FinalizeInput<
-  TAccountChannel extends string = string,
-  TAccountClock extends string = string,
-> = {
+export type FinalizeInput<TAccountChannel extends string = string> = {
   channel: Address<TAccountChannel>;
-  clock: Address<TAccountClock>;
 };
 
 export function getFinalizeInstruction<
   TAccountChannel extends string,
-  TAccountClock extends string,
   TProgramAddress extends Address = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
 >(
-  input: FinalizeInput<TAccountChannel, TAccountClock>,
+  input: FinalizeInput<TAccountChannel>,
   config?: { programAddress?: TProgramAddress },
-): FinalizeInstruction<TProgramAddress, TAccountChannel, TAccountClock> {
+): FinalizeInstruction<TProgramAddress, TAccountChannel> {
   // Program address.
   const programAddress =
     config?.programAddress ?? PAYMENT_CHANNELS_PROGRAM_ADDRESS;
@@ -106,7 +96,6 @@ export function getFinalizeInstruction<
   // Original accounts.
   const originalAccounts = {
     channel: { value: input.channel ?? null, isWritable: true },
-    clock: { value: input.clock ?? null, isWritable: false },
   };
   const accounts = originalAccounts as Record<
     keyof typeof originalAccounts,
@@ -115,13 +104,10 @@ export function getFinalizeInstruction<
 
   const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
   return Object.freeze({
-    accounts: [
-      getAccountMeta("channel", accounts.channel),
-      getAccountMeta("clock", accounts.clock),
-    ],
+    accounts: [getAccountMeta("channel", accounts.channel)],
     data: getFinalizeInstructionDataEncoder().encode({}),
     programAddress,
-  } as FinalizeInstruction<TProgramAddress, TAccountChannel, TAccountClock>);
+  } as FinalizeInstruction<TProgramAddress, TAccountChannel>);
 }
 
 export type ParsedFinalizeInstruction<
@@ -131,7 +117,6 @@ export type ParsedFinalizeInstruction<
   programAddress: Address<TProgram>;
   accounts: {
     channel: TAccountMetas[0];
-    clock: TAccountMetas[1];
   };
   data: FinalizeInstructionData;
 };
@@ -144,12 +129,12 @@ export function parseFinalizeInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedFinalizeInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 2) {
+  if (instruction.accounts.length < 1) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 2,
+        expectedAccountMetas: 1,
       },
     );
   }
@@ -161,7 +146,7 @@ export function parseFinalizeInstruction<
   };
   return {
     programAddress: instruction.programAddress,
-    accounts: { channel: getNextAccount(), clock: getNextAccount() },
+    accounts: { channel: getNextAccount() },
     data: getFinalizeInstructionDataDecoder().decode(instruction.data),
   };
 }

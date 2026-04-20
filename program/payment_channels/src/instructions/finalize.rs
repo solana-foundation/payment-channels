@@ -17,17 +17,16 @@ pub struct FinalizeAccounts<'a> {
     /// [`Finalized`](crate::ChannelStatus::Finalized),
     /// [`closure_started_at`](crate::Channel::closure_started_at) → 0.
     pub channel: &'a AccountView,
-    pub clock: &'a AccountView,
 }
 
 impl<'a> TryFrom<&'a [AccountView]> for FinalizeAccounts<'a> {
     type Error = ProgramError;
 
     fn try_from(accounts: &'a [AccountView]) -> Result<Self, Self::Error> {
-        let [channel, clock] = accounts else {
+        let [channel] = accounts else {
             return Err(ProgramError::NotEnoughAccountKeys);
         };
-        Ok(Self { channel, clock })
+        Ok(Self { channel })
     }
 }
 

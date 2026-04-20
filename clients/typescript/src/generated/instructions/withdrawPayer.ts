@@ -50,7 +50,6 @@ export type WithdrawPayerInstruction<
   TAccountPayerTokenAccount extends string | AccountMeta<string> = string,
   TAccountMint extends string | AccountMeta<string> = string,
   TAccountTokenProgram extends string | AccountMeta<string> = string,
-  TAccountClock extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
 > = Instruction<TProgram> &
   InstructionWithData<ReadonlyUint8Array> &
@@ -75,9 +74,6 @@ export type WithdrawPayerInstruction<
       TAccountTokenProgram extends string
         ? ReadonlyAccount<TAccountTokenProgram>
         : TAccountTokenProgram,
-      TAccountClock extends string
-        ? ReadonlyAccount<TAccountClock>
-        : TAccountClock,
       ...TRemainingAccounts,
     ]
   >;
@@ -114,7 +110,6 @@ export type WithdrawPayerInput<
   TAccountPayerTokenAccount extends string = string,
   TAccountMint extends string = string,
   TAccountTokenProgram extends string = string,
-  TAccountClock extends string = string,
 > = {
   payer: TransactionSigner<TAccountPayer>;
   channel: Address<TAccountChannel>;
@@ -122,7 +117,6 @@ export type WithdrawPayerInput<
   payerTokenAccount: Address<TAccountPayerTokenAccount>;
   mint: Address<TAccountMint>;
   tokenProgram: Address<TAccountTokenProgram>;
-  clock: Address<TAccountClock>;
 };
 
 export function getWithdrawPayerInstruction<
@@ -132,7 +126,6 @@ export function getWithdrawPayerInstruction<
   TAccountPayerTokenAccount extends string,
   TAccountMint extends string,
   TAccountTokenProgram extends string,
-  TAccountClock extends string,
   TProgramAddress extends Address = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
 >(
   input: WithdrawPayerInput<
@@ -141,8 +134,7 @@ export function getWithdrawPayerInstruction<
     TAccountChannelTokenAccount,
     TAccountPayerTokenAccount,
     TAccountMint,
-    TAccountTokenProgram,
-    TAccountClock
+    TAccountTokenProgram
   >,
   config?: { programAddress?: TProgramAddress },
 ): WithdrawPayerInstruction<
@@ -152,8 +144,7 @@ export function getWithdrawPayerInstruction<
   TAccountChannelTokenAccount,
   TAccountPayerTokenAccount,
   TAccountMint,
-  TAccountTokenProgram,
-  TAccountClock
+  TAccountTokenProgram
 > {
   // Program address.
   const programAddress =
@@ -173,7 +164,6 @@ export function getWithdrawPayerInstruction<
     },
     mint: { value: input.mint ?? null, isWritable: false },
     tokenProgram: { value: input.tokenProgram ?? null, isWritable: false },
-    clock: { value: input.clock ?? null, isWritable: false },
   };
   const accounts = originalAccounts as Record<
     keyof typeof originalAccounts,
@@ -189,7 +179,6 @@ export function getWithdrawPayerInstruction<
       getAccountMeta("payerTokenAccount", accounts.payerTokenAccount),
       getAccountMeta("mint", accounts.mint),
       getAccountMeta("tokenProgram", accounts.tokenProgram),
-      getAccountMeta("clock", accounts.clock),
     ],
     data: getWithdrawPayerInstructionDataEncoder().encode({}),
     programAddress,
@@ -200,8 +189,7 @@ export function getWithdrawPayerInstruction<
     TAccountChannelTokenAccount,
     TAccountPayerTokenAccount,
     TAccountMint,
-    TAccountTokenProgram,
-    TAccountClock
+    TAccountTokenProgram
   >);
 }
 
@@ -217,7 +205,6 @@ export type ParsedWithdrawPayerInstruction<
     payerTokenAccount: TAccountMetas[3];
     mint: TAccountMetas[4];
     tokenProgram: TAccountMetas[5];
-    clock: TAccountMetas[6];
   };
   data: WithdrawPayerInstructionData;
 };
@@ -230,12 +217,12 @@ export function parseWithdrawPayerInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedWithdrawPayerInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 7) {
+  if (instruction.accounts.length < 6) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 7,
+        expectedAccountMetas: 6,
       },
     );
   }
@@ -254,7 +241,6 @@ export function parseWithdrawPayerInstruction<
       payerTokenAccount: getNextAccount(),
       mint: getNextAccount(),
       tokenProgram: getNextAccount(),
-      clock: getNextAccount(),
     },
     data: getWithdrawPayerInstructionDataDecoder().decode(instruction.data),
   };
