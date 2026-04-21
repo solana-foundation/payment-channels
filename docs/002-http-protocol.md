@@ -2,17 +2,17 @@
 
 **Status:** Draft
 
-**Parent ADR:** ADR-001 — Payment Channel State Machine
+**Parent ADR:** ADR-001 Payment Channel State Machine
 
 ## Context
 
-ADR-001 specifies the on-chain channel program. This ADR specifies the **off-chain HTTP protocol** that drives it: how a client and merchant server coordinate to open a channel, pay per request via off-chain vouchers, and close the channel cooperatively or unilaterally. It aligns with the MPP [`draft-solana-session-00`](https://github.com/solana-foundation/mpp-specs/blob/a64edb477cfcb5e071e4f73f4227cf329dd1c4b5/specs/methods/solana/draft-solana-session-00.md) session-flow semantics.
+This ADR specifies the off-chain HTTP protocol for channel coordination, aligning with MPP [`draft-solana-session-00`](https://github.com/solana-foundation/mpp-specs/blob/a64edb477cfcb5e071e4f73f4227cf329dd1c4b5/specs/methods/solana/draft-solana-session-00.md).
 
 ## Decision
 
-The client and server exchange **payment credentials** (HTTP-layer objects that carry partially-signed on-chain transactions) and **vouchers** (payer-signed off-chain cumulative-amount assertions). The server is the fee payer for every on-chain transaction — clients never submit transactions directly. Two canonical flows cover the lifecycle:
+The client and server exchange payment credentials and vouchers. In the cooperative path, the server pays fees for all on-chain transactions. Escape-route instructions (`withdraw_payer`, `finalize`, `distribute`) are client-direct-to-RPC for when the server is unresponsive. Two canonical flows:
 
-- **Happy path**: discovery → open → metered requests → server-initiated cooperative close.
+- **Happy path**: discovery -> open -> metered requests -> server-initiated cooperative close.
 - **Client-initiated close**: client requests closure; resolves either within the grace period (merchant cooperates) or after the grace period (permissionless escape).
 
 All on-chain instruction names referenced below are defined in ADR-001.
@@ -21,48 +21,84 @@ All on-chain instruction names referenced below are defined in ADR-001.
 
 Actors: **C** = client (payer). **S** = server (merchant).
 
-| Direction | Method · Path | Payload | Drives on-chain ix | Purpose |
-|---|---|---|---|---|
-| S → C | `402 Payment Required` | open-challenge JSON (below) | — | Advertise open parameters when no channel exists |
-| C → S | `POST /channel/open` | `{ action: "open", tx: <base64> }` | `open` | Submit payer-signed partial `open` tx |
-| C → S | `GET <resource>` + `Authorization: Payment <base64url-JSON>` header | voucher (below), Ed25519-signed, wrapped in MPP credential | — (off-chain) | Pay for one metered request |
-| C → S | `POST /channel/topup` | `{ action: "topup", tx: <base64> }` | `topUp` | Submit payer-signed partial `topUp` tx |
-| C → S | `POST /channel/close` | `{ action: "close", tx: <base64> }` | `requestClose` | Submit payer-signed partial `requestClose` tx |
-| C → S | `POST /channel/withdraw_payer` | `{ action: "withdraw_payer", tx: <base64> }` | `withdraw_payer` | Submit payer-signed partial `withdraw_payer` tx |
-| C → S | `POST /channel/finalize` | — | `finalize` | Crank post-grace freeze of the watermark |
+| Direction | Transport | Wire shape | Drives on-chain ix |
+|---|---|---|---|
+| S → C | `402 Payment Required` + `WWW-Authenticate: Payment <auth-params>` header | auth-params: `id="…", method="solana", intent="session", request="<b64url-nopad(JCS(challenge-json))>"` | — |
+| C → S | `POST /channel/open` | body: MPP credential envelope, `payload.action="open"`, carries `transaction` (base64 partial-signed open tx) | `open` |
+| C → S | `GET <resource>` + `Authorization: Payment <b64url-nopad(JCS(credential-json))>` header | `payload.action="voucher"`, carries SignedVoucher | — (off-chain metering) |
+| C → S | `POST /channel/topup` | body: MPP credential envelope, `payload.action="topUp"` (camelCase), carries `transaction` | `topUp` |
+| C → S | `POST /channel/close` | body: MPP credential envelope, `payload.action="close"`, carries `transaction` | `requestClose` |
+| S → C | Any 200 that accepted a voucher or submitted an on-chain tx on the client's behalf | `Payment-Receipt: <b64url-nopad(JSON)>` header | — |
 
-Two categories:
+### Notes
 
-- **Credential endpoints** (`/open`, `/topup`, `/close`, `/withdraw_payer`) carry a **partially-signed Solana transaction** (base64). Payer signs the authority portion; the server co-signs as fee payer and submits. Required because these ixs need payer authority.
-- **Crank endpoints** (`/finalize`) have an **empty body**. The underlying on-chain ix is permissionless; the server submits as fee payer purely as a convenience for clients that don't want to manage an RPC connection. A client may equivalently submit it **directly to Solana RPC** without the server's cooperation — this is the escape hatch when the server is unresponsive.
+- **Minimum-deposit constraint:** `POST /channel/open` requires `payload.depositAmount >= challenge.methodDetails.minimumDeposit`. Enforced at the HTTP layer, not on-chain.
+- **Server-submitted ixs:** `settle`, `settleAndFinalize`, and `distribute` are submitted directly by the server. In the cooperative path, the server triggers `distribute` (often bundled with `settleAndFinalize`) and may run mid-session distributes from `OPEN`.
+- **Escape routes are direct-to-chain:** The client submits these directly to Solana RPC:
+  - `requestClose`: Payer-signed. Callable in `OPEN`. Starts the grace period.
+  - `withdraw_payer`: Payer-signed. Callable in `FINALIZED`. Refunds `deposit - settled`.
+  - `finalize`: Permissionless. Post-grace. Transitions `CLOSING -> FINALIZED`.
+  - `distribute`: Permissionless from `FINALIZED`. Caller supplies splits preimage. Program verifies hash, pays recipients, refunds payer if `payerWithdrawnAt == 0`, and tombstones.
+- **Escape-route self-sufficiency:** Clients persist the 402 challenge and `channelId` to independently invoke escape routes.
+- **Distribution commitment:** The PDA stores a 32-byte sha256 digest of the splits preimage. Splits are passed to `open` and hashed on-chain, making them publicly recoverable from instruction data. `distribute` requires the caller to supply the preimage for hash verification.
+- **Vouchers are purely off-chain:** No on-chain transactions during metered requests.
 
-Server-submitted ixs (`settle`, `settleAndFinalize`, `distribute`) are never exposed over HTTP; the server submits them on its own schedule. `distribute` is technically permissionless (preimage is the authority), but in practice only the server holds the preimage, so it acts as the de-facto caller — including for mid-session distributes from `OPEN` state when the server wants to realize accumulated `settled` revenue without closing the channel.
+### Server-Side Validation
 
-Vouchers are purely off-chain — no tx involved.
+To avoid paying Solana network fees for invalid transactions and to ensure protocol security, the server MUST perform the following validations off-chain before submitting any transactions:
 
-**Open-challenge body** (returned in `402`):
+1. **`POST /channel/open` Payload Validation:** The server MUST strictly validate that the `distributionSplits`, `payee`, and `mint` in the payload exactly match what it requested in the `402` challenge. Failing to do so allows a malicious client to alter the distribution to themselves.
+2. **Voucher Validation:** Before accepting a metered request or submitting `settle` / `settleAndFinalize`, the server MUST verify the Ed25519 signature over the Borsh-serialized voucher, check that `cumulativeAmount <= deposit`, and ensure the voucher is fresh (`expiresAt` is null or in the future).
+3. **Cooperative Close Optimization:** When a cooperative server receives `POST /channel/close` with a final voucher, it SHOULD discard the `requestClose` transaction and immediately submit `settleAndFinalize` + `distribute`. This bypasses the `CLOSING` state entirely, instantly finalizing the channel and saving fees.
+
+**Challenge `request` object** (JCS-canonicalized then base64url-nopad into the `request` auth-param of `WWW-Authenticate: Payment`):
 
 ```json
 {
-  "action": "open",
-  "payee": "<pubkey base58>",
-  "mint": "<pubkey base58>",
-  "minimumDeposit": "<u64 decimal string>",
-  "distributionHash": "<16 bytes hex>",
-  "authorizedSigner": "<pubkey base58, may equal payer>",
-  "gracePeriod": <duration in seconds — stored per-channel on-chain at `open`>
+  "amount": "<u64 decimal string — price per unit, in token base units>",
+  "unitType": "<e.g. 'request' | 'token' | 'byte' — OPTIONAL>",
+  "recipient": "<merchant pubkey base58>",
+  "currency": "<SPL mint pubkey base58 — wrap SOL to wSOL>",
+  "description": "<human-readable — OPTIONAL>",
+  "externalId": "<server correlation id — OPTIONAL>",
+  "methodDetails": {
+    "network": "<'mainnet-beta' | 'devnet' | 'localnet' — OPTIONAL, default mainnet-beta>",
+    "channelProgram": "<pubkey base58 — REQUIRED>",
+    "channelId": "<pubkey base58 — OPTIONAL, resume existing channel>",
+    "decimals": <integer 0-9 — REQUIRED when currency is an SPL mint>,
+    "tokenProgram": "<pubkey base58 — OPTIONAL, SPL-Token or Token-2022>",
+    "feePayer": <bool — OPTIONAL, true enables gasless flow>,
+    "feePayerKey": "<pubkey base58 — REQUIRED when feePayer=true>",
+    "minVoucherDelta": "<u64 decimal string — OPTIONAL; server-policy hint, not enforced on-chain>",
+    "ttlSeconds": <integer — OPTIONAL; server-policy hint for voucher `expiresAt`, not enforced on-chain>,
+    "gracePeriodSeconds": <integer — OPTIONAL, recommended 900>,
+
+    // Solana-session extensions (not in MPP core; documented in Extensions section):
+    "distributionSplits": [
+      { "recipient": "<pubkey base58>", "shareBps": <integer 1–10000> }
+      // 1..=MAX_SPLITS entries; every shareBps > 0; Σ shareBps == 10000.
+      // Merchant's proposed splits; forwarded by the client as inputs to
+      // `open` (program canonicalizes + hashes on-chain).
+    ],
+    "minimumDeposit": "<u64 decimal string — hard floor enforced at HTTP layer, not on-chain>"
+  }
 }
+
+`authorizedSigner` is client-chosen and carried in the open credential's `payload`.
 ```
 
-`minimumDeposit` is a **floor** enforced at the HTTP layer: the server MUST reject any `open` credential whose deposit is below this value. The on-chain program does not check it — a too-small channel only wastes the opener's own rent and fees and exposes the merchant to nothing, so the policy belongs at the application edge.
-
-**Voucher payload** (JCS-canonicalized, Ed25519-signed by payer, base58-encoded):
+**SignedVoucher** (carried in `payload.voucher` of credentials; the inner `voucher` object is Borsh-serialized and Ed25519-signed by the payer, producing the base58 `signature`):
 
 ```json
 {
-  "channelId": "<PDA address base58>",
-  "cumulativeAmount": "<u64 decimal string>",
-  "expiresAt": <optional unix seconds>
+  "voucher": {
+    "channelId": "<PDA address base58>",
+    "cumulativeAmount": "<u64 decimal string>",
+    "expiresAt": "<RFC 3339 timestamp — OPTIONAL>"
+  },
+  "signer": "<payer pubkey base58>",
+  "signature": "<base58 Ed25519 sig over Borsh(voucher)>",
+  "signatureType": "ed25519"
 }
 ```
 
@@ -90,8 +126,8 @@ sequenceDiagram
     end
 
     Note over S: (optional) mid-session distribute
-    S->>P: submit `distribute` ix (preimage)
-    P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients<br/>paid_out = settled<br/>state stays OPEN
+    S->>P: submit `distribute` ix
+    P->>P: transfer (settled − paid_out) → recipients (per on-chain splits)<br/>paid_out = settled<br/>state stays OPEN
     P-->>S: OK
 
     Note over S: Server decides to close
@@ -99,12 +135,10 @@ sequenceDiagram
     P->>P: verify voucher, set settled<br/>state = FINALIZED
     P-->>S: OK
 
-    S->>P: submit `distribute` ix (preimage)
-    P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients<br/>transfer (deposit − settled) → payer<br/>realloc to 8 bytes<br/>state = CLOSED
+    S->>P: submit `distribute` ix
+    P->>P: transfer (settled − paid_out) → recipients (per on-chain splits)<br/>transfer (deposit − settled) → payer<br/>realloc to 8 bytes<br/>state = tombstoned
     P-->>S: OK
 ```
-
-On first unpaid request the server returns `402` with the open-challenge. The client signs a partial `open` tx (authorizing the deposit transfer), POSTs it as a credential; the server co-signs as fee payer and submits. Once `OPEN`, the client pays per request with an Ed25519-signed voucher — purely off-chain. When the server closes, `settleAndFinalize` locks the final watermark and `distribute` executes the hash-committed splits plus payer refund, tombstoning the PDA.
 
 ## Client-Initiated Close
 
@@ -123,26 +157,203 @@ sequenceDiagram
 
     alt Within grace — merchant cooperates
         Note over S,P: now < closureStartedAt + GRACE
-        S->>P: submit `settleAndFinalize` ix (final voucher)
-        P->>P: lock watermark<br/>closureStartedAt = 0<br/>state = FINALIZED
+        S->>P: submit `settleAndFinalize` ix (voucher optional)
+        P->>P: lock watermark<br/>state = FINALIZED
         P-->>S: OK
 
-        S->>P: submit `distribute` ix (preimage)
-        P->>P: transfer (settled − paid_out) → recipients<br/>transfer (deposit − settled) → payer<br/>realloc to 8 bytes<br/>state = CLOSED
+        S->>P: submit `distribute` ix
+        P->>P: transfer (settled − paid_out) → recipients (per on-chain splits)<br/>transfer (deposit − settled) → payer
         P-->>S: OK
-    else Post-grace — permissionless escape
+    else Grace elapsed — anyone cranks `finalize` + `distribute` (direct RPC)
         Note over A,P: now ≥ closureStartedAt + GRACE
         A->>P: submit `finalize` ix (no voucher)
-        P->>P: freeze watermark<br/>closureStartedAt = 0<br/>state = FINALIZED
+        P->>P: freeze watermark<br/>state = FINALIZED
         P-->>A: OK
 
-        C->>S: POST withdraw_payer credential<br/>(payer-signed partial `withdraw_payer` tx)
-        S->>P: submit `withdraw_payer` ix
-        P->>P: transfer (deposit − settled) → payer<br/>payerWithdrawnAt = now
-        P-->>S: OK
-
-        Note over S,P: Merchant still needs `distribute` preimage to collect `settled`.<br/>Until revealed, `settled − paid_out` stays in escrow and the PDA is not tombstoned.
+        A->>P: submit `distribute` ix
+        P->>P: transfer (settled − paid_out) → recipients (per on-chain splits)<br/>(if payerWithdrawnAt == 0) transfer (deposit − settled) → payer
+        P-->>A: OK
     end
+
+    P->>P: realloc to 8 bytes<br/>state = tombstoned
 ```
 
-The client POSTs a close credential (payer-signed `requestClose` tx); the server submits it and grace begins. **Within grace**, the server finalizes cooperatively via `settleAndFinalize` + `distribute`. **Post-grace**, anyone cranks `finalize` (permissionless, voucher-free) to move `CLOSING → FINALIZED`. The payer recovers `deposit − settled` at any time during `FINALIZED` via the standalone `withdraw_payer` ix. There is **no preimage-free payee payout**: to collect `settled` and tombstone the PDA, the merchant must submit `distribute` with the committed preimage — if they never do, the `settled` tranche stays in escrow indefinitely.
+## Wire Examples
+
+Concrete request/response blocks for each flow.
+
+**Example 1: 402 challenge (S -> C)**
+
+Unauthenticated client requests a metered resource:
+
+```http
+GET /api/v1/inference/completion HTTP/1.1
+Host: merchant.example
+```
+
+Server responds with a `402` and `WWW-Authenticate: Payment` challenge:
+
+```http
+HTTP/1.1 402 Payment Required
+WWW-Authenticate: Payment id="018f1a2b-7d1e-7c4a-9e12-3d0f5a8b2c4d",
+    method="solana", intent="session",
+    request="eyJyZWNpcGllbnQiOiJQYXllZU1lcmNoYW50MTIzNC4uLiJ9"
+```
+
+`request` is the MPP auth-param. Decoding its base64url-nopad value yields the challenge JSON:
+
+```json
+{
+  "amount": "10",
+  "unitType": "request",
+  "recipient": "PayeeMerchant1234567890abcdefghijklmnop",
+  "currency": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+  "methodDetails": {
+    "network": "mainnet-beta",
+    "channelProgram": "PayCh111111111111111111111111111111111111",
+    "decimals": 6,
+    "feePayer": true,
+    "feePayerKey": "SrvrFeePayer9876543210zyxwvutsrqponmlkji",
+    "gracePeriodSeconds": 900,
+    "distributionSplits": [
+      { "recipient": "PayeeMerchant1234567890abcdefghijklmnop", "shareBps": 9500 },
+      { "recipient": "PltfrmFee456789abcdefghijklmnopqrstuv",   "shareBps":  500 }
+    ],
+    "minimumDeposit": "1000000"
+  }
+}
+```
+
+**Example 2: `POST /channel/open` (C -> S)**
+
+```http
+POST /channel/open HTTP/1.1
+Host: merchant.example
+Content-Type: application/json
+
+{
+  "id": "018f1a2b-7d1e-7c4a-9e12-3d0f5a8b2c4d",
+  "method": "solana",
+  "intent": "session",
+  "payload": {
+    "action": "open",
+    "channelId": "ChA9XyZabcdef1234567890abcdef1234567890abc",
+    "payer": "PayerAbcdef1234567890abcdef1234567890abcde",
+    "payee": "PayeeMerchant1234567890abcdefghijklmnop",
+    "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "authorizedSigner": "PayerAbcdef1234567890abcdef1234567890abcde",
+    "salt": "42",
+    "bump": 254,
+    "depositAmount": "1000000",
+    "distributionSplits": [
+      { "recipient": "PayeeMerchant1234567890abcdefghijklmnop", "shareBps": 9500 },
+      { "recipient": "PltfrmFee456789abcdefghijklmnopqrstuv",   "shareBps":  500 }
+    ],
+    "transaction": "AQABA4...base64-partial-signed-open-tx..."
+  }
+}
+```
+
+**Example 3: Metered `GET` with voucher (C -> S)**
+
+```http
+GET /api/v1/inference/completion HTTP/1.1
+Host: merchant.example
+Authorization: Payment eyJpZCI6IjAxOGYxYTJiLi4uIiwibWV0aG9kIjoic29sYW5hIi...
+```
+
+`Authorization: Payment <…>` decodes to:
+
+```json
+{
+  "id": "018f1a2b-7d1e-7c4a-9e12-3d0f5a8b2c4d",
+  "method": "solana",
+  "intent": "session",
+  "payload": {
+    "action": "voucher",
+    "voucher": {
+      "voucher": {
+        "channelId": "ChA9XyZabcdef1234567890abcdef1234567890abc",
+        "cumulativeAmount": "42500"
+      },
+      "signer": "PayerAbcdef1234567890abcdef1234567890abcde",
+      "signature": "5J7k...base58-Ed25519-sig-64-bytes...",
+      "signatureType": "ed25519"
+    }
+  }
+}
+```
+
+**Example 4: `POST /channel/topup` (C -> S)**
+
+```http
+POST /channel/topup HTTP/1.1
+Content-Type: application/json
+
+{
+  "id": "018f1c3d-…",
+  "method": "solana",
+  "intent": "session",
+  "payload": {
+    "action": "topUp",
+    "channelId": "ChA9XyZabcdef1234567890abcdef1234567890abc",
+    "additionalAmount": "500000",
+    "transaction": "AQABA...base64-partial-signed-topUp-tx..."
+  }
+}
+```
+
+**Example 5: `POST /channel/close` (C -> S)**
+
+```http
+POST /channel/close HTTP/1.1
+Content-Type: application/json
+
+{
+  "id": "018f1d4e-…",
+  "method": "solana",
+  "intent": "session",
+  "payload": {
+    "action": "close",
+    "channelId": "ChA9XyZabcdef1234567890abcdef1234567890abc",
+    "transaction": "AQABA...base64-partial-signed-requestClose-tx...",
+    "voucher": {
+      "voucher": {
+        "channelId": "ChA9XyZabcdef1234567890abcdef1234567890abc",
+        "cumulativeAmount": "842500",
+        "expiresAt": "2026-04-20T18:30:00Z"
+      },
+      "signer": "PayerAbcdef1234567890abcdef1234567890abcde",
+      "signature": "5J7k...base58-Ed25519-sig...",
+      "signatureType": "ed25519"
+    }
+  }
+}
+```
+
+**Example 6: Successful response with `Payment-Receipt` (S -> C)**
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Payment-Receipt: eyJtZXRob2QiOiJzb2xhbmEiLCJpbnRlbnQiOiJzZXNzaW9uIi...
+
+{ "data": "...resource body or empty..." }
+```
+
+`Payment-Receipt` decodes to:
+
+```json
+{
+  "method": "solana",
+  "intent": "session",
+  "reference": "ChA9XyZabcdef1234567890abcdef1234567890abc",
+  "status": "success",
+  "timestamp": "2026-04-20T18:42:03Z",
+  "challengeId": "018f1a2b-7d1e-7c4a-9e12-3d0f5a8b2c4d",
+  "acceptedCumulative": "42500",
+  "spent": "250"
+}
+```
+
+On close-receipt responses (`POST /channel/close`), add `"txHash": "<base58 solana sig>"` and (if a final settle happened) `"refunded": "<u64 decimal>"`.
