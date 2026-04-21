@@ -125,8 +125,8 @@ sequenceDiagram
     end
 
     Note over S: (optional) mid-session distribute
-    S->>P: submit `distribute` ix
-    P->>P: transfer (settled − paid_out) → recipients (per on-chain splits)<br/>paid_out = settled<br/>state stays OPEN
+    S->>P: submit `distribute` ix (preimage)
+    P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients (per on-chain splits)<br/>paid_out = settled<br/>state stays OPEN
     P-->>S: OK
 
     Note over S: Server decides to close
@@ -134,8 +134,8 @@ sequenceDiagram
     P->>P: verify voucher, set settled<br/>state = FINALIZED
     P-->>S: OK
 
-    S->>P: submit `distribute` ix
-    P->>P: transfer (settled − paid_out) → recipients (per on-chain splits)<br/>transfer (deposit − settled) → payer<br/>realloc to 8 bytes<br/>state = tombstoned
+    S->>P: submit `distribute` ix (preimage)
+    P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients (per on-chain splits)<br/>transfer (deposit − settled) → payer<br/>realloc to 8 bytes<br/>state = tombstoned
     P-->>S: OK
 ```
 
@@ -154,8 +154,8 @@ sequenceDiagram
         P->>P: (if voucher) set settled<br/>state = FINALIZED
         P-->>S: OK
 
-        S->>P: submit `distribute` ix
-        P->>P: transfer (settled − paid_out) → recipients (per on-chain splits)<br/>transfer (deposit − settled) → payer<br/>realloc to 8 bytes<br/>state = tombstoned
+        S->>P: submit `distribute` ix (preimage)
+        P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients (per on-chain splits)<br/>transfer (deposit − settled) → payer<br/>realloc to 8 bytes<br/>state = tombstoned
         P-->>S: OK
         S->>C: 200 + receipt { txHash, refunded }
     else Forced — server unresponsive
@@ -167,8 +167,8 @@ sequenceDiagram
         A->>P: submit `finalize` ix (no voucher)
         P->>P: freeze watermark<br/>state = FINALIZED
 
-        A->>P: submit `distribute` ix
-        P->>P: transfer (settled − paid_out) → recipients (per on-chain splits)<br/>(if payerWithdrawnAt == 0) transfer (deposit − settled) → payer<br/>realloc to 8 bytes<br/>state = tombstoned
+        A->>P: submit `distribute` ix (preimage)
+        P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients (per on-chain splits)<br/>(if payerWithdrawnAt == 0) transfer (deposit − settled) → payer<br/>realloc to 8 bytes<br/>state = tombstoned
     end
 ```
 
