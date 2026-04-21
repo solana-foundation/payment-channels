@@ -38,7 +38,7 @@ Actors: **C** = client (payer). **S** = server (merchant).
   - `requestClose`: Payer-signed. Callable in `OPEN`. Starts the grace period.
   - `withdraw_payer`: Payer-signed. Callable in `FINALIZED`. Refunds `deposit - settled`.
   - `finalize`: Permissionless. Post-grace. Transitions `CLOSING -> FINALIZED`.
-  - `distribute`: Permissionless from `FINALIZED`. Caller supplies splits preimage. Program verifies hash, pays recipients, refunds payer if `payerWithdrawnAt == 0`, and tombstones.
+  - `distribute`: Permissionless in `OPEN` and `FINALIZED`. Caller supplies splits preimage; program verifies hash against `Channel.distribution_hash`. From `OPEN`, advances `paid_out` by paying `settled - paid_out` to recipients (channel stays OPEN). From `FINALIZED`, also refunds `deposit - settled` to the payer (if `payerWithdrawnAt == 0`) and tombstones the PDA.
 - **Escape-route self-sufficiency:** Clients persist the 402 challenge and `channelId` to independently invoke escape routes.
 - **Distribution commitment:** The PDA stores a 32-byte sha256 digest of the splits preimage. Splits are passed to `open` and hashed on-chain, making them publicly recoverable from instruction data. `distribute` requires the caller to supply the preimage for hash verification.
 - **Vouchers are purely off-chain:** No on-chain transactions during metered requests.
