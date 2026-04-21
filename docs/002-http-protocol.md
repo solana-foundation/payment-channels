@@ -10,10 +10,10 @@ This ADR specifies the off-chain HTTP protocol for channel coordination, alignin
 
 ## Decision
 
-The client and server exchange payment credentials and vouchers. In the cooperative path, the server pays fees for all on-chain transactions. Escape-route instructions (`withdraw_payer`, `finalize`, `distribute`) are client-direct-to-RPC for when the server is unresponsive. Two canonical flows:
+The client and server exchange payment credentials and vouchers. In the cooperative path, the server pays fees for the on-chain transactions it submits. Escape-route instructions (`requestClose`, `withdraw_payer`, `finalize`, `distribute`) are client-direct-to-RPC for when the server is unresponsive. Two canonical flows:
 
-- **Happy path**: discovery -> open -> metered requests -> server-initiated cooperative close.
-- **Client-initiated close**: client requests closure; resolves either within the grace period (merchant cooperates) or after the grace period (permissionless escape).
+- **Happy path**: discovery -> open -> metered requests -> cooperative close (client `POST /channel/close`, server submits `settleAndFinalize` optionally bundled with `distribute`).
+- **Forced close**: client broadcasts `requestClose` directly to RPC; after grace, anyone cranks `finalize` + `distribute`.
 
 All on-chain instruction names referenced below are defined in ADR-001.
 
@@ -27,7 +27,7 @@ Actors: **C** = client (payer). **S** = server (merchant).
 | C → S | `POST /channel/open` | body: MPP credential envelope, `payload.action="open"`, carries `transaction` (base64 partial-signed open tx) | `open` |
 | C → S | `GET <resource>` + `Authorization: Payment <b64url-nopad(JCS(credential-json))>` header | `payload.action="voucher"`, carries SignedVoucher | — (off-chain metering) |
 | C → S | `POST /channel/topup` | body: MPP credential envelope, `payload.action="topUp"` (camelCase), carries `transaction` | `topUp` |
-| C → S | `POST /channel/close` | body: MPP credential envelope, `payload.action="close"`, carries `transaction` | `requestClose` |
+| C → S | `POST /channel/close` | body: MPP credential envelope, `payload.action="close"`, optional `payload.voucher` (SignedVoucher); no pre-signed tx | `settleAndFinalize` (optionally bundled with `distribute`) |
 | S → C | Any 200 that accepted a voucher or submitted an on-chain tx on the client's behalf | `Payment-Receipt: <b64url-nopad(JSON)>` header | — |
 
 ### Notes
@@ -48,8 +48,7 @@ Actors: **C** = client (payer). **S** = server (merchant).
 To avoid paying Solana network fees for invalid transactions and to ensure protocol security, the server MUST perform the following validations off-chain before submitting any transactions:
 
 1. **`POST /channel/open` Payload Validation:** The server MUST strictly validate that the `distributionSplits`, `payee`, and `mint` in the payload exactly match what it requested in the `402` challenge. Failing to do so allows a malicious client to alter the distribution to themselves.
-2. **Voucher Validation:** Before accepting a metered request or submitting `settle` / `settleAndFinalize`, the server MUST verify the Ed25519 signature over the Borsh-serialized voucher, check that `cumulativeAmount <= deposit`, and ensure the voucher is fresh (`expiresAt` is null or in the future).
-3. **Cooperative Close Optimization:** When a cooperative server receives `POST /channel/close` with a final voucher, it SHOULD discard the `requestClose` transaction and immediately submit `settleAndFinalize` + `distribute`. This bypasses the `CLOSING` state entirely, instantly finalizing the channel and saving fees.
+2. **Voucher Validation:** Before accepting a metered request or submitting `settle` / `settleAndFinalize`, the server MUST verify the Ed25519 signature over the Borsh-serialized voucher, check that `cumulativeAmount <= deposit`, and ensure the voucher is fresh (`expiresAt` is null or in the future). The same validation applies to any `voucher` carried in `POST /channel/close`.
 
 **Challenge `request` object** (JCS-canonicalized then base64url-nopad into the `request` auth-param of `WWW-Authenticate: Payment`):
 
@@ -149,33 +148,28 @@ sequenceDiagram
     participant A as Anyone (cranker)
     participant P as Channel Program
 
-    C->>S: POST close credential<br/>(payer-signed partial `requestClose` tx)
-    S->>P: submit `requestClose` ix
-    P->>P: closureStartedAt = now<br/>state = CLOSING
-    P-->>S: OK
-    S->>C: 200 + { closureStartedAt, GRACE }
-
-    alt Within grace — merchant cooperates
-        Note over S,P: now < closureStartedAt + GRACE
+    alt Cooperative — server responsive
+        C->>S: POST /channel/close<br/>(optional final voucher, no pre-signed tx)
         S->>P: submit `settleAndFinalize` ix (voucher optional)
-        P->>P: lock watermark<br/>state = FINALIZED
+        P->>P: (if voucher) set settled<br/>state = FINALIZED
         P-->>S: OK
 
         S->>P: submit `distribute` ix
-        P->>P: transfer (settled − paid_out) → recipients (per on-chain splits)<br/>transfer (deposit − settled) → payer
+        P->>P: transfer (settled − paid_out) → recipients (per on-chain splits)<br/>transfer (deposit − settled) → payer<br/>realloc to 8 bytes<br/>state = tombstoned
         P-->>S: OK
-    else Grace elapsed — anyone cranks `finalize` + `distribute` (direct RPC)
-        Note over A,P: now ≥ closureStartedAt + GRACE
+        S->>C: 200 + receipt { txHash, refunded }
+    else Forced — server unresponsive
+        C->>P: submit `requestClose` ix (direct RPC)
+        P->>P: closureStartedAt = now<br/>state = CLOSING
+
+        Note over C,P: wait until now ≥ closureStartedAt + GRACE
+
         A->>P: submit `finalize` ix (no voucher)
         P->>P: freeze watermark<br/>state = FINALIZED
-        P-->>A: OK
 
         A->>P: submit `distribute` ix
-        P->>P: transfer (settled − paid_out) → recipients (per on-chain splits)<br/>(if payerWithdrawnAt == 0) transfer (deposit − settled) → payer
-        P-->>A: OK
+        P->>P: transfer (settled − paid_out) → recipients (per on-chain splits)<br/>(if payerWithdrawnAt == 0) transfer (deposit − settled) → payer<br/>realloc to 8 bytes<br/>state = tombstoned
     end
-
-    P->>P: realloc to 8 bytes<br/>state = tombstoned
 ```
 
 ## Wire Examples
@@ -316,7 +310,6 @@ Content-Type: application/json
   "payload": {
     "action": "close",
     "channelId": "ChA9XyZabcdef1234567890abcdef1234567890abc",
-    "transaction": "AQABA...base64-partial-signed-requestClose-tx...",
     "voucher": {
       "voucher": {
         "channelId": "ChA9XyZabcdef1234567890abcdef1234567890abc",
@@ -330,6 +323,8 @@ Content-Type: application/json
   }
 }
 ```
+
+`voucher` is OPTIONAL; omit it when no final settle is needed and the channel finalizes at the current on-chain `settled` watermark.
 
 **Example 6: Successful response with `Payment-Receipt` (S -> C)**
 
@@ -356,4 +351,4 @@ Payment-Receipt: eyJtZXRob2QiOiJzb2xhbmEiLCJpbnRlbnQiOiJzZXNzaW9uIi...
 }
 ```
 
-On close-receipt responses (`POST /channel/close`), add `"txHash": "<base58 solana sig>"` and (if a final settle happened) `"refunded": "<u64 decimal>"`.
+On close-receipt responses (`POST /channel/close`), add `"txHash": "<base58 solana sig>"` identifying the `settleAndFinalize` tx the server submitted (optionally bundled with `distribute`), and (if the bundled `distribute` ran) `"refunded": "<u64 decimal>"` for the `deposit - settled` leg paid back to the payer.
