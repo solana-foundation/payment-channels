@@ -10,7 +10,7 @@ This ADR specifies the channel lifecycle, instruction set, and on-chain PDA layo
 
 The program implements unidirectional payment channels. Channels are PDAs holding escrowed tokens. Payer-signed off-chain vouchers carry a cumulative amount committed to a `settled` watermark. The split config (a list of `(recipient, shareBps)` summing to 10000 bps) is passed to `open`. The program stores the 32-byte sha256 digest in `Channel.distribution_hash`. Splits are recoverable from the `open` instruction data. Token movement occurs at closure via two paths:
 
-- **Happy path (`settleAndFinalize` + `distribute`)**: Merchant commits the final voucher (transitions to `FINALIZED`) and runs `distribute` with the splits preimage. The program verifies the sha256 hash, pays `settled - paid_out` proportionally, refunds `deposit - settled` to the payer, and tombstones the PDA. These instructions SHOULD be bundled.
+- **Happy path (`settleAndFinalize` + `distribute`)**: Merchant commits the final voucher (transitions to `FINALIZED`) and runs `distribute` with the splits preimage. The program verifies the sha256 hash, pays `settled - paid_out` proportionally (giving any rounding dust to the final recipient), refunds `deposit - settled` to the payer, and tombstones the PDA. These instructions SHOULD be bundled.
 - **Unhappy path (post-grace permissionless crank)**: If the merchant fails to submit a voucher after `requestClose` starts the grace period, anyone can call `finalize` post-grace to transition to `FINALIZED`. Anyone can then call `distribute` using the publicly recoverable splits preimage. The payer can also pull their refund early during `FINALIZED` via `withdraw_payer`.
 
 Instructions determined by on-chain state are permissionless cranks. Authority is encoded in the channel state, not the signer.
@@ -85,7 +85,7 @@ Payer-signed off-chain payload authorizing cumulative spend. Committed on-chain 
 pub struct Voucher {
     pub channel_id:        Pubkey,        // JSON: base58 string
     pub cumulative_amount: u64,           // JSON: decimal ASCII string (base units)
-    pub expires_at:        Option<i64>,   // JSON: ISO 8601 string when Some, omitted when None
+    pub expires_at:        i64,           // JSON: ISO 8601 string when != 0, omitted when 0
 }
 
 /// Wire format. Carried inside the MPP `Authorization: Payment <base64url-JSON>`
@@ -128,26 +128,13 @@ pub enum SigType {
 | `distribute` | `FINALIZED → CLOSED` | `sha256(canonicalized preimage) == distribution_hash` (permissionless; tombstones the PDA) |
 | `withdraw_payer` | `FINALIZED → FINALIZED` | `payerWithdrawnAt == 0` |
 
-† **voucher fresh** = `voucher.expires_at == None` OR `now < voucher.expires_at`. Expired vouchers MUST be rejected to prevent merchants from settling stale authorizations after the payer's TTL has passed.
+† **voucher fresh** = `voucher.expires_at == 0` OR `now < voucher.expires_at`. Expired vouchers MUST be rejected to prevent merchants from settling stale authorizations after the payer's TTL has passed.
 
 ‡ **`closureStartedAt` semantics:** Set by `requestClose`. Gates `finalize` via `now >= closureStartedAt + grace_period`. Reset to `0` on transition to `FINALIZED`. Only `CLOSING` carries a live timestamp. Once `FINALIZED`, `distribute` and `withdraw_payer` are immediately callable. The payer's worst-case wait is one `grace_period`.
 
 ## Instructions
 
-| Instruction | Description                                                                                                                         | Caller | Signers |
-|---|-------------------------------------------------------------------------------------------------------------------------------------|---|---|
-| `open` | Creates the channel PDA, locks the deposit, and stores the sha256 digest of the caller-supplied splits preimage (`num_splits`, `recipients`, `shareBps`). Validates `1 ≤ num_splits ≤ MAX_SPLITS`, per-entry `shareBps > 0`, and `Σ shareBps == 10000`. Splits themselves are not stored on-chain — they live in the `open` tx's ix data. | anyone | payer |
-| `settle` | Advances the on-chain `settled` watermark against a payer-signed voucher. `OPEN` only. | merchant | merchant |
-| `topUp` | Adds to `deposit`. `OPEN` only — disallowed once `closureStartedAt > 0`. | payer | payer |
-| `settleAndFinalize` | Optionally commits a final voucher, locks the watermark, and transitions to `FINALIZED`. From `CLOSING`, callable only while the grace period is still open. | merchant | merchant |
-| `requestClose` | Starts the grace period by setting `closureStartedAt = now`. | payer | payer |
-| `finalize` | Freezes the current watermark and transitions `CLOSING → FINALIZED`. Permissionless, voucher-free; callable only after the grace period has expired. | anyone | any |
-| `distribute` | Caller re-supplies the splits preimage; program re-hashes via sha256 and compares against `Channel.distribution_hash`, rejecting on mismatch. Pays `settled − paid_out` to the preimage's `recipients` proportionally by `shareBps` and updates `paid_out`. From `OPEN`: channel stays open (mid-session realization). From `FINALIZED`: also refunds `deposit − settled` to the payer when `payerWithdrawnAt == 0`, then tombstones the PDA. | anyone | any |
-| `withdraw_payer` | Refunds `deposit − settled` to the payer and sets `payerWithdrawnAt = now`. Callable any time the channel is `FINALIZED`. Does not tombstone. | payer | payer |
-
-**Signers** lists transaction-level signers. Voucher signatures are verified via Ed25519 syscall. `any` indicates no specific account signature is required.
-
-**All ixs are fee-sponsorable.** The fee payer is distinct from the authority signer.
+See [ADR-003: Program Instructions Reference](./003-program-instructions.md) for the full per-instruction args + accounts listing.
 
 ## Splits Preimage Canonicalization
 
