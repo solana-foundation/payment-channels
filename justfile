@@ -84,11 +84,12 @@ events-e2e:
 check: generate-client
     cargo fmt --all -- --check
     cargo clippy --all-targets -- -D warnings
+    pnpm run format:check
     cd {{ts_client_dir}} && pnpm run typecheck
 
 fmt:
     cargo fmt --all
-    cd {{ts_client_dir}} && pnpm run format || true
+    pnpm run format
 
 # ---------- misc ----------
 
