@@ -22,6 +22,12 @@ pub unsafe trait Transmutable {
 }
 
 /// Reinterpret `bytes` as `&T`. Validates length only and alignment.
+///
+/// # Safety
+///
+/// Caller must ensure `bytes` is a valid bit-pattern for `T`. The `Transmutable`
+/// impl guarantees align-1 and no padding, so any `T::LEN`-sized byte sequence
+/// is a valid `T` as long as its fields satisfy `T`'s own invariants.
 #[inline(always)]
 pub unsafe fn load<T: Transmutable>(bytes: &[u8]) -> Result<&T, ProgramError> {
     const {
@@ -37,6 +43,11 @@ pub unsafe fn load<T: Transmutable>(bytes: &[u8]) -> Result<&T, ProgramError> {
 }
 
 /// Reinterpret `bytes` as `&mut T`. Validates length only and alignment.
+///
+/// # Safety
+///
+/// Same contract as [`load`]: caller must ensure `bytes` is a valid bit-pattern
+/// for `T`. Writes through the returned reference must preserve `T`'s invariants.
 #[inline(always)]
 pub unsafe fn load_mut<T: Transmutable>(bytes: &mut [u8]) -> Result<&mut T, ProgramError> {
     const {
