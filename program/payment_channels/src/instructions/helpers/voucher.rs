@@ -249,8 +249,7 @@ mod tests {
     /// path reads (`settled`, `deposit`, `authorized_signer`) are set;
     /// everything else is zero.
     fn make_channel(settled: u64, deposit: u64, authorized_signer: Address) -> Channel {
-        let bytes = [0u8; Channel::LEN];
-        let mut ch: Channel = unsafe { core::ptr::read(bytes.as_ptr() as *const Channel) };
+        let mut ch: Channel = unsafe { core::mem::zeroed() };
         ch.deposit = deposit;
         ch.settled = settled;
         ch.authorized_signer = authorized_signer;
