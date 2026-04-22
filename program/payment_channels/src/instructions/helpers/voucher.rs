@@ -115,7 +115,7 @@ mod payload {
 
 mod ed25519_ix {
     //! Ed25519 precompile ix parser.
-    //! 
+    //!
     //! All magic constants and layouts are sourced from the official Solana documentation.
     //! https://solana.com/docs/core/programs/precompiles#verify-ed25519-signature
 
@@ -391,7 +391,13 @@ mod tests {
     #[test]
     fn wrong_channel_id() {
         let ch = make_channel(0, 500, AUTH);
-        let v = make_voucher(Address::new_from_array([9u8; 32]), 100, 0, AUTH, AUTH_SIGNATURE);
+        let v = make_voucher(
+            Address::new_from_array([9u8; 32]),
+            100,
+            0,
+            AUTH,
+            AUTH_SIGNATURE,
+        );
         let msg = payload::build_signed_payload(&v);
         let parsed = valid_parsed(&msg);
         expect_err(
