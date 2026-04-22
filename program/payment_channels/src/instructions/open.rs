@@ -11,9 +11,9 @@ use crate::state::{Transmutable, load};
 /// Instruction discriminator byte for `open`.
 pub const DISCRIMINATOR: u8 = 1;
 
-/// Init payload. Fields land in the [`Channel`](crate::Channel) PDA either
-/// directly (deposit, grace_period, distribution_hash) or through seeds
-/// (salt).
+/// Init payload. `deposit`, `grace_period`, and `distribution_hash` are
+/// stored on the [`Channel`](crate::Channel) PDA; `salt` is a seed input
+/// (address-only, not persisted).
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]

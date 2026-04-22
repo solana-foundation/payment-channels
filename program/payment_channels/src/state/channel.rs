@@ -64,61 +64,61 @@ impl TryFrom<u8> for ChannelStatus {
 pub struct Channel {
     /// [`AccountDiscriminator::Channel`]. First byte so zero-initialized
     /// account bytes fail load before any field is interpreted.
-    pub discriminator: u8, //   0..1
+    pub discriminator: u8,
     /// [`CURRENT_CHANNEL_VERSION`] at `open`. Any other value is rejected
     /// on load, gating future PDA-layout migrations.
-    pub version: u8, //   1..2
+    pub version: u8,
     /// Canonical bump from `find_program_address` at `open`. Reused
     /// verbatim by subsequent ixs via `create_program_address`, avoiding
     /// rederivation cost.
-    pub bump: u8, //   2..3
+    pub bump: u8,
     /// [`ChannelStatus`] discriminant.
-    pub status: u8, //   3..4
+    pub status: u8,
     /// Initial escrow; immutable ceiling on [`Self::settled`]. Grows only
     /// via `topUp` while [`Self::status`] == [`ChannelStatus::Open`] and
     /// [`Self::closure_started_at`] == 0.
     #[cfg_attr(feature = "idl", codama(type = number(u64)))]
-    deposit: [u8; 8], //   4..12
+    deposit: [u8; 8],
     /// Cumulative authorized watermark. Advanced monotonically by signed
     /// vouchers in `settle` / `settleAndFinalize`; capped by
     /// [`Self::deposit`].
     #[cfg_attr(feature = "idl", codama(type = number(u64)))]
-    settled: [u8; 8], //  12..20
+    settled: [u8; 8],
     /// Cumulative tokens already paid out to merchant splits across
     /// `distribute` calls. Invariant: `paid_out` ≤ [`Self::settled`].
     /// Lets mid-session `distribute` run without double-paying.
     #[cfg_attr(feature = "idl", codama(type = number(u64)))]
-    paid_out: [u8; 8], //  20..28
+    paid_out: [u8; 8],
     /// Set to `now` by `requestClose` (starts grace) and reset to 0 on
     /// `CLOSING → FINALIZED` via either `settleAndFinalize` (mid-grace)
     /// or `finalize` (post-grace). Always 0 in `OPEN` and `FINALIZED`;
     /// only `CLOSING` carries a live timestamp.
     #[cfg_attr(feature = "idl", codama(type = number(i64)))]
-    closure_started_at: [u8; 8], //  28..36
+    closure_started_at: [u8; 8],
     /// Unix ts of the payer's one-shot refund via `withdraw_payer`; 0
     /// means not yet withdrawn. Gates the atomic refund leg inside
     /// `distribute` when it runs from `FINALIZED`.
     #[cfg_attr(feature = "idl", codama(type = number(i64)))]
-    payer_withdrawn_at: [u8; 8], //  36..44
+    payer_withdrawn_at: [u8; 8],
     /// Per-channel grace duration in seconds, set at `open`. Governs
     /// the `CLOSING → FINALIZED` unlock for permissionless `finalize`.
     #[cfg_attr(feature = "idl", codama(type = number(u32)))]
-    grace_period: [u8; 4], //  44..48
+    grace_period: [u8; 4],
     /// Blake3 commitment to the distribution preimage.
-    pub distribution_hash: [u8; 32], //  48..80
+    pub distribution_hash: [u8; 32],
     /// Refund destination and payer-side authority signer (required for
     /// `topUp`, `requestClose`, `withdraw_payer`).
-    pub payer: Address, //  80..112
+    pub payer: Address,
     /// PDA seed binding; retained on-struct because every ix that
     /// re-derives the channel address needs the original pubkey.
-    pub payee: Address, // 112..144
+    pub payee: Address,
     /// Pubkey that signs vouchers; equals [`Self::payer`] unless a
     /// delegate was bound at `open`. Every voucher's
     /// [`signer`](crate::VoucherArgs::signer) field must match this value.
-    pub authorized_signer: Address, // 144..176
+    pub authorized_signer: Address,
     /// Token mint bound at `open`. All escrow and payout transfers ride
     /// this mint.
-    pub mint: Address, // 176..208
+    pub mint: Address,
 }
 
 impl Channel {
