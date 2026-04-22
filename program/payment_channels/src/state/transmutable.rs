@@ -3,13 +3,7 @@
 //! Implementers store multi-byte primitives as `[u8; N]` byte arrays (with
 //! `from_le_bytes` / `to_le_bytes` accessors) so the struct's alignment is 1.
 //! [`load`] / [`load_mut`] then cast any source slice to `&T` / `&mut T`
-//! without alignment concerns — the source pointer can come from instruction
-//! data (any offset post-discriminator), account data, or anywhere else.
-//!
-//! Reference: `solana-program/token/pinocchio/interface/src/state/mod.rs`
-//! (`Transmutable` trait + shared `load<T>`) and
-//! `anza-xyz/pinocchio/programs/token-2022/src/state/{mint,account}.rs`
-//! (per-struct variant of the same idiom).
+//! without alignment concerns.
 
 use pinocchio::error::ProgramError;
 
@@ -27,12 +21,7 @@ pub unsafe trait Transmutable {
     const LEN: usize;
 }
 
-/// Reinterpret `bytes` as `&T`. Validates length only; semantic checks
-/// (discriminator, version, owner, ...) are the caller's responsibility.
-///
-/// # Safety
-///
-/// Caller must ensure `bytes` is a valid little-endian representation of `T`.
+/// Reinterpret `bytes` as `&T`. Validates length only and alignment.
 #[inline(always)]
 pub unsafe fn load<T: Transmutable>(bytes: &[u8]) -> Result<&T, ProgramError> {
     const {
@@ -47,11 +36,7 @@ pub unsafe fn load<T: Transmutable>(bytes: &[u8]) -> Result<&T, ProgramError> {
     Ok(unsafe { &*(bytes.as_ptr() as *const T) })
 }
 
-/// Mutable variant of [`load`].
-///
-/// # Safety
-///
-/// Same contract as [`load`].
+/// Reinterpret `bytes` as `&mut T`. Validates length only and alignment.
 #[inline(always)]
 pub unsafe fn load_mut<T: Transmutable>(bytes: &mut [u8]) -> Result<&mut T, ProgramError> {
     const {
