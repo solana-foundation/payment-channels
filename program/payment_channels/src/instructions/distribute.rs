@@ -4,6 +4,7 @@ use core::mem::size_of;
 use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 
 use crate::errors::PaymentChannelsError;
+use crate::state::{Transmutable, load};
 
 /// Instruction discriminator byte for `distribute`.
 pub const DISCRIMINATOR: u8 = 7;
@@ -12,13 +13,14 @@ pub const DISCRIMINATOR: u8 = 7;
 pub const MAX_DISTRIBUTE_PREIMAGE: usize = 512;
 
 /// Distribute with splits preimage submission.
-#[repr(C, packed)]
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct DistributeArgs {
     /// Active byte count inside [`Self::preimage`]. Bounds both the
     /// Blake3 input and the splits parser.
-    pub preimage_len: u16,
+    #[cfg_attr(feature = "idl", codama(type = number(u16)))]
+    preimage_len: [u8; 2],
     /// Blake3-hashed on-chain; digest must equal
     /// [`Channel::distribution_hash`](crate::Channel::distribution_hash).
     /// Carries the splits config committed at `open`.
@@ -29,13 +31,23 @@ pub struct DistributeArgs {
 impl DistributeArgs {
     pub const LEN: usize = size_of::<Self>();
 
+    #[inline(always)]
+    pub fn preimage_len(&self) -> u16 {
+        u16::from_le_bytes(self.preimage_len)
+    }
+
     pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
-        if data.len() != Self::LEN {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-        Ok(unsafe { &*(data.as_ptr() as *const Self) })
+        unsafe { load::<Self>(data) }.map_err(|_| ProgramError::InvalidInstructionData)
     }
 }
+
+unsafe impl Transmutable for DistributeArgs {
+    const LEN: usize = 514;
+}
+
+const _: () = {
+    assert!(core::mem::size_of::<DistributeArgs>() == 514);
+};
 
 /// Permissionless with preimage-hash check, gates *who* is paid and *how* much.
 pub struct DistributeAccounts<'a> {

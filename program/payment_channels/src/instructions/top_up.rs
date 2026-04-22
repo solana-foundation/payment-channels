@@ -4,33 +4,45 @@ use core::mem::size_of;
 use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 
 use crate::errors::PaymentChannelsError;
+use crate::state::{Transmutable, load};
 
 /// Instruction discriminator byte for `topUp`.
 pub const DISCRIMINATOR: u8 = 3;
 
-/// Extends an `OPEN` channel's escrow. The full [`Self::amount`] is
-/// transferred from [`TopUpAccounts::payer_token_account`] to
+/// Extends an `OPEN` channel's escrow. The full amount is transferred from
+/// [`TopUpAccounts::payer_token_account`] to
 /// [`TopUpAccounts::channel_token_account`] and added to
 /// [`Channel::deposit`](crate::Channel::deposit), raising the ceiling on
 /// future [`settled`](crate::Channel::settled) growth.
-#[repr(C, packed)]
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct TopUpArgs {
     /// Base-unit amount to pull from the payer's token account into escrow.
-    pub amount: u64,
+    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    amount: [u8; 8],
 }
 
 impl TopUpArgs {
     pub const LEN: usize = size_of::<Self>();
 
+    #[inline(always)]
+    pub fn amount(&self) -> u64 {
+        u64::from_le_bytes(self.amount)
+    }
+
     pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
-        if data.len() != Self::LEN {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-        Ok(unsafe { &*(data.as_ptr() as *const Self) })
+        unsafe { load::<Self>(data) }.map_err(|_| ProgramError::InvalidInstructionData)
     }
 }
+
+unsafe impl Transmutable for TopUpArgs {
+    const LEN: usize = 8;
+}
+
+const _: () = {
+    assert!(core::mem::size_of::<TopUpArgs>() == 8);
+};
 
 pub struct TopUpAccounts<'a> {
     /// Must equal [`Channel::payer`](crate::Channel::payer).

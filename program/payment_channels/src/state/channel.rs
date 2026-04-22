@@ -9,6 +9,7 @@ use pinocchio::{
 
 use crate::errors::PaymentChannelsError;
 use crate::state::common::{AccountDiscriminator, CURRENT_CHANNEL_VERSION};
+use crate::state::transmutable::{Transmutable, load, load_mut};
 
 /// Fixed on-chain byte length of the [`Channel`] PDA. Asserted at compile
 /// time (see below).
@@ -56,8 +57,8 @@ impl TryFrom<u8> for ChannelStatus {
 
 /// Active channel PDA: escrowed deposit, settled watermark, closure
 /// timestamps, distribution commitment, and participant bindings. Fixed
-/// 208-byte `#[repr(C, packed)]` layout for zero-copy load.
-#[repr(C, packed)]
+/// 208-byte layout for zero-copy load.
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaAccount))]
 pub struct Channel {
@@ -76,28 +77,33 @@ pub struct Channel {
     /// Initial escrow; immutable ceiling on [`Self::settled`]. Grows only
     /// via `topUp` while [`Self::status`] == [`ChannelStatus::Open`] and
     /// [`Self::closure_started_at`] == 0.
-    pub deposit: u64, //   4..12
+    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    deposit: [u8; 8], //   4..12
     /// Cumulative authorized watermark. Advanced monotonically by signed
     /// vouchers in `settle` / `settleAndFinalize`; capped by
     /// [`Self::deposit`].
-    pub settled: u64, //  12..20
+    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    settled: [u8; 8], //  12..20
     /// Cumulative tokens already paid out to merchant splits across
-    /// `distribute` calls. Invariant:
-    /// `paid_out` ≤ [`Self::settled`]. Lets mid-session `distribute`
-    /// run without double-paying.
-    pub paid_out: u64, //  20..28
+    /// `distribute` calls. Invariant: `paid_out` ≤ [`Self::settled`].
+    /// Lets mid-session `distribute` run without double-paying.
+    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    paid_out: [u8; 8], //  20..28
     /// Set to `now` by `requestClose` (starts grace) and reset to 0 on
     /// `CLOSING → FINALIZED` via either `settleAndFinalize` (mid-grace)
     /// or `finalize` (post-grace). Always 0 in `OPEN` and `FINALIZED`;
     /// only `CLOSING` carries a live timestamp.
-    pub closure_started_at: i64, //  28..36
+    #[cfg_attr(feature = "idl", codama(type = number(i64)))]
+    closure_started_at: [u8; 8], //  28..36
     /// Unix ts of the payer's one-shot refund via `withdraw_payer`; 0
     /// means not yet withdrawn. Gates the atomic refund leg inside
     /// `distribute` when it runs from `FINALIZED`.
-    pub payer_withdrawn_at: i64, //  36..44
+    #[cfg_attr(feature = "idl", codama(type = number(i64)))]
+    payer_withdrawn_at: [u8; 8], //  36..44
     /// Per-channel grace duration in seconds, set at `open`. Governs
     /// the `CLOSING → FINALIZED` unlock for permissionless `finalize`.
-    pub grace_period: u32, //  44..48
+    #[cfg_attr(feature = "idl", codama(type = number(u32)))]
+    grace_period: [u8; 4], //  44..48
     /// Blake3 commitment to the distribution preimage.
     pub distribution_hash: [u8; 32], //  48..80
     /// Refund destination and payer-side authority signer (required for
@@ -117,6 +123,60 @@ pub struct Channel {
 
 impl Channel {
     pub const LEN: usize = CHANNEL_LEN;
+
+    #[inline(always)]
+    pub fn deposit(&self) -> u64 {
+        u64::from_le_bytes(self.deposit)
+    }
+    #[inline(always)]
+    pub fn set_deposit(&mut self, v: u64) {
+        self.deposit = v.to_le_bytes();
+    }
+
+    #[inline(always)]
+    pub fn settled(&self) -> u64 {
+        u64::from_le_bytes(self.settled)
+    }
+    #[inline(always)]
+    pub fn set_settled(&mut self, v: u64) {
+        self.settled = v.to_le_bytes();
+    }
+
+    #[inline(always)]
+    pub fn paid_out(&self) -> u64 {
+        u64::from_le_bytes(self.paid_out)
+    }
+    #[inline(always)]
+    pub fn set_paid_out(&mut self, v: u64) {
+        self.paid_out = v.to_le_bytes();
+    }
+
+    #[inline(always)]
+    pub fn closure_started_at(&self) -> i64 {
+        i64::from_le_bytes(self.closure_started_at)
+    }
+    #[inline(always)]
+    pub fn set_closure_started_at(&mut self, v: i64) {
+        self.closure_started_at = v.to_le_bytes();
+    }
+
+    #[inline(always)]
+    pub fn payer_withdrawn_at(&self) -> i64 {
+        i64::from_le_bytes(self.payer_withdrawn_at)
+    }
+    #[inline(always)]
+    pub fn set_payer_withdrawn_at(&mut self, v: i64) {
+        self.payer_withdrawn_at = v.to_le_bytes();
+    }
+
+    #[inline(always)]
+    pub fn grace_period(&self) -> u32 {
+        u32::from_le_bytes(self.grace_period)
+    }
+    #[inline(always)]
+    pub fn set_grace_period(&mut self, v: u32) {
+        self.grace_period = v.to_le_bytes();
+    }
 
     pub fn find_pda(
         payer: &Address,
@@ -159,30 +219,30 @@ impl Channel {
     }
 
     fn load(bytes: &[u8]) -> Result<&Self, ProgramError> {
-        if bytes.len() != Self::LEN {
-            return Err(ProgramError::InvalidAccountData);
-        }
-        if bytes[0] != AccountDiscriminator::Channel as u8 {
-            return Err(PaymentChannelsError::InvalidAccountDiscriminator.into());
-        }
-        if bytes[1] != CURRENT_CHANNEL_VERSION {
-            return Err(PaymentChannelsError::UnsupportedChannelVersion.into());
-        }
-        Ok(unsafe { &*(bytes.as_ptr() as *const Self) })
+        let channel = unsafe { load::<Self>(bytes) }?;
+        Self::validate_header(channel)?;
+        Ok(channel)
     }
 
     fn load_mut(bytes: &mut [u8]) -> Result<&mut Self, ProgramError> {
-        if bytes.len() != Self::LEN {
-            return Err(ProgramError::InvalidAccountData);
-        }
-        if bytes[0] != AccountDiscriminator::Channel as u8 {
+        let channel = unsafe { load_mut::<Self>(bytes) }?;
+        Self::validate_header(channel)?;
+        Ok(channel)
+    }
+
+    fn validate_header(channel: &Self) -> Result<(), ProgramError> {
+        if channel.discriminator != AccountDiscriminator::Channel as u8 {
             return Err(PaymentChannelsError::InvalidAccountDiscriminator.into());
         }
-        if bytes[1] != CURRENT_CHANNEL_VERSION {
+        if channel.version != CURRENT_CHANNEL_VERSION {
             return Err(PaymentChannelsError::UnsupportedChannelVersion.into());
         }
-        Ok(unsafe { &mut *(bytes.as_mut_ptr() as *mut Self) })
+        Ok(())
     }
+}
+
+unsafe impl Transmutable for Channel {
+    const LEN: usize = CHANNEL_LEN;
 }
 
 const _: () = {
