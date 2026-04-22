@@ -38,6 +38,4 @@ pub enum PaymentChannelsError {
     VoucherMessageMismatch = 11,
     #[error("Voucher signer does not match channel authorized_signer")]
     VoucherSignerMismatch = 12,
-    #[error("Voucher signature does not match Ed25519 ix signature")]
-    VoucherSignatureCrossCheckFailed = 13,
 }

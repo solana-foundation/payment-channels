@@ -15,9 +15,6 @@ use pinocchio::{Address, error::ProgramError};
 
 /// On-chain wire encoding of the voucher. Field order is re-packed vs.
 /// the off-chain JSON shape to make the struct zero-copy loadable.
-/// Ed25519-only; signature verification is offloaded to a caller-bundled
-/// Ed25519 native-program ix whose message bytes are read back via the
-/// Instructions sysvar.
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
@@ -32,16 +29,6 @@ pub struct VoucherArgs {
     pub expires_at: i64,
     /// Replay scope; must equal the [`Channel`](crate::Channel) PDA.
     pub channel_id: Address,
-    /// Voucher author. Must equal
-    /// [`Channel::authorized_signer`](crate::Channel::authorized_signer).
-    pub signer: Address,
-    /// Ed25519 signature over the Borsh serialization of
-    /// `Voucher { channel_id, cumulative_amount, expires_at }` — exactly
-    /// 48 bytes, fixed little-endian, no length prefix (see
-    /// [`helpers::voucher`]). Verified by matching
-    /// the preceding Ed25519 native-program ix's message bytes against
-    /// the re-encoded payload.
-    pub signature: [u8; 64],
 }
 
 /// Byte-0-dispatched instruction codomain. Each variant's discriminant

@@ -2,9 +2,9 @@
 //!
 //! Parses the caller-bundled Ed25519 precompile ix from the Instructions
 //! sysvar at `current - 1`, reconstructs the signed payload, and checks
-//! binding / freshness / cap / strict monotonicity / message / signer /
-//! signature cross-check against the channel state. Pure validator; the
-//! caller is responsible for writing [`Channel::settled`] back.
+//! binding / freshness / cap / strict monotonicity / message / precompile
+//! pubkey against the channel state. Pure validator; the caller is
+//! responsible for writing [`Channel::settled`] back.
 
 use pinocchio::{AccountView, Address, error::ProgramError, sysvars::instructions::Instructions};
 
@@ -73,15 +73,6 @@ fn verify_parsed(
     let authorized: Address = channel.authorized_signer;
     if parsed.pubkey != authorized.as_array() {
         return Err(PaymentChannelsError::VoucherSignerMismatch.into());
-    }
-    let v_signer: Address = voucher.signer;
-    if v_signer != authorized {
-        return Err(PaymentChannelsError::VoucherSignerMismatch.into());
-    }
-
-    let v_sig: [u8; 64] = voucher.signature;
-    if parsed.signature != v_sig {
-        return Err(PaymentChannelsError::VoucherSignatureCrossCheckFailed.into());
     }
 
     Ok(cumulative)
@@ -162,21 +153,32 @@ mod ed25519_ix {
     pub(super) struct Parsed<'a> {
         /// Ed25519 pubkey.
         pub pubkey: &'a [u8],
-        /// Ed25519 signature.
-        pub signature: &'a [u8],
         /// Ed25519 message.
         pub message: &'a [u8],
     }
+
+    /// Canonical inline ix data length.
+    const CANONICAL_IX_DATA_LEN: usize = MESSAGE_OFFSET + VOUCHER_PAYLOAD_SIZE;
 
     /// Parse a single-signature Ed25519 precompile ix with the canonical
     /// inline layout. Validates every field of `Ed25519SignatureOffsets`.
     pub(super) fn parse(data: &[u8]) -> Result<Parsed<'_>, ProgramError> {
         // Full canonical inline layout: `[num_sigs=1, pad=0, offsets×1, pubkey, signature, message]`.
+        // Guard — length. Pins the full 160-byte canonical layout.
+        if data.len() != CANONICAL_IX_DATA_LEN {
+            return Err(PaymentChannelsError::MalformedEd25519Instruction.into());
+        }
+
         // Guard — `num_signatures == 1`. N = 0 verifies nothing; N > 1
         // appends further offsets records whose signatures we never
         // parse, so the surrounding ix could appear "verified" while
         // those riders covered arbitrary attacker-chosen bytes.
         if data[0] != 1 {
+            return Err(PaymentChannelsError::MalformedEd25519Instruction.into());
+        }
+
+        // Guard — padding byte is zero.
+        if data[1] != 0 {
             return Err(PaymentChannelsError::MalformedEd25519Instruction.into());
         }
 
@@ -224,7 +226,6 @@ mod ed25519_ix {
 
         Ok(Parsed {
             pubkey: &data[PUBKEY_OFFSET..SIGNATURE_OFFSET],
-            signature: &data[SIGNATURE_OFFSET..MESSAGE_OFFSET],
             message,
         })
     }
@@ -242,7 +243,9 @@ mod tests {
     const AUTH: Address = Address::new_from_array([66u8; 32]);
     /// Other pubkey for wrong-pubkey tests.
     const OTHER_PUBKEY: Address = Address::new_from_array([85u8; 32]);
-    /// Voucher Signature.
+    /// Fill bytes for the 64-byte signature region of the synthetic
+    /// precompile ix. Never read by the verifier; kept distinctive so
+    /// accidental mis-slices show up in test failures.
     const AUTH_SIGNATURE: [u8; 64] = [154u8; 64];
 
     /// Build a [`Channel`] for fixtures: only the fields the voucher
@@ -259,19 +262,11 @@ mod tests {
     /// Assemble a [`VoucherArgs`] by logical argument order. Exists so
     /// tests don't have to know the `#[repr(C, packed)]` field order
     /// of the on-chain struct.
-    fn make_voucher(
-        channel_id: Address,
-        cumulative: u64,
-        expires_at: i64,
-        signer: Address,
-        signature: [u8; 64],
-    ) -> VoucherArgs {
+    fn make_voucher(channel_id: Address, cumulative: u64, expires_at: i64) -> VoucherArgs {
         VoucherArgs {
             cumulative_amount: cumulative,
             expires_at,
             channel_id,
-            signer,
-            signature,
         }
     }
 
@@ -324,7 +319,6 @@ mod tests {
     fn valid_parsed(message: &[u8]) -> ed25519_ix::Parsed<'_> {
         ed25519_ix::Parsed {
             pubkey: AUTH.as_array(),
-            signature: &AUTH_SIGNATURE,
             message,
         }
     }
@@ -340,7 +334,7 @@ mod tests {
             cumulative_amount: u64,
             expires_at: i64,
         }
-        let args = make_voucher(CHANNEL_ID, SAMPLE_CUMULATIVE, -1i64, AUTH, AUTH_SIGNATURE);
+        let args = make_voucher(CHANNEL_ID, SAMPLE_CUMULATIVE, -1i64);
         let built = payload::build_signed_payload(&args);
         let borshed = borsh::to_vec(&Voucher {
             channel_id: *CHANNEL_ID.as_array(),
@@ -356,7 +350,7 @@ mod tests {
     fn payload_layout_channel_id_first_then_cumulative_then_expiry() {
         const CUMULATIVE: u64 = u64::from_le_bytes([119, 102, 85, 68, 51, 34, 17, 0]);
         const EXPIRES_AT: i64 = i64::from_le_bytes([248, 249, 250, 251, 252, 253, 254, 127]);
-        let args = make_voucher(CHANNEL_ID, CUMULATIVE, EXPIRES_AT, AUTH, AUTH_SIGNATURE);
+        let args = make_voucher(CHANNEL_ID, CUMULATIVE, EXPIRES_AT);
         let built = payload::build_signed_payload(&args);
         assert_eq!(&built[..32], CHANNEL_ID.as_array());
         assert_eq!(&built[32..40], &CUMULATIVE.to_le_bytes());
@@ -368,7 +362,7 @@ mod tests {
     #[test]
     fn ok_strict_monotonic_no_expiry() {
         let ch = make_channel(100, 1_000, AUTH);
-        let v = make_voucher(CHANNEL_ID, 200, 0, AUTH, AUTH_SIGNATURE);
+        let v = make_voucher(CHANNEL_ID, 200, 0);
         let msg = payload::build_signed_payload(&v);
         let parsed = valid_parsed(&msg);
         let out = verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 1_000_000).unwrap();
@@ -378,7 +372,7 @@ mod tests {
     #[test]
     fn ok_expiry_in_future() {
         let ch = make_channel(100, 500, AUTH);
-        let v = make_voucher(CHANNEL_ID, 500, 2_000, AUTH, AUTH_SIGNATURE);
+        let v = make_voucher(CHANNEL_ID, 500, 2_000);
         let msg = payload::build_signed_payload(&v);
         let parsed = valid_parsed(&msg);
         let out = verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 1_999).unwrap();
@@ -390,13 +384,7 @@ mod tests {
     #[test]
     fn wrong_channel_id() {
         let ch = make_channel(0, 500, AUTH);
-        let v = make_voucher(
-            Address::new_from_array([9u8; 32]),
-            100,
-            0,
-            AUTH,
-            AUTH_SIGNATURE,
-        );
+        let v = make_voucher(Address::new_from_array([9u8; 32]), 100, 0);
         let msg = payload::build_signed_payload(&v);
         let parsed = valid_parsed(&msg);
         expect_err(
@@ -408,7 +396,7 @@ mod tests {
     #[test]
     fn now_equals_expires_at() {
         let ch = make_channel(0, 500, AUTH);
-        let v = make_voucher(CHANNEL_ID, 100, 500, AUTH, AUTH_SIGNATURE);
+        let v = make_voucher(CHANNEL_ID, 100, 500);
         let msg = payload::build_signed_payload(&v);
         let parsed = valid_parsed(&msg);
         expect_err(
@@ -420,7 +408,7 @@ mod tests {
     #[test]
     fn now_past_expires_at() {
         let ch = make_channel(0, 500, AUTH);
-        let v = make_voucher(CHANNEL_ID, 100, 500, AUTH, AUTH_SIGNATURE);
+        let v = make_voucher(CHANNEL_ID, 100, 500);
         let msg = payload::build_signed_payload(&v);
         let parsed = valid_parsed(&msg);
         expect_err(
@@ -432,7 +420,7 @@ mod tests {
     #[test]
     fn negative_expires_at_fails_closed() {
         let ch = make_channel(0, 500, AUTH);
-        let v = make_voucher(CHANNEL_ID, 100, -1, AUTH, AUTH_SIGNATURE);
+        let v = make_voucher(CHANNEL_ID, 100, -1);
         let msg = payload::build_signed_payload(&v);
         let parsed = valid_parsed(&msg);
         expect_err(
@@ -444,7 +432,7 @@ mod tests {
     #[test]
     fn cumulative_equals_settled() {
         let ch = make_channel(250, 500, AUTH);
-        let v = make_voucher(CHANNEL_ID, 250, 0, AUTH, AUTH_SIGNATURE);
+        let v = make_voucher(CHANNEL_ID, 250, 0);
         let msg = payload::build_signed_payload(&v);
         let parsed = valid_parsed(&msg);
         expect_err(
@@ -456,7 +444,7 @@ mod tests {
     #[test]
     fn cumulative_below_settled() {
         let ch = make_channel(250, 500, AUTH);
-        let v = make_voucher(CHANNEL_ID, 100, 0, AUTH, AUTH_SIGNATURE);
+        let v = make_voucher(CHANNEL_ID, 100, 0);
         let msg = payload::build_signed_payload(&v);
         let parsed = valid_parsed(&msg);
         expect_err(
@@ -468,7 +456,7 @@ mod tests {
     #[test]
     fn cumulative_zero_on_fresh_channel() {
         let ch = make_channel(0, 500, AUTH);
-        let v = make_voucher(CHANNEL_ID, 0, 0, AUTH, AUTH_SIGNATURE);
+        let v = make_voucher(CHANNEL_ID, 0, 0);
         let msg = payload::build_signed_payload(&v);
         let parsed = valid_parsed(&msg);
         expect_err(
@@ -480,7 +468,7 @@ mod tests {
     #[test]
     fn cumulative_above_deposit() {
         let ch = make_channel(0, 500, AUTH);
-        let v = make_voucher(CHANNEL_ID, 501, 0, AUTH, AUTH_SIGNATURE);
+        let v = make_voucher(CHANNEL_ID, 501, 0);
         let msg = payload::build_signed_payload(&v);
         let parsed = valid_parsed(&msg);
         expect_err(
@@ -513,21 +501,21 @@ mod tests {
 
     #[test]
     fn num_signatures_zero() {
-        let mut data = build_ix_data(AUTH.as_array(), b"msg", &AUTH_SIGNATURE);
+        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
         data[0] = 0;
         assert_malformed(parse_err(&data));
     }
 
     #[test]
     fn num_signatures_two() {
-        let mut data = build_ix_data(AUTH.as_array(), b"msg", &AUTH_SIGNATURE);
+        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
         data[0] = 2;
         assert_malformed(parse_err(&data));
     }
 
     #[test]
     fn signature_offset_non_canonical() {
-        let mut data = build_ix_data(AUTH.as_array(), b"msg", &AUTH_SIGNATURE);
+        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
         // signature_offset sits at offsets[0..2] → data[2..4]
         data[2..4].copy_from_slice(&49u16.to_le_bytes());
         assert_malformed(parse_err(&data));
@@ -535,7 +523,7 @@ mod tests {
 
     #[test]
     fn public_key_offset_non_canonical() {
-        let mut data = build_ix_data(AUTH.as_array(), b"msg", &AUTH_SIGNATURE);
+        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
         // public_key_offset sits at offsets[4..6] → data[6..8]
         data[6..8].copy_from_slice(&17u16.to_le_bytes());
         assert_malformed(parse_err(&data));
@@ -543,29 +531,56 @@ mod tests {
 
     #[test]
     fn message_data_offset_non_canonical() {
-        let mut data = build_ix_data(AUTH.as_array(), b"msg", &AUTH_SIGNATURE);
+        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
         // message_data_offset sits at offsets[8..10] → data[10..12]
         data[10..12].copy_from_slice(&113u16.to_le_bytes());
         assert_malformed(parse_err(&data));
     }
 
     #[test]
-    fn message_data_size_not_canonical_48() {
-        // build_ix_data writes `msg_size = message.len()`, so a 49-byte
-        // message makes the declared `message_data_size` = 49.
-        let data = build_ix_data(AUTH.as_array(), &[0u8; 49], &AUTH_SIGNATURE);
+    fn message_data_size_above_canonical_48() {
+        // Canonical 160-byte ix, but overwrite the declared
+        // `message_data_size` field at offsets[10..12] (= data[12..14])
+        // to 49. Length guard passes; the dedicated size-check fires.
+        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
+        data[12..14].copy_from_slice(&49u16.to_le_bytes());
         assert_malformed(parse_err(&data));
     }
 
     #[test]
     fn message_data_size_below_canonical_48() {
-        let data = build_ix_data(AUTH.as_array(), &[0u8; 47], &AUTH_SIGNATURE);
+        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
+        data[12..14].copy_from_slice(&47u16.to_le_bytes());
+        assert_malformed(parse_err(&data));
+    }
+
+    #[test]
+    fn ix_data_shorter_than_canonical() {
+        // 159 bytes — one shy of the canonical 160-byte layout. Must
+        // fail fast before any offsets are read, so short ixs return a
+        // clean error instead of panicking on out-of-bounds indexing.
+        let short = [0u8; 159];
+        assert_malformed(parse_err(&short));
+    }
+
+    #[test]
+    fn ix_data_longer_than_canonical() {
+        // 161 bytes — trailing byte past the pinned layout.
+        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
+        data.push(0u8);
+        assert_malformed(parse_err(&data));
+    }
+
+    #[test]
+    fn non_zero_padding_rejects() {
+        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
+        data[1] = 1;
         assert_malformed(parse_err(&data));
     }
 
     #[test]
     fn signature_instruction_index_not_u16_max() {
-        let mut data = build_ix_data(AUTH.as_array(), b"msg", &AUTH_SIGNATURE);
+        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
         // offsets[2..4] is signature_instruction_index
         data[4] = 0;
         data[5] = 0;
@@ -574,7 +589,7 @@ mod tests {
 
     #[test]
     fn public_key_instruction_index_not_u16_max() {
-        let mut data = build_ix_data(AUTH.as_array(), b"msg", &AUTH_SIGNATURE);
+        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
         // offsets[6..8] is pubkey_instruction_index
         data[8] = 0;
         data[9] = 0;
@@ -583,7 +598,7 @@ mod tests {
 
     #[test]
     fn message_instruction_index_not_u16_max() {
-        let mut data = build_ix_data(AUTH.as_array(), b"msg", &AUTH_SIGNATURE);
+        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
         // offsets[12..14] is message_instruction_index
         data[14] = 0;
         data[15] = 0;
@@ -595,7 +610,7 @@ mod tests {
     #[test]
     fn message_off_by_one_byte() {
         let ch = make_channel(0, 500, AUTH);
-        let v = make_voucher(CHANNEL_ID, 100, 0, AUTH, AUTH_SIGNATURE);
+        let v = make_voucher(CHANNEL_ID, 100, 0);
         let mut msg: Vec<u8> = payload::build_signed_payload(&v).to_vec();
         msg[0] ^= 1;
         let parsed = valid_parsed(&msg);
@@ -608,53 +623,15 @@ mod tests {
     #[test]
     fn precompile_pubkey_not_authorized_signer() {
         let ch = make_channel(0, 500, AUTH);
-        let v = make_voucher(CHANNEL_ID, 100, 0, AUTH, AUTH_SIGNATURE);
+        let v = make_voucher(CHANNEL_ID, 100, 0);
         let msg = payload::build_signed_payload(&v);
         let parsed = ed25519_ix::Parsed {
             pubkey: OTHER_PUBKEY.as_array(),
-            signature: &AUTH_SIGNATURE,
             message: &msg,
         };
         expect_err(
             verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
             PaymentChannelsError::VoucherSignerMismatch,
-        );
-    }
-
-    #[test]
-    fn wire_signer_not_authorized_signer() {
-        let ch = make_channel(0, 500, AUTH);
-        let v = make_voucher(CHANNEL_ID, 100, 0, OTHER_PUBKEY, AUTH_SIGNATURE);
-        let msg = payload::build_signed_payload(&v);
-        let parsed = valid_parsed(&msg);
-        expect_err(
-            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
-            PaymentChannelsError::VoucherSignerMismatch,
-        );
-    }
-
-    #[test]
-    fn signature_cross_check_fails() {
-        const OTHER_SIGNATURE: [u8; 64] = [119u8; 64];
-        let ch = make_channel(0, 500, AUTH);
-        let v = make_voucher(CHANNEL_ID, 100, 0, AUTH, OTHER_SIGNATURE);
-        let msg = payload::build_signed_payload(&v);
-        let parsed = valid_parsed(&msg);
-        expect_err(
-            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
-            PaymentChannelsError::VoucherSignatureCrossCheckFailed,
-        );
-    }
-
-    #[test]
-    fn all_zero_wire_signature_with_valid_precompile() {
-        let ch = make_channel(0, 500, AUTH);
-        let v = make_voucher(CHANNEL_ID, 100, 0, AUTH, [0u8; 64]);
-        let msg = payload::build_signed_payload(&v);
-        let parsed = valid_parsed(&msg);
-        expect_err(
-            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
-            PaymentChannelsError::VoucherSignatureCrossCheckFailed,
         );
     }
 }
