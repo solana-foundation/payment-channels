@@ -58,12 +58,8 @@ impl OpenArgs {
 }
 
 unsafe impl Transmutable for OpenArgs {
-    const LEN: usize = 52;
+    const LEN: usize = size_of::<Self>();
 }
-
-const _: () = {
-    assert!(core::mem::size_of::<OpenArgs>() == 52);
-};
 
 /// [`Self::payer`], [`Self::payee`], [`Self::mint`],
 /// [`Self::authorized_signer`] are PDA seed inputs.

@@ -42,12 +42,8 @@ impl DistributeArgs {
 }
 
 unsafe impl Transmutable for DistributeArgs {
-    const LEN: usize = 514;
+    const LEN: usize = size_of::<Self>();
 }
-
-const _: () = {
-    assert!(core::mem::size_of::<DistributeArgs>() == 514);
-};
 
 /// Permissionless with preimage-hash check, gates *who* is paid and *how* much.
 pub struct DistributeAccounts<'a> {

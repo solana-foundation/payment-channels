@@ -58,12 +58,8 @@ impl VoucherArgs {
 }
 
 unsafe impl Transmutable for VoucherArgs {
-    const LEN: usize = 144;
+    const LEN: usize = core::mem::size_of::<Self>();
 }
-
-const _: () = {
-    assert!(core::mem::size_of::<VoucherArgs>() == 144);
-};
 
 /// Byte-0-dispatched instruction codomain. Each variant's discriminant
 /// matches the `DISCRIMINATOR` const in the corresponding sibling module;

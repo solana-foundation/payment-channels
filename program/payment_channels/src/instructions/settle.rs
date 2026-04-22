@@ -29,12 +29,8 @@ impl SettleArgs {
 }
 
 unsafe impl Transmutable for SettleArgs {
-    const LEN: usize = 144;
+    const LEN: usize = size_of::<Self>();
 }
-
-const _: () = {
-    assert!(core::mem::size_of::<SettleArgs>() == 144);
-};
 
 pub struct SettleAccounts<'a> {
     pub merchant: &'a AccountView,

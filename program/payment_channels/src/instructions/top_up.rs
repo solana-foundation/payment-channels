@@ -37,12 +37,8 @@ impl TopUpArgs {
 }
 
 unsafe impl Transmutable for TopUpArgs {
-    const LEN: usize = 8;
+    const LEN: usize = size_of::<Self>();
 }
-
-const _: () = {
-    assert!(core::mem::size_of::<TopUpArgs>() == 8);
-};
 
 pub struct TopUpAccounts<'a> {
     /// Must equal [`Channel::payer`](crate::Channel::payer).

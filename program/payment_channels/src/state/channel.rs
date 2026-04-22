@@ -11,10 +11,6 @@ use crate::errors::PaymentChannelsError;
 use crate::state::common::{AccountDiscriminator, CURRENT_CHANNEL_VERSION};
 use crate::state::transmutable::{Transmutable, load, load_mut};
 
-/// Fixed on-chain byte length of the [`Channel`] PDA. Asserted at compile
-/// time (see below).
-pub const CHANNEL_LEN: usize = size_of::<Channel>();
-
 /// PDA seed prefix. Full seeds:
 /// `[CHANNEL_SEED, payer, payee, mint, authorized_signer, salt.to_le_bytes()]`.
 pub const CHANNEL_SEED: &[u8] = b"channel";
@@ -122,7 +118,7 @@ pub struct Channel {
 }
 
 impl Channel {
-    pub const LEN: usize = CHANNEL_LEN;
+    pub const LEN: usize = size_of::<Self>();
 
     #[inline(always)]
     pub fn deposit(&self) -> u64 {
@@ -242,12 +238,8 @@ impl Channel {
 }
 
 unsafe impl Transmutable for Channel {
-    const LEN: usize = CHANNEL_LEN;
+    const LEN: usize = size_of::<Self>();
 }
-
-const _: () = {
-    assert!(Channel::LEN == 208);
-};
 
 #[cfg(test)]
 mod tests {

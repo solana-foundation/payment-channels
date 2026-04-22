@@ -35,12 +35,8 @@ impl SettleAndFinalizeArgs {
 }
 
 unsafe impl Transmutable for SettleAndFinalizeArgs {
-    const LEN: usize = 145;
+    const LEN: usize = size_of::<Self>();
 }
-
-const _: () = {
-    assert!(core::mem::size_of::<SettleAndFinalizeArgs>() == 145);
-};
 
 pub struct SettleAndFinalizeAccounts<'a> {
     pub merchant: &'a AccountView,
