@@ -35,10 +35,12 @@ pub struct VoucherArgs {
     /// Voucher author. Must equal
     /// [`Channel::authorized_signer`](crate::Channel::authorized_signer).
     pub signer: Address,
-    /// Ed25519 signature over the JCS canonicalization (RFC 8785) of the
-    /// logical voucher payload. Verified by matching the Ed25519
-    /// native-program ix's message bytes against the JCS re-encoding of
-    /// these fields.
+    /// Ed25519 signature over the Borsh serialization of
+    /// `Voucher { channel_id, cumulative_amount, expires_at }` — exactly
+    /// 48 bytes, fixed little-endian, no length prefix (see
+    /// [`helpers::voucher`]). Verified by matching
+    /// the preceding Ed25519 native-program ix's message bytes against
+    /// the re-encoded payload.
     pub signature: [u8; 64],
 }
 

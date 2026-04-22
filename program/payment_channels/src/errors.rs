@@ -22,4 +22,22 @@ pub enum PaymentChannelsError {
     InvalidAccountDiscriminator = 3,
     #[error("Unsupported channel version")]
     UnsupportedChannelVersion = 4,
+    #[error("Voucher channel_id does not match channel PDA")]
+    VoucherChannelMismatch = 5,
+    #[error("Voucher expired")]
+    VoucherExpired = 6,
+    #[error("Voucher watermark not strictly monotonic")]
+    VoucherWatermarkNotMonotonic = 7,
+    #[error("Voucher cumulative_amount exceeds channel deposit")]
+    VoucherOverDeposit = 8,
+    #[error("Missing Ed25519 precompile ix at current-1")]
+    MissingEd25519Verification = 9,
+    #[error("Malformed Ed25519 precompile instruction")]
+    MalformedEd25519Instruction = 10,
+    #[error("Ed25519 message does not match Borsh voucher payload")]
+    VoucherMessageMismatch = 11,
+    #[error("Voucher signer does not match channel authorized_signer")]
+    VoucherSignerMismatch = 12,
+    #[error("Voucher signature does not match Ed25519 ix signature")]
+    VoucherSignatureCrossCheckFailed = 13,
 }
