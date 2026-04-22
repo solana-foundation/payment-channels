@@ -1,6 +1,6 @@
 # solana-payment-channels
 
-A Solana payment channel program in the spirit of [`draft-solana-session-00`](https://github.com/solana-foundation/mpp-specs/blob/a64edb477cfcb5e071e4f73f4227cf329dd1c4b5/specs/methods/solana/draft-solana-session-00.md), with two-phase close, hash-committed multi-destination distribution, and an operator watermark voucher model.
+A Solana payment channel program in the spirit of [`draft-solana-session-00`](https://github.com/solana-foundation/mpp-specs/blob/a64edb477cfcb5e071e4f73f4227cf329dd1c4b5/specs/methods/solana/draft-solana-session-00.md), with two-phase close, on-chain multi-destination split distribution, and an operator watermark voucher model.
 
 See [`docs/001-payment-channel-state-machine.md`](docs/001-payment-channel-state-machine.md) for the FSM, transition guards, instruction set, and on-chain PDA layout.
 
