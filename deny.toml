@@ -20,23 +20,12 @@ db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/RustSec/advisory-db"]
 yanked = "warn"
 ignore = [
-    # ed25519-dalek 1.x oracle attack — pulled transitively through the
-    # solana crates; fixed in 2.x but blocked on upstream migration across
-    # the solana-* stack. Not exploitable in the program's voucher path,
-    # which verifies via the Ed25519 native program, not dalek.
-    "RUSTSEC-2022-0093",
-    # curve25519-dalek timing variability in Scalar29/Scalar52 sub — same
-    # upstream blocker; host-only (litesvm/solana test harness) concern,
-    # not in the deployed program binary.
-    "RUSTSEC-2024-0344",
     # bincode unmaintained — transitive via solana/litesvm dev-deps.
     "RUSTSEC-2025-0141",
     # libsecp256k1 unmaintained — same source.
     "RUSTSEC-2025-0161",
     # ansi_term unmaintained — litesvm transitive dev-dep.
     "RUSTSEC-2021-0139",
-    # atty unmaintained — litesvm transitive dev-dep.
-    "RUSTSEC-2024-0375",
     # derivative unmaintained — solana-sdk transitive.
     "RUSTSEC-2024-0388",
     # paste unmaintained — solana-sdk transitive.
