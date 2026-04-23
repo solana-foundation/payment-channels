@@ -219,7 +219,7 @@ mod tests {
     // it back requires a raw-pointer cast because `mem::discriminant`
     // is opaque and variants with payloads can't `as u8`.
     fn tag(v: &PaymentChannelsInstruction<'_>) -> u8 {
-        unsafe { *(v as *const _ as *const u8) }
+        unsafe { *core::ptr::from_ref(v).cast::<u8>() }
     }
 
     #[test]

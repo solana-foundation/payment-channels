@@ -34,7 +34,7 @@ pub unsafe trait Transmutable {
                 "Transmutable types must have alignment 1",
             );
         };
-        unsafe { core::slice::from_raw_parts(self as *const Self as *const u8, Self::LEN) }
+        unsafe { core::slice::from_raw_parts(core::ptr::from_ref(self).cast::<u8>(), Self::LEN) }
     }
 }
 
@@ -54,7 +54,7 @@ pub unsafe fn load<T: Transmutable>(bytes: &[u8]) -> Result<&T, ProgramError> {
     if bytes.len() != T::LEN {
         return Err(ProgramError::InvalidAccountData);
     }
-    Ok(unsafe { &*(bytes.as_ptr() as *const T) })
+    Ok(unsafe { &*bytes.as_ptr().cast::<T>() })
 }
 
 /// Reinterpret `bytes` as `&mut T`. Validates length only and alignment.
@@ -73,7 +73,7 @@ pub unsafe fn load_mut<T: Transmutable>(bytes: &mut [u8]) -> Result<&mut T, Prog
     if bytes.len() != T::LEN {
         return Err(ProgramError::InvalidAccountData);
     }
-    Ok(unsafe { &mut *(bytes.as_mut_ptr() as *mut T) })
+    Ok(unsafe { &mut *bytes.as_mut_ptr().cast::<T>() })
 }
 
 #[cfg(test)]
