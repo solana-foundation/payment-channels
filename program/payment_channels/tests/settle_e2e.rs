@@ -120,6 +120,24 @@ fn read_settled(svm: &LiteSVM, channel: &Pubkey) -> u64 {
     u64::from_le_bytes(buf)
 }
 
+fn compute_budget_program_id() -> Pubkey {
+    Pubkey::from_str("ComputeBudget111111111111111111111111111111").unwrap()
+}
+
+/// `ComputeBudgetInstruction::SetComputeUnitLimit(u32)` — variant tag 2
+/// followed by the limit as little-endian `u32`. Used as a stand-in for
+/// a non-Ed25519 preceding ix.
+fn build_compute_budget_limit_ix(limit: u32) -> Instruction {
+    let mut data = Vec::with_capacity(5);
+    data.push(0x02);
+    data.extend_from_slice(&limit.to_le_bytes());
+    Instruction {
+        program_id: compute_budget_program_id(),
+        accounts: Vec::new(),
+        data,
+    }
+}
+
 #[test]
 fn settle_advances_watermark_on_valid_voucher() {
     let mut svm = load_program();
@@ -260,5 +278,255 @@ fn settle_after_expiry_rejects() {
     expect_custom_err(
         svm.send_transaction(tx),
         PaymentChannelsError::VoucherExpired,
+    );
+}
+
+#[test]
+fn settle_voucher_channel_mismatch_rejects() {
+    let mut svm = load_program();
+    let fee_payer = Keypair::new();
+    svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
+
+    let signer = Keypair::new();
+    let channel_a = Pubkey::new_unique();
+    let channel_b = Pubkey::new_unique();
+    seed_channel(&mut svm, &channel_a, 0, 1_000_000, 0, &signer.pubkey());
+
+    let voucher = VoucherArgs {
+        channel_id: channel_b,
+        cumulative_amount: 500_000,
+        expires_at: 0,
+    };
+    let payload = voucher_payload(&voucher);
+    let signature: [u8; 64] = signer.sign_message(&payload).into();
+    let pubkey = signer.pubkey().to_bytes();
+
+    let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
+    let settle_ix = build_settle_ix(&channel_a, voucher);
+
+    let tx = Transaction::new_signed_with_payer(
+        &[ed25519_ix, settle_ix],
+        Some(&fee_payer.pubkey()),
+        &[&fee_payer],
+        svm.latest_blockhash(),
+    );
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::VoucherChannelMismatch,
+    );
+}
+
+#[test]
+fn settle_voucher_over_deposit_rejects() {
+    let mut svm = load_program();
+    let fee_payer = Keypair::new();
+    svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
+
+    let signer = Keypair::new();
+    let channel = Pubkey::new_unique();
+    seed_channel(&mut svm, &channel, 0, 500_000, 0, &signer.pubkey());
+
+    let voucher = VoucherArgs {
+        channel_id: channel,
+        cumulative_amount: 500_001,
+        expires_at: 0,
+    };
+    let payload = voucher_payload(&voucher);
+    let signature: [u8; 64] = signer.sign_message(&payload).into();
+    let pubkey = signer.pubkey().to_bytes();
+
+    let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
+    let settle_ix = build_settle_ix(&channel, voucher);
+
+    let tx = Transaction::new_signed_with_payer(
+        &[ed25519_ix, settle_ix],
+        Some(&fee_payer.pubkey()),
+        &[&fee_payer],
+        svm.latest_blockhash(),
+    );
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::VoucherOverDeposit,
+    );
+}
+
+#[test]
+fn settle_voucher_not_monotonic_rejects() {
+    let mut svm = load_program();
+    let fee_payer = Keypair::new();
+    svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
+
+    let signer = Keypair::new();
+    let channel = Pubkey::new_unique();
+    seed_channel(&mut svm, &channel, 0, 1_000_000, 500_000, &signer.pubkey());
+
+    let voucher = VoucherArgs {
+        channel_id: channel,
+        cumulative_amount: 500_000,
+        expires_at: 0,
+    };
+    let payload = voucher_payload(&voucher);
+    let signature: [u8; 64] = signer.sign_message(&payload).into();
+    let pubkey = signer.pubkey().to_bytes();
+
+    let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
+    let settle_ix = build_settle_ix(&channel, voucher);
+
+    let tx = Transaction::new_signed_with_payer(
+        &[ed25519_ix, settle_ix],
+        Some(&fee_payer.pubkey()),
+        &[&fee_payer],
+        svm.latest_blockhash(),
+    );
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::VoucherWatermarkNotMonotonic,
+    );
+}
+
+#[test]
+fn settle_voucher_message_mismatch_rejects() {
+    let mut svm = load_program();
+    let fee_payer = Keypair::new();
+    svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
+
+    let signer = Keypair::new();
+    let channel = Pubkey::new_unique();
+    seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
+
+    // Sign one payload but submit a different `VoucherArgs`. Both cumulative
+    // values pass cap/monotonicity, so only the message check can fire.
+    let voucher_signed = VoucherArgs {
+        channel_id: channel,
+        cumulative_amount: 100_000,
+        expires_at: 0,
+    };
+    let voucher_submitted = VoucherArgs {
+        channel_id: channel,
+        cumulative_amount: 200_000,
+        expires_at: 0,
+    };
+    let payload_signed = voucher_payload(&voucher_signed);
+    let signature: [u8; 64] = signer.sign_message(&payload_signed).into();
+    let pubkey = signer.pubkey().to_bytes();
+
+    let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload_signed);
+    let settle_ix = build_settle_ix(&channel, voucher_submitted);
+
+    let tx = Transaction::new_signed_with_payer(
+        &[ed25519_ix, settle_ix],
+        Some(&fee_payer.pubkey()),
+        &[&fee_payer],
+        svm.latest_blockhash(),
+    );
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::VoucherMessageMismatch,
+    );
+}
+
+#[test]
+fn settle_voucher_signer_mismatch_rejects() {
+    let mut svm = load_program();
+    let fee_payer = Keypair::new();
+    svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
+
+    let authorized = Keypair::new();
+    let impostor = Keypair::new();
+    let channel = Pubkey::new_unique();
+    seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &authorized.pubkey());
+
+    let voucher = VoucherArgs {
+        channel_id: channel,
+        cumulative_amount: 500_000,
+        expires_at: 0,
+    };
+    let payload = voucher_payload(&voucher);
+    let signature: [u8; 64] = impostor.sign_message(&payload).into();
+    let pubkey = impostor.pubkey().to_bytes();
+
+    let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
+    let settle_ix = build_settle_ix(&channel, voucher);
+
+    let tx = Transaction::new_signed_with_payer(
+        &[ed25519_ix, settle_ix],
+        Some(&fee_payer.pubkey()),
+        &[&fee_payer],
+        svm.latest_blockhash(),
+    );
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::VoucherSignerMismatch,
+    );
+}
+
+#[test]
+fn settle_malformed_ed25519_ix_rejects() {
+    let mut svm = load_program();
+    let fee_payer = Keypair::new();
+    svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
+
+    let signer = Keypair::new();
+    let channel = Pubkey::new_unique();
+    seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
+
+    let voucher = VoucherArgs {
+        channel_id: channel,
+        cumulative_amount: 500_000,
+        expires_at: 0,
+    };
+    let payload = voucher_payload(&voucher);
+    let signature: [u8; 64] = signer.sign_message(&payload).into();
+    let pubkey = signer.pubkey().to_bytes();
+
+    // Flip the padding byte: the Solana Ed25519 precompile does not
+    // inspect `data[1]`, so the ix clears precompile verification; the
+    // program's `parse` then rejects on the `padding == 0` guard.
+    let mut ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
+    ed25519_ix.data[1] = 1;
+    let settle_ix = build_settle_ix(&channel, voucher);
+
+    let tx = Transaction::new_signed_with_payer(
+        &[ed25519_ix, settle_ix],
+        Some(&fee_payer.pubkey()),
+        &[&fee_payer],
+        svm.latest_blockhash(),
+    );
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::MalformedEd25519Instruction,
+    );
+}
+
+#[test]
+fn settle_preceding_compute_budget_ix_rejects() {
+    let mut svm = load_program();
+    let fee_payer = Keypair::new();
+    svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
+
+    let signer = Keypair::new();
+    let channel = Pubkey::new_unique();
+    seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
+
+    let voucher = VoucherArgs {
+        channel_id: channel,
+        cumulative_amount: 500_000,
+        expires_at: 0,
+    };
+    // Preceding ix resolves cleanly, but its program id is not the Ed25519
+    // precompile — exercises the program-id branch of
+    // `MissingEd25519Verification`.
+    let preceding_ix = build_compute_budget_limit_ix(200_000);
+    let settle_ix = build_settle_ix(&channel, voucher);
+
+    let tx = Transaction::new_signed_with_payer(
+        &[preceding_ix, settle_ix],
+        Some(&fee_payer.pubkey()),
+        &[&fee_payer],
+        svm.latest_blockhash(),
+    );
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::MissingEd25519Verification,
     );
 }
