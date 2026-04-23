@@ -6,28 +6,32 @@ use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 use crate::event_engine::EventSerialize;
 use crate::event_engine::emit_event;
 use crate::events::Opened;
+use crate::state::{Transmutable, load};
 
 /// Instruction discriminator byte for `open`.
 pub const DISCRIMINATOR: u8 = 1;
 
-/// Init payload. Fields land in the [`Channel`](crate::Channel) PDA either
-/// directly ([`Self::deposit`], [`Self::grace_period`],
-/// [`Self::distribution_hash`]) or through seeds ([`Self::salt`]).
-#[repr(C, packed)]
+/// Init payload. `deposit`, `grace_period`, and `distribution_hash` are
+/// stored on the [`Channel`](crate::Channel) PDA; `salt` is a seed input
+/// (address-only, not persisted).
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct OpenArgs {
     /// PDA disambiguator; seed-only, not stored. Enables concurrent
     /// channels for the same `(payer, payee, mint, authorized_signer)`
     /// tuple.
-    pub salt: u64,
+    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    salt: [u8; 8],
     /// Initial escrow; the immutable ceiling on
     /// [`Channel::settled`](crate::Channel::settled) (raised later only by
     /// `topUp`).
-    pub deposit: u64,
+    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    deposit: [u8; 8],
     /// Grace duration (seconds). Governs the `CLOSING → FINALIZED`
     /// unlock for permissionless `finalize`.
-    pub grace_period: u32,
+    #[cfg_attr(feature = "idl", codama(type = number(u32)))]
+    grace_period: [u8; 4],
     /// Blake3 commitment to the `distribute` splits preimage.
     pub distribution_hash: [u8; 32],
 }
@@ -35,12 +39,26 @@ pub struct OpenArgs {
 impl OpenArgs {
     pub const LEN: usize = size_of::<Self>();
 
-    pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
-        if data.len() != Self::LEN {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-        Ok(unsafe { &*(data.as_ptr() as *const Self) })
+    #[inline(always)]
+    pub fn salt(&self) -> u64 {
+        u64::from_le_bytes(self.salt)
     }
+    #[inline(always)]
+    pub fn deposit(&self) -> u64 {
+        u64::from_le_bytes(self.deposit)
+    }
+    #[inline(always)]
+    pub fn grace_period(&self) -> u32 {
+        u32::from_le_bytes(self.grace_period)
+    }
+
+    pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
+        unsafe { load::<Self>(data) }.map_err(|_| ProgramError::InvalidInstructionData)
+    }
+}
+
+unsafe impl Transmutable for OpenArgs {
+    const LEN: usize = size_of::<Self>();
 }
 
 /// [`Self::payer`], [`Self::payee`], [`Self::mint`],

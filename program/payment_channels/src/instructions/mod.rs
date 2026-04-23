@@ -13,9 +13,14 @@ pub mod withdraw_payer;
 use codama::{CodamaInstructions, CodamaType};
 use pinocchio::{Address, error::ProgramError};
 
+use crate::state::Transmutable;
+
 /// On-chain wire encoding of the voucher. Field order is re-packed vs.
 /// the off-chain JSON shape to make the struct zero-copy loadable.
-#[repr(C, packed)]
+/// Ed25519-only; signature verification is offloaded to a caller-bundled
+/// Ed25519 native-program ix whose message bytes are read back via the
+/// Instructions sysvar.
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct VoucherArgs {
@@ -23,12 +28,37 @@ pub struct VoucherArgs {
     /// [`settled`](crate::Channel::settled) `< cumulative_amount ≤`
     /// [`deposit`](crate::Channel::deposit); the strict increase also
     /// serves as the implicit nonce.
-    pub cumulative_amount: u64,
-    /// Unix-seconds TTL; `0` means no expiry (packed wire cannot carry
-    /// `Option`). Freshness: `expires_at == 0 || now < expires_at`.
-    pub expires_at: i64,
+    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    cumulative_amount: [u8; 8],
+    /// Unix-seconds TTL; `0` means no expiry. Freshness:
+    /// `expires_at == 0 || now < expires_at`.
+    #[cfg_attr(feature = "idl", codama(type = number(i64)))]
+    expires_at: [u8; 8],
     /// Replay scope; must equal the [`Channel`](crate::Channel) PDA.
     pub channel_id: Address,
+}
+
+impl VoucherArgs {
+    pub fn new(cumulative_amount: u64, expires_at: i64, channel_id: Address) -> Self {
+        Self {
+            cumulative_amount: cumulative_amount.to_le_bytes(),
+            expires_at: expires_at.to_le_bytes(),
+            channel_id,
+        }
+    }
+
+    #[inline(always)]
+    pub fn cumulative_amount(&self) -> u64 {
+        u64::from_le_bytes(self.cumulative_amount)
+    }
+    #[inline(always)]
+    pub fn expires_at(&self) -> i64 {
+        i64::from_le_bytes(self.expires_at)
+    }
+}
+
+unsafe impl Transmutable for VoucherArgs {
+    const LEN: usize = core::mem::size_of::<Self>();
 }
 
 /// Byte-0-dispatched instruction codomain. Each variant's discriminant
