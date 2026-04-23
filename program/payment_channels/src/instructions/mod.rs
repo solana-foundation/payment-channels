@@ -88,11 +88,11 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
     )]
     Open(#[cfg_attr(feature = "idl", codama(name = "open_args"))] &'a open::OpenArgs) = 1,
 
-    /// Advances the on-chain [`settled`](crate::Channel::settled) watermark
-    /// against a payer-signed voucher. `OPEN → OPEN`.
+    /// Permissionless crank: advances the on-chain
+    /// [`settled`](crate::Channel::settled) watermark against a payer-signed
+    /// voucher. `OPEN → OPEN`.
     #[cfg_attr(
         feature = "idl",
-        codama(account(name = "merchant", signer)),
         codama(account(name = "channel", writable)),
         codama(account(name = "instructions_sysvar"))
     )]

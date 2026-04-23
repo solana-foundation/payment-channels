@@ -31,7 +31,7 @@ borsh                              = { version = "1", default-features = false, 
 thiserror                          = { version = "2", default-features = false }
 
 [dev-dependencies]
-litesvm                  = "0.11"
+litesvm                  = { version = "0.11", features = ["precompiles"] }
 litesvm-token            = { version = "0.11", features = ["token-2022"] }
 payment_channels_client  = { workspace = true }
 solana-account           = "^3"
