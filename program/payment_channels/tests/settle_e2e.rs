@@ -10,16 +10,14 @@ use payment_channels_client::instructions::{Settle, SettleInstructionArgs};
 use payment_channels_client::types::{SettleArgs, VoucherArgs};
 use solana_account::Account;
 use solana_instruction::Instruction;
-use solana_instruction::error::InstructionError;
 use solana_keypair::Keypair;
 use solana_message::Message;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
-use solana_transaction_error::TransactionError;
 
 mod common;
-use common::{PROGRAM_ID, load_program};
+use common::{PROGRAM_ID, expect_custom_err, load_program};
 
 fn instructions_sysvar_id() -> Pubkey {
     Pubkey::from_str("Sysvar1nstructions1111111111111111111111111").unwrap()
@@ -120,19 +118,6 @@ fn read_settled(svm: &LiteSVM, channel: &Pubkey) -> u64 {
     let mut buf = [0u8; 8];
     buf.copy_from_slice(&acct.data[12..20]);
     u64::from_le_bytes(buf)
-}
-
-fn expect_custom_err(
-    res: Result<litesvm::types::TransactionMetadata, litesvm::types::FailedTransactionMetadata>,
-    expected: PaymentChannelsError,
-) {
-    let err = res.expect_err("tx should fail");
-    match err.err {
-        TransactionError::InstructionError(_, InstructionError::Custom(code)) => {
-            assert_eq!(code, expected as u32, "wrong custom error code");
-        }
-        other => panic!("unexpected error: {other:?}"),
-    }
 }
 
 #[test]

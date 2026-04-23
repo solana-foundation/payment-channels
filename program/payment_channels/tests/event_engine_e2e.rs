@@ -29,7 +29,7 @@ use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 
 mod common;
-use common::{PROGRAM_ID, load_program};
+use common::{PROGRAM_ID, expect_custom_err, load_program};
 
 fn event_authority() -> (Pubkey, u8) {
     Pubkey::find_program_address(&[EVENT_AUTHORITY_SEED], &PROGRAM_ID)
@@ -160,14 +160,10 @@ fn emit_event_rejects_bad_authority() {
     let ix = build_direct_emit_event_ix(&attacker.pubkey(), true, &[]);
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
     let tx = Transaction::new(&[&payer, &attacker], msg, svm.latest_blockhash());
-    let err = svm.send_transaction(tx).expect_err("should fail");
-    let expected = PaymentChannelsError::InvalidEventAuthority as u32;
-    match err.err {
-        TransactionError::InstructionError(_, InstructionError::Custom(code)) => {
-            assert_eq!(code, expected, "expected InvalidEventAuthority");
-        }
-        other => panic!("unexpected error: {other:?}"),
-    }
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::InvalidEventAuthority,
+    );
 }
 
 #[test]
