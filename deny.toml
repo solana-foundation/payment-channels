@@ -30,6 +30,13 @@ ignore = [
     "RUSTSEC-2024-0388",
     # paste unmaintained — solana-sdk transitive.
     "RUSTSEC-2024-0436",
+    # ed25519-dalek 1.0.1 double-pubkey-oracle — pulled via
+    # litesvm[precompiles] → agave-precompiles; dev-dep only, not linked
+    # into the on-chain program.
+    "RUSTSEC-2022-0093",
+    # curve25519-dalek 3.2.0 Scalar{29,52}::sub timing variability — same
+    # source (litesvm[precompiles] → agave-precompiles); dev-dep only.
+    "RUSTSEC-2024-0344",
 ]
 
 [licenses]
