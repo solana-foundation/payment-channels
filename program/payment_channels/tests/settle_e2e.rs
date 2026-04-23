@@ -11,7 +11,6 @@ use payment_channels_client::types::{SettleArgs, VoucherArgs};
 use solana_account::Account;
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
-use solana_message::Message;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
@@ -143,8 +142,12 @@ fn settle_advances_watermark_on_valid_voucher() {
     let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
     let settle_ix = build_settle_ix(&channel, voucher);
 
-    let msg = Message::new(&[ed25519_ix, settle_ix], Some(&fee_payer.pubkey()));
-    let tx = Transaction::new(&[&fee_payer], msg, svm.latest_blockhash());
+    let tx = Transaction::new_signed_with_payer(
+        &[ed25519_ix, settle_ix],
+        Some(&fee_payer.pubkey()),
+        &[&fee_payer],
+        svm.latest_blockhash(),
+    );
     svm.send_transaction(tx).expect("tx ok");
 
     assert_eq!(read_settled(&svm, &channel), cumulative);
@@ -169,8 +172,12 @@ fn settle_without_preceding_ed25519_ix_rejects() {
         },
     );
 
-    let msg = Message::new(&[settle_ix], Some(&fee_payer.pubkey()));
-    let tx = Transaction::new(&[&fee_payer], msg, svm.latest_blockhash());
+    let tx = Transaction::new_signed_with_payer(
+        &[settle_ix],
+        Some(&fee_payer.pubkey()),
+        &[&fee_payer],
+        svm.latest_blockhash(),
+    );
     expect_custom_err(
         svm.send_transaction(tx),
         PaymentChannelsError::MissingEd25519Verification,
@@ -201,8 +208,12 @@ fn settle_on_non_open_status_rejects() {
     let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
     let settle_ix = build_settle_ix(&channel, voucher);
 
-    let msg = Message::new(&[ed25519_ix, settle_ix], Some(&fee_payer.pubkey()));
-    let tx = Transaction::new(&[&fee_payer], msg, svm.latest_blockhash());
+    let tx = Transaction::new_signed_with_payer(
+        &[ed25519_ix, settle_ix],
+        Some(&fee_payer.pubkey()),
+        &[&fee_payer],
+        svm.latest_blockhash(),
+    );
     expect_custom_err(
         svm.send_transaction(tx),
         PaymentChannelsError::InvalidChannelStatus,
