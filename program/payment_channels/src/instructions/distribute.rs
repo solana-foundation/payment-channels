@@ -8,8 +8,9 @@ use crate::errors::PaymentChannelsError;
 /// Instruction discriminator byte for `distribute`.
 pub const DISCRIMINATOR: u8 = 7;
 
-/// Upper bound on the serialized splits blob.
-pub const MAX_DISTRIBUTE_PREIMAGE: usize = 512;
+/// Upper bound on the serialized splits blob:
+/// `num_recipients(1) + 30 × (address(32) + amount(8))`.
+pub const MAX_DISTRIBUTE_PREIMAGE: usize = 1 + crate::instructions::open::MAX_DISTRIBUTION_RECIPIENTS * 40;
 
 /// Distribute with splits preimage submission.
 #[repr(C, packed)]

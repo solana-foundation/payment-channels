@@ -56,7 +56,7 @@ impl TryFrom<u8> for ChannelStatus {
 
 /// Active channel PDA: escrowed deposit, settled watermark, closure
 /// timestamps, distribution commitment, and participant bindings. Fixed
-/// 208-byte `#[repr(C, packed)]` layout for zero-copy load.
+/// 216-byte `#[repr(C, packed)]` layout for zero-copy load.
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaAccount))]
@@ -73,46 +73,50 @@ pub struct Channel {
     pub bump: u8, //   2..3
     /// [`ChannelStatus`] discriminant.
     pub status: u8, //   3..4
+    /// PDA disambiguator set at `open`. Stored so downstream instructions
+    /// (`distribute`, `withdraw_payer`) can reconstruct the full PDA seeds
+    /// and sign as the channel PDA without off-chain data.
+    pub salt: u64, //   4..12
     /// Initial escrow; immutable ceiling on [`Self::settled`]. Grows only
     /// via `topUp` while [`Self::status`] == [`ChannelStatus::Open`] and
     /// [`Self::closure_started_at`] == 0.
-    pub deposit: u64, //   4..12
+    pub deposit: u64, //  12..20
     /// Cumulative authorized watermark. Advanced monotonically by signed
     /// vouchers in `settle` / `settleAndFinalize`; capped by
     /// [`Self::deposit`].
-    pub settled: u64, //  12..20
+    pub settled: u64, //  20..28
     /// Cumulative tokens already paid out to merchant splits across
     /// `distribute` calls. Invariant:
     /// `paid_out` ≤ [`Self::settled`]. Lets mid-session `distribute`
     /// run without double-paying.
-    pub paid_out: u64, //  20..28
+    pub paid_out: u64, //  28..36
     /// Set to `now` by `requestClose` (starts grace) and reset to 0 on
     /// `CLOSING → FINALIZED` via either `settleAndFinalize` (mid-grace)
     /// or `finalize` (post-grace). Always 0 in `OPEN` and `FINALIZED`;
     /// only `CLOSING` carries a live timestamp.
-    pub closure_started_at: i64, //  28..36
+    pub closure_started_at: i64, //  36..44
     /// Unix ts of the payer's one-shot refund via `withdraw_payer`; 0
     /// means not yet withdrawn. Gates the atomic refund leg inside
     /// `distribute` when it runs from `FINALIZED`.
-    pub payer_withdrawn_at: i64, //  36..44
+    pub payer_withdrawn_at: i64, //  44..52
     /// Per-channel grace duration in seconds, set at `open`. Governs
     /// the `CLOSING → FINALIZED` unlock for permissionless `finalize`.
-    pub grace_period: u32, //  44..48
+    pub grace_period: u32, //  52..56
     /// Blake3 commitment to the distribution preimage.
-    pub distribution_hash: [u8; 32], //  48..80
+    pub distribution_hash: [u8; 32], //  56..88
     /// Refund destination and payer-side authority signer (required for
     /// `topUp`, `requestClose`, `withdraw_payer`).
-    pub payer: Address, //  80..112
+    pub payer: Address, //  88..120
     /// PDA seed binding; retained on-struct because every ix that
     /// re-derives the channel address needs the original pubkey.
-    pub payee: Address, // 112..144
+    pub payee: Address, // 120..152
     /// Pubkey that signs vouchers; equals [`Self::payer`] unless a
     /// delegate was bound at `open`. Matched against the pubkey
     /// embedded in the caller-bundled Ed25519 precompile ix.
-    pub authorized_signer: Address, // 144..176
+    pub authorized_signer: Address, // 152..184
     /// Token mint bound at `open`. All escrow and payout transfers ride
     /// this mint.
-    pub mint: Address, // 176..208
+    pub mint: Address, // 184..216
 }
 
 impl Channel {
@@ -158,6 +162,54 @@ impl Channel {
         RefMut::try_map(data, Self::load_mut).map_err(|(_, e)| e)
     }
 
+    /// Write all fields into a freshly-allocated account buffer.
+    ///
+    /// Called by `open` after the system-program CPI that allocates the PDA.
+    /// Fails if `bytes` is not exactly [`Self::LEN`] bytes.
+    #[allow(clippy::too_many_arguments)]
+    pub fn init_at(
+        bytes: &mut [u8],
+        bump: u8,
+        salt: u64,
+        deposit: u64,
+        grace_period: u32,
+        distribution_hash: [u8; 32],
+        payer: Address,
+        payee: Address,
+        authorized_signer: Address,
+        mint: Address,
+    ) -> Result<(), ProgramError> {
+        if bytes.len() != Self::LEN {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        // SAFETY: length == Self::LEN checked above; `Channel` is `repr(C, packed)`
+        let ch = unsafe { &mut *(bytes.as_mut_ptr() as *mut Self) };
+        ch.discriminator = AccountDiscriminator::Channel as u8;
+        ch.version = CURRENT_CHANNEL_VERSION;
+        ch.bump = bump;
+        ch.status = ChannelStatus::Open as u8;
+        ch.salt = salt;
+        ch.deposit = deposit;
+        ch.settled = 0;
+        ch.paid_out = 0;
+        ch.closure_started_at = 0;
+        ch.payer_withdrawn_at = 0;
+        ch.grace_period = grace_period;
+        ch.distribution_hash = distribution_hash;
+        ch.payer = payer;
+        ch.payee = payee;
+        ch.authorized_signer = authorized_signer;
+        ch.mint = mint;
+        Ok(())
+    }
+
+    /// Read `salt` from the packed struct without creating an unaligned reference.
+    #[inline(always)]
+    pub fn salt(&self) -> u64 {
+        // SAFETY: `addr_of!` avoids an unaligned reference; `read_unaligned` copies bytes.
+        unsafe { core::ptr::read_unaligned(core::ptr::addr_of!(self.salt)) }
+    }
+
     fn load(bytes: &[u8]) -> Result<&Self, ProgramError> {
         if bytes.len() != Self::LEN {
             return Err(ProgramError::InvalidAccountData);
@@ -186,7 +238,7 @@ impl Channel {
 }
 
 const _: () = {
-    assert!(Channel::LEN == 208);
+    assert!(Channel::LEN == 216);
 };
 
 #[cfg(test)]
@@ -201,8 +253,8 @@ mod tests {
     }
 
     #[test]
-    fn size_is_208_bytes() {
-        assert_eq!(core::mem::size_of::<Channel>(), 208);
+    fn size_is_216_bytes() {
+        assert_eq!(core::mem::size_of::<Channel>(), 216);
     }
 
     #[test]
