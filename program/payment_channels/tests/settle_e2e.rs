@@ -173,6 +173,54 @@ fn settle_advances_watermark_on_valid_voucher() {
 }
 
 #[test]
+fn settle_batches_two_paired_ix_advance_watermark() {
+    let mut svm = load_program();
+    let fee_payer = Keypair::new();
+    svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
+
+    let signer = Keypair::new();
+    let channel = Pubkey::new_unique();
+    seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
+
+    let voucher_1 = VoucherArgs {
+        channel_id: channel,
+        cumulative_amount: 300_000,
+        expires_at: 0,
+    };
+    let voucher_2 = VoucherArgs {
+        channel_id: channel,
+        cumulative_amount: 500_000,
+        expires_at: 0,
+    };
+
+    let payload_1 = voucher_payload(&voucher_1);
+    let payload_2 = voucher_payload(&voucher_2);
+    let signature_1: [u8; 64] = signer.sign_message(&payload_1).into();
+    let signature_2: [u8; 64] = signer.sign_message(&payload_2).into();
+    let pubkey = signer.pubkey().to_bytes();
+
+    let ed25519_ix_1 = build_ed25519_ix(&pubkey, &signature_1, &payload_1);
+    let ed25519_ix_2 = build_ed25519_ix(&pubkey, &signature_2, &payload_2);
+    let settle_ix_1 = build_settle_ix(&channel, voucher_1);
+    let settle_ix_2 = build_settle_ix(&channel, voucher_2);
+
+    // Batch layout `[ed25519_1, settle_1, ed25519_2, settle_2]`: each
+    // `settle` reads its paired ed25519 ix at `current - 1`. Positional
+    // pairing — not "any ed25519 in the tx". Second settle also exercises
+    // monotonic progression from the in-tx-updated watermark (300_000 →
+    // 500_000), not the seeded 0.
+    let tx = Transaction::new_signed_with_payer(
+        &[ed25519_ix_1, settle_ix_1, ed25519_ix_2, settle_ix_2],
+        Some(&fee_payer.pubkey()),
+        &[&fee_payer],
+        svm.latest_blockhash(),
+    );
+    svm.send_transaction(tx).expect("tx ok");
+
+    assert_eq!(read_settled(&svm, &channel), 500_000);
+}
+
+#[test]
 fn settle_without_preceding_ed25519_ix_rejects() {
     let mut svm = load_program();
     let fee_payer = Keypair::new();
