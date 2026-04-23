@@ -2,11 +2,16 @@
   "name": "payment-channels-monorepo",
   "type": "module",
   "private": true,
-  "workspaces": ["clients/*"],
+  "workspaces": [
+    "clients/*"
+  ],
   "scripts": {
-    "generate": "codama run js rust"
+    "generate": "codama run js rust",
+    "format": "biome format --write .",
+    "format:check": "biome format ."
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.12",
     "@codama/cli": "latest",
     "@codama/nodes": "^1.5.1",
     "@codama/nodes-from-anchor": "latest",

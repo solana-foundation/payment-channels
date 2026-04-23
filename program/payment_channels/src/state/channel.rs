@@ -109,8 +109,8 @@ pub struct Channel {
     /// re-derives the channel address needs the original pubkey.
     pub payee: Address,
     /// Pubkey that signs vouchers; equals [`Self::payer`] unless a
-    /// delegate was bound at `open`. Every voucher's
-    /// [`signer`](crate::VoucherArgs::signer) field must match this value.
+    /// delegate was bound at `open`. Matched against the pubkey
+    /// embedded in the caller-bundled Ed25519 precompile ix.
     pub authorized_signer: Address,
     /// Token mint bound at `open`. All escrow and payout transfers ride
     /// this mint.

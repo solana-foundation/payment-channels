@@ -36,17 +36,17 @@ pub struct VoucherArgs {
     expires_at: [u8; 8],
     /// Replay scope; must equal the [`Channel`](crate::Channel) PDA.
     pub channel_id: Address,
-    /// Voucher author. Must equal
-    /// [`Channel::authorized_signer`](crate::Channel::authorized_signer).
-    pub signer: Address,
-    /// Ed25519 signature over the JCS canonicalization (RFC 8785) of the
-    /// logical voucher payload. Verified by matching the Ed25519
-    /// native-program ix's message bytes against the JCS re-encoding of
-    /// these fields.
-    pub signature: [u8; 64],
 }
 
 impl VoucherArgs {
+    pub fn new(cumulative_amount: u64, expires_at: i64, channel_id: Address) -> Self {
+        Self {
+            cumulative_amount: cumulative_amount.to_le_bytes(),
+            expires_at: expires_at.to_le_bytes(),
+            channel_id,
+        }
+    }
+
     #[inline(always)]
     pub fn cumulative_amount(&self) -> u64 {
         u64::from_le_bytes(self.cumulative_amount)
