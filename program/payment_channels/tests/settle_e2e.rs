@@ -68,26 +68,15 @@ fn seed_channel(
     .expect("set_account");
 }
 
-/// Borsh(`Voucher { channel_id, cumulative_amount, expires_at }`). Produced
-/// via a real Borsh encoder so the test drives the verifier with the actual
-/// wire codec rather than re-implementing its hand-rolled mirror. Field order
-/// differs from [`VoucherArgs`] (the ix-arg codec): the signed payload puts
-/// `channel_id` first.
-fn build_voucher_payload(channel_id: &Pubkey, cumulative: u64, expires_at: i64) -> [u8; 48] {
-    #[derive(borsh::BorshSerialize)]
-    struct Voucher {
-        channel_id: [u8; 32],
-        cumulative_amount: u64,
-        expires_at: i64,
-    }
-    borsh::to_vec(&Voucher {
-        channel_id: channel_id.to_bytes(),
-        cumulative_amount: cumulative,
-        expires_at,
-    })
-    .expect("voucher borsh encoding")
-    .try_into()
-    .expect("48-byte voucher payload")
+/// Borsh-serialize the client `VoucherArgs`. The on-chain struct's field
+/// order (`channel_id || cumulative_amount || expires_at`) matches the
+/// ed25519-signed payload byte-for-byte, so the client's Borsh output IS
+/// the message the precompile must verify.
+fn voucher_payload(voucher: &VoucherArgs) -> [u8; 48] {
+    borsh::to_vec(voucher)
+        .expect("voucher borsh encoding")
+        .try_into()
+        .expect("48-byte voucher payload")
 }
 
 /// Canonical single-signature inline Ed25519 precompile ix:
@@ -100,9 +89,9 @@ fn build_ed25519_ix(pubkey: &[u8; 32], signature: &[u8; 64], message: &[u8; 48])
     data.push(0u8); // padding
 
     let header_len: u16 = 2 + 14;
-    let pubkey_offset = header_len; // 16
-    let signature_offset = pubkey_offset + 32; // 48
-    let message_offset = signature_offset + 64; // 112
+    let pubkey_offset = header_len;
+    let signature_offset = pubkey_offset + 32;
+    let message_offset = signature_offset + 64;
     let message_size: u16 = 48;
 
     data.extend_from_slice(&signature_offset.to_le_bytes());
@@ -165,19 +154,17 @@ fn settle_advances_watermark_on_valid_voucher() {
     seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
 
     let cumulative = 500_000u64;
-    let payload = build_voucher_payload(&channel, cumulative, 0);
+    let voucher = VoucherArgs {
+        channel_id: channel,
+        cumulative_amount: cumulative,
+        expires_at: 0,
+    };
+    let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = signer.sign_message(&payload).into();
     let pubkey = signer.pubkey().to_bytes();
 
     let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
-    let settle_ix = build_settle_ix(
-        &channel,
-        VoucherArgs {
-            cumulative_amount: cumulative,
-            expires_at: 0,
-            channel_id: channel,
-        },
-    );
+    let settle_ix = build_settle_ix(&channel, voucher);
 
     let msg = Message::new(&[ed25519_ix, settle_ix], Some(&fee_payer.pubkey()));
     let tx = Transaction::new(&[&fee_payer], msg, svm.latest_blockhash());
@@ -199,9 +186,9 @@ fn settle_without_preceding_ed25519_ix_rejects() {
     let settle_ix = build_settle_ix(
         &channel,
         VoucherArgs {
+            channel_id: channel,
             cumulative_amount: 500_000,
             expires_at: 0,
-            channel_id: channel,
         },
     );
 
@@ -225,19 +212,17 @@ fn settle_on_non_open_status_rejects() {
     seed_channel(&mut svm, &channel, 1, 1_000_000, 0, &signer.pubkey());
 
     let cumulative = 500_000u64;
-    let payload = build_voucher_payload(&channel, cumulative, 0);
+    let voucher = VoucherArgs {
+        channel_id: channel,
+        cumulative_amount: cumulative,
+        expires_at: 0,
+    };
+    let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = signer.sign_message(&payload).into();
     let pubkey = signer.pubkey().to_bytes();
 
     let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
-    let settle_ix = build_settle_ix(
-        &channel,
-        VoucherArgs {
-            cumulative_amount: cumulative,
-            expires_at: 0,
-            channel_id: channel,
-        },
-    );
+    let settle_ix = build_settle_ix(&channel, voucher);
 
     let msg = Message::new(&[ed25519_ix, settle_ix], Some(&fee_payer.pubkey()));
     let tx = Transaction::new(&[&fee_payer], msg, svm.latest_blockhash());

@@ -10,6 +10,7 @@ use pinocchio::{AccountView, Address, error::ProgramError, sysvars::instructions
 
 use crate::errors::PaymentChannelsError;
 use crate::instructions::VoucherArgs;
+use crate::state::Transmutable;
 use crate::state::channel::Channel;
 
 /// Verify a voucher against the channel and the preceding Ed25519 ix.
@@ -65,8 +66,7 @@ fn verify_parsed(
         return Err(PaymentChannelsError::VoucherWatermarkNotMonotonic.into());
     }
 
-    let payload = payload::build_signed_payload(voucher);
-    if parsed.message != payload.as_slice() {
+    if parsed.message != voucher.as_bytes() {
         return Err(PaymentChannelsError::VoucherMessageMismatch.into());
     }
 
@@ -78,40 +78,22 @@ fn verify_parsed(
     Ok(cumulative)
 }
 
-mod payload {
-    use super::{Address, VoucherArgs};
-
-    /// Byte length of the signed voucher payload — `channel_id (32) ||
-    /// cumulative_amount (8 LE) || expires_at (8 LE)`. Also the canonical
-    /// `message_data_size` the Ed25519 precompile ix must declare; pinned
-    /// by [`super::ed25519_ix::parse`] against a layout where an attacker has the
-    /// precompile verify a truncated or extended message.
-    pub(super) const VOUCHER_PAYLOAD_SIZE: usize = 48;
-
-    /// Borsh(`Voucher { channel_id, cumulative_amount, expires_at }`).
-    /// Hand-rolled because the 48-byte layout is part of the off-chain
-    /// signer contract.
-    pub(super) fn build_signed_payload(v: &VoucherArgs) -> [u8; VOUCHER_PAYLOAD_SIZE] {
-        let channel_id: Address = v.channel_id;
-        let cumulative: u64 = v.cumulative_amount();
-        let expires_at: i64 = v.expires_at();
-
-        let mut out = [0u8; VOUCHER_PAYLOAD_SIZE];
-        out[..32].copy_from_slice(channel_id.as_array());
-        out[32..40].copy_from_slice(&cumulative.to_le_bytes());
-        out[40..48].copy_from_slice(&expires_at.to_le_bytes());
-        out
-    }
-}
-
 mod ed25519_ix {
     //! Ed25519 precompile ix parser.
     //!
     //! All magic constants and layouts are sourced from the official Solana documentation.
     //! https://solana.com/docs/core/programs/precompiles#verify-ed25519-signature
 
-    use super::{PaymentChannelsError, payload::VOUCHER_PAYLOAD_SIZE};
+    use super::{PaymentChannelsError, Transmutable, VoucherArgs};
     use pinocchio::{Address, error::ProgramError};
+
+    /// Byte length of the signed voucher payload — `channel_id (32) ||
+    /// cumulative_amount (8 LE) || expires_at (8 LE)`, which is exactly the
+    /// in-memory layout of [`VoucherArgs`]. Also the canonical
+    /// `message_data_size` the Ed25519 precompile ix must declare; pinned
+    /// against a layout where an attacker has the precompile verify a
+    /// truncated or extended message.
+    const VOUCHER_PAYLOAD_SIZE: usize = <VoucherArgs as Transmutable>::LEN;
 
     /// Native program address of Ed25519SigVerify precompile.
     pub(super) const ED25519_PROGRAM_ID: Address =
@@ -314,36 +296,21 @@ mod tests {
 
     // --- payload contract -------------------------------------------------
 
+    /// Pins the `channel_id || cumulative_amount || expires_at` byte
+    /// layout that the off-chain signer and the Ed25519 precompile
+    /// depend on. `as_bytes` is a zero-cost reinterpretation of the
+    /// struct, so this doubles as a guard against anyone reordering
+    /// [`VoucherArgs`] without updating the signer contract.
     #[test]
-    fn payload_matches_borsh_voucher_struct() {
-        const SAMPLE_CUMULATIVE: u64 = u64::from_le_bytes([239, 205, 171, 137, 103, 69, 35, 1]);
-        #[derive(borsh::BorshSerialize)]
-        struct Voucher {
-            channel_id: [u8; 32],
-            cumulative_amount: u64,
-            expires_at: i64,
-        }
-        let args = VoucherArgs::new(SAMPLE_CUMULATIVE, -1i64, CHANNEL_ID);
-        let built = payload::build_signed_payload(&args);
-        let borshed = borsh::to_vec(&Voucher {
-            channel_id: *CHANNEL_ID.as_array(),
-            cumulative_amount: SAMPLE_CUMULATIVE,
-            expires_at: -1i64,
-        })
-        .unwrap();
-        assert_eq!(built.as_slice(), borshed.as_slice());
-        assert_eq!(built.len(), 48);
-    }
-
-    #[test]
-    fn payload_layout_channel_id_first_then_cumulative_then_expiry() {
+    fn voucher_args_bytes_match_signed_payload_layout() {
         const CUMULATIVE: u64 = u64::from_le_bytes([119, 102, 85, 68, 51, 34, 17, 0]);
         const EXPIRES_AT: i64 = i64::from_le_bytes([248, 249, 250, 251, 252, 253, 254, 127]);
-        let args = VoucherArgs::new(CUMULATIVE, EXPIRES_AT, CHANNEL_ID);
-        let built = payload::build_signed_payload(&args);
-        assert_eq!(&built[..32], CHANNEL_ID.as_array());
-        assert_eq!(&built[32..40], &CUMULATIVE.to_le_bytes());
-        assert_eq!(&built[40..48], &EXPIRES_AT.to_le_bytes());
+        let args = VoucherArgs::new(CHANNEL_ID, CUMULATIVE, EXPIRES_AT);
+        let bytes = args.as_bytes();
+        assert_eq!(bytes.len(), 48);
+        assert_eq!(&bytes[..32], CHANNEL_ID.as_array());
+        assert_eq!(&bytes[32..40], &CUMULATIVE.to_le_bytes());
+        assert_eq!(&bytes[40..48], &EXPIRES_AT.to_le_bytes());
     }
 
     // --- happy paths ------------------------------------------------------
@@ -351,9 +318,9 @@ mod tests {
     #[test]
     fn ok_strict_monotonic_no_expiry() {
         let ch = make_channel(100, 1_000, AUTH);
-        let v = VoucherArgs::new(200, 0, CHANNEL_ID);
-        let msg = payload::build_signed_payload(&v);
-        let parsed = valid_parsed(&msg);
+        let v = VoucherArgs::new(CHANNEL_ID, 200, 0);
+        let msg = v.as_bytes();
+        let parsed = valid_parsed(msg);
         let out = verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 1_000_000).unwrap();
         assert_eq!(out, 200);
     }
@@ -361,9 +328,9 @@ mod tests {
     #[test]
     fn ok_expiry_in_future() {
         let ch = make_channel(100, 500, AUTH);
-        let v = VoucherArgs::new(500, 2_000, CHANNEL_ID);
-        let msg = payload::build_signed_payload(&v);
-        let parsed = valid_parsed(&msg);
+        let v = VoucherArgs::new(CHANNEL_ID, 500, 2_000);
+        let msg = v.as_bytes();
+        let parsed = valid_parsed(msg);
         let out = verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 1_999).unwrap();
         assert_eq!(out, 500);
     }
@@ -373,9 +340,9 @@ mod tests {
     #[test]
     fn wrong_channel_id() {
         let ch = make_channel(0, 500, AUTH);
-        let v = VoucherArgs::new(100, 0, Address::new_from_array([9u8; 32]));
-        let msg = payload::build_signed_payload(&v);
-        let parsed = valid_parsed(&msg);
+        let v = VoucherArgs::new(Address::new_from_array([9u8; 32]), 100, 0);
+        let msg = v.as_bytes();
+        let parsed = valid_parsed(msg);
         expect_err(
             verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
             PaymentChannelsError::VoucherChannelMismatch,
@@ -385,9 +352,9 @@ mod tests {
     #[test]
     fn now_equals_expires_at() {
         let ch = make_channel(0, 500, AUTH);
-        let v = VoucherArgs::new(100, 500, CHANNEL_ID);
-        let msg = payload::build_signed_payload(&v);
-        let parsed = valid_parsed(&msg);
+        let v = VoucherArgs::new(CHANNEL_ID, 100, 500);
+        let msg = v.as_bytes();
+        let parsed = valid_parsed(msg);
         expect_err(
             verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 500),
             PaymentChannelsError::VoucherExpired,
@@ -397,9 +364,9 @@ mod tests {
     #[test]
     fn now_past_expires_at() {
         let ch = make_channel(0, 500, AUTH);
-        let v = VoucherArgs::new(100, 500, CHANNEL_ID);
-        let msg = payload::build_signed_payload(&v);
-        let parsed = valid_parsed(&msg);
+        let v = VoucherArgs::new(CHANNEL_ID, 100, 500);
+        let msg = v.as_bytes();
+        let parsed = valid_parsed(msg);
         expect_err(
             verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 501),
             PaymentChannelsError::VoucherExpired,
@@ -409,9 +376,9 @@ mod tests {
     #[test]
     fn negative_expires_at_fails_closed() {
         let ch = make_channel(0, 500, AUTH);
-        let v = VoucherArgs::new(100, -1, CHANNEL_ID);
-        let msg = payload::build_signed_payload(&v);
-        let parsed = valid_parsed(&msg);
+        let v = VoucherArgs::new(CHANNEL_ID, 100, -1);
+        let msg = v.as_bytes();
+        let parsed = valid_parsed(msg);
         expect_err(
             verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
             PaymentChannelsError::VoucherExpired,
@@ -421,9 +388,9 @@ mod tests {
     #[test]
     fn cumulative_equals_settled() {
         let ch = make_channel(250, 500, AUTH);
-        let v = VoucherArgs::new(250, 0, CHANNEL_ID);
-        let msg = payload::build_signed_payload(&v);
-        let parsed = valid_parsed(&msg);
+        let v = VoucherArgs::new(CHANNEL_ID, 250, 0);
+        let msg = v.as_bytes();
+        let parsed = valid_parsed(msg);
         expect_err(
             verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
             PaymentChannelsError::VoucherWatermarkNotMonotonic,
@@ -433,9 +400,9 @@ mod tests {
     #[test]
     fn cumulative_below_settled() {
         let ch = make_channel(250, 500, AUTH);
-        let v = VoucherArgs::new(100, 0, CHANNEL_ID);
-        let msg = payload::build_signed_payload(&v);
-        let parsed = valid_parsed(&msg);
+        let v = VoucherArgs::new(CHANNEL_ID, 100, 0);
+        let msg = v.as_bytes();
+        let parsed = valid_parsed(msg);
         expect_err(
             verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
             PaymentChannelsError::VoucherWatermarkNotMonotonic,
@@ -445,9 +412,9 @@ mod tests {
     #[test]
     fn cumulative_zero_on_fresh_channel() {
         let ch = make_channel(0, 500, AUTH);
-        let v = VoucherArgs::new(0, 0, CHANNEL_ID);
-        let msg = payload::build_signed_payload(&v);
-        let parsed = valid_parsed(&msg);
+        let v = VoucherArgs::new(CHANNEL_ID, 0, 0);
+        let msg = v.as_bytes();
+        let parsed = valid_parsed(msg);
         expect_err(
             verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
             PaymentChannelsError::VoucherWatermarkNotMonotonic,
@@ -457,9 +424,9 @@ mod tests {
     #[test]
     fn cumulative_above_deposit() {
         let ch = make_channel(0, 500, AUTH);
-        let v = VoucherArgs::new(501, 0, CHANNEL_ID);
-        let msg = payload::build_signed_payload(&v);
-        let parsed = valid_parsed(&msg);
+        let v = VoucherArgs::new(CHANNEL_ID, 501, 0);
+        let msg = v.as_bytes();
+        let parsed = valid_parsed(msg);
         expect_err(
             verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
             PaymentChannelsError::VoucherOverDeposit,
@@ -599,8 +566,8 @@ mod tests {
     #[test]
     fn message_off_by_one_byte() {
         let ch = make_channel(0, 500, AUTH);
-        let v = VoucherArgs::new(100, 0, CHANNEL_ID);
-        let mut msg: Vec<u8> = payload::build_signed_payload(&v).to_vec();
+        let v = VoucherArgs::new(CHANNEL_ID, 100, 0);
+        let mut msg: Vec<u8> = v.as_bytes().to_vec();
         msg[0] ^= 1;
         let parsed = valid_parsed(&msg);
         expect_err(
@@ -612,11 +579,11 @@ mod tests {
     #[test]
     fn precompile_pubkey_not_authorized_signer() {
         let ch = make_channel(0, 500, AUTH);
-        let v = VoucherArgs::new(100, 0, CHANNEL_ID);
-        let msg = payload::build_signed_payload(&v);
+        let v = VoucherArgs::new(CHANNEL_ID, 100, 0);
+        let msg = v.as_bytes();
         let parsed = ed25519_ix::Parsed {
             pubkey: OTHER_PUBKEY.as_array(),
-            message: &msg,
+            message: msg,
         };
         expect_err(
             verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
