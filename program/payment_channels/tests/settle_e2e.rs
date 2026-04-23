@@ -18,7 +18,8 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 
-const PROGRAM_ID: Pubkey = Pubkey::new_from_array(*payment_channels::ID.as_array());
+mod common;
+use common::{PROGRAM_ID, load_program};
 
 fn instructions_sysvar_id() -> Pubkey {
     Pubkey::from_str("Sysvar1nstructions1111111111111111111111111").unwrap()
@@ -26,15 +27,6 @@ fn instructions_sysvar_id() -> Pubkey {
 
 fn ed25519_program_id() -> Pubkey {
     Pubkey::from_str("Ed25519SigVerify111111111111111111111111111").unwrap()
-}
-
-fn load_program() -> LiteSVM {
-    let mut svm = LiteSVM::new();
-    let path = std::env::var("PAYMENT_CHANNELS_SO")
-        .unwrap_or_else(|_| "../../target/deploy/payment_channels.so".into());
-    svm.add_program_from_file(PROGRAM_ID, &path)
-        .unwrap_or_else(|e| panic!("failed to load {path}: {e:?}"));
-    svm
 }
 
 /// Seed a `Channel` PDA (208-byte `#[repr(C, packed)]` layout) owned by the

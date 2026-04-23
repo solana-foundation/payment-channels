@@ -28,16 +28,8 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 
-const PROGRAM_ID: Pubkey = Pubkey::new_from_array(*payment_channels::ID.as_array());
-
-fn load_program() -> LiteSVM {
-    let mut svm = LiteSVM::new();
-    let path = std::env::var("PAYMENT_CHANNELS_SO")
-        .unwrap_or_else(|_| "../../target/deploy/payment_channels.so".into());
-    svm.add_program_from_file(PROGRAM_ID, &path)
-        .unwrap_or_else(|e| panic!("failed to load {path}: {e:?}"));
-    svm
-}
+mod common;
+use common::{PROGRAM_ID, load_program};
 
 fn event_authority() -> (Pubkey, u8) {
     Pubkey::find_program_address(&[EVENT_AUTHORITY_SEED], &PROGRAM_ID)
