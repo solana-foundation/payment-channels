@@ -19,6 +19,23 @@ use pinocchio::error::ProgramError;
 pub unsafe trait Transmutable {
     /// On-wire byte length of the type.
     const LEN: usize;
+
+    /// Reverse of [`load`]: reinterpret `self` as its `Self::LEN` raw
+    /// bytes. The trait's safety invariant (align-1, no padding,
+    /// `LEN == size_of`) makes this a trivially safe byte view.
+    #[inline(always)]
+    fn as_bytes(&self) -> &[u8]
+    where
+        Self: Sized,
+    {
+        const {
+            assert!(
+                core::mem::align_of::<Self>() == 1,
+                "Transmutable types must have alignment 1",
+            );
+        };
+        unsafe { core::slice::from_raw_parts(self as *const Self as *const u8, Self::LEN) }
+    }
 }
 
 /// Reinterpret `bytes` as `&T`. Validates length only and alignment.
@@ -105,6 +122,13 @@ mod tests {
         }
         assert_eq!(bytes[0], 0x42);
         assert_eq!(u64::from_le_bytes(bytes[1..9].try_into().unwrap()), 1234);
+    }
+
+    #[test]
+    fn as_bytes_round_trips_through_load() {
+        let bytes = [0xAB, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01];
+        let s = unsafe { load::<Sample>(&bytes) }.expect("load");
+        assert_eq!(s.as_bytes(), &bytes);
     }
 
     #[test]
