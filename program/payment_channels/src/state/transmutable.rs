@@ -21,8 +21,7 @@ pub unsafe trait Transmutable {
     const LEN: usize;
 
     /// Reverse of [`load`]: reinterpret `self` as its `Self::LEN` raw
-    /// bytes. The trait's safety invariant (align-1, no padding,
-    /// `LEN == size_of`) makes this a trivially safe byte view.
+    /// bytes.
     #[inline(always)]
     fn as_bytes(&self) -> &[u8]
     where
