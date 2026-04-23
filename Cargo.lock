@@ -3279,6 +3279,7 @@ dependencies = [
  "serde_json",
  "solana-account",
  "solana-address 2.6.0",
+ "solana-clock",
  "solana-instruction",
  "solana-keypair",
  "solana-message",

@@ -9,6 +9,7 @@ use payment_channels::PaymentChannelsError;
 use payment_channels_client::instructions::{Settle, SettleInstructionArgs};
 use payment_channels_client::types::{SettleArgs, VoucherArgs};
 use solana_account::Account;
+use solana_clock::Clock;
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -217,5 +218,47 @@ fn settle_on_non_open_status_rejects() {
     expect_custom_err(
         svm.send_transaction(tx),
         PaymentChannelsError::InvalidChannelStatus,
+    );
+}
+
+#[test]
+fn settle_after_expiry_rejects() {
+    let mut svm = load_program();
+    let fee_payer = Keypair::new();
+    svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
+
+    let signer = Keypair::new();
+    let channel = Pubkey::new_unique();
+    seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
+
+    // Pin `now >= expires_at` by warping the Clock sysvar to the
+    // voucher's TTL. `verify_voucher` rejects on `>=`, so equality
+    // is the tight boundary of "expiry has been reached".
+    let expires_at: i64 = 1_700_000_000;
+    let mut clock = svm.get_sysvar::<Clock>();
+    clock.unix_timestamp = expires_at;
+    svm.set_sysvar::<Clock>(&clock);
+
+    let voucher = VoucherArgs {
+        channel_id: channel,
+        cumulative_amount: 500_000,
+        expires_at,
+    };
+    let payload = voucher_payload(&voucher);
+    let signature: [u8; 64] = signer.sign_message(&payload).into();
+    let pubkey = signer.pubkey().to_bytes();
+
+    let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
+    let settle_ix = build_settle_ix(&channel, voucher);
+
+    let tx = Transaction::new_signed_with_payer(
+        &[ed25519_ix, settle_ix],
+        Some(&fee_payer.pubkey()),
+        &[&fee_payer],
+        svm.latest_blockhash(),
+    );
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::VoucherExpired,
     );
 }
