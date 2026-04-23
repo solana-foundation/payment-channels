@@ -6,8 +6,9 @@
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 use payment_channels::event_engine::event_authority_pda;
-use payment_channels::instructions::open::{DISCRIMINATOR, MAX_DISTRIBUTION_RECIPIENTS};
-use payment_channels::state::{AccountDiscriminator, CURRENT_CHANNEL_VERSION, Channel, ChannelStatus};
+use payment_channels::state::{
+    AccountDiscriminator, CURRENT_CHANNEL_VERSION, Channel, ChannelStatus,
+};
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_message::Message;
@@ -15,7 +16,8 @@ use solana_pubkey::{Pubkey, pubkey};
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-const PROGRAM_ID: Pubkey = Pubkey::new_from_array(*payment_channels::ID.as_array());
+use super::{PROGRAM_ID, open_ix_data, so_path};
+
 const EVENT_AUTHORITY: Pubkey = Pubkey::new_from_array(*event_authority_pda::ID.as_array());
 
 const SPL_TOKEN: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -28,29 +30,11 @@ const DEPOSIT: u64 = 5_000_000;
 const GRACE_PERIOD: u32 = 7200;
 
 fn load_svm() -> LiteSVM {
-    let path = std::env::var("PAYMENT_CHANNELS_SO")
-        .unwrap_or_else(|_| "../../target/deploy/payment_channels.so".into());
+    let path = so_path();
     let mut svm = LiteSVM::new();
     svm.add_program_from_file(PROGRAM_ID, &path)
         .unwrap_or_else(|e| panic!("failed to load {path}: {e:?}"));
     svm
-}
-
-fn open_ix_data(num_recipients: u8) -> Vec<u8> {
-    let mut data = vec![DISCRIMINATOR];
-    data.extend_from_slice(&SALT.to_le_bytes());
-    data.extend_from_slice(&DEPOSIT.to_le_bytes());
-    data.extend_from_slice(&GRACE_PERIOD.to_le_bytes());
-    data.push(num_recipients);
-    for i in 0..MAX_DISTRIBUTION_RECIPIENTS {
-        if (i as u8) < num_recipients {
-            data.extend_from_slice(&[i as u8 + 1; 32]); // recipient
-            data.extend_from_slice(&(1000u64 + i as u64).to_le_bytes()); // amount
-        } else {
-            data.extend_from_slice(&[0u8; 40]);
-        }
-    }
-    data
 }
 
 fn read_u64(data: &[u8], offset: usize) -> u64 {
@@ -114,7 +98,7 @@ fn open_sets_channel_fields() {
 
     let ix = Instruction::new_with_bytes(
         PROGRAM_ID,
-        &open_ix_data(1),
+        &open_ix_data(SALT, DEPOSIT, GRACE_PERIOD, 1),
         vec![
             AccountMeta::new(payer.pubkey(), true),
             AccountMeta::new_readonly(payee, false),
@@ -136,7 +120,10 @@ fn open_sets_channel_fields() {
     let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
     svm.send_transaction(tx).expect("open should succeed");
 
-    let channel_data = svm.get_account(&channel).expect("channel account missing").data;
+    let channel_data = svm
+        .get_account(&channel)
+        .expect("channel account missing")
+        .data;
 
     assert_eq!(channel_data.len(), Channel::LEN, "channel data length");
 
@@ -169,9 +156,17 @@ fn open_sets_channel_fields() {
     assert_eq!(read_i64(&channel_data, 36), 0, "closure_started_at");
     assert_eq!(read_i64(&channel_data, 44), 0, "payer_withdrawn_at");
     assert_eq!(read_u32(&channel_data, 52), GRACE_PERIOD);
-    assert_ne!(&channel_data[56..88], &[0u8; 32], "distribution_hash must be set");
+    assert_ne!(
+        &channel_data[56..88],
+        &[0u8; 32],
+        "distribution_hash must be set"
+    );
     assert_eq!(&channel_data[88..120], payer.pubkey().as_array(), "payer");
     assert_eq!(&channel_data[120..152], payee.as_array(), "payee");
-    assert_eq!(&channel_data[152..184], authorized_signer.as_array(), "authorized_signer");
+    assert_eq!(
+        &channel_data[152..184],
+        authorized_signer.as_array(),
+        "authorized_signer"
+    );
     assert_eq!(&channel_data[184..216], mint.as_array(), "mint");
 }

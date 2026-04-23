@@ -224,7 +224,11 @@ fn blake3(_input: &[u8]) -> [u8; 32] {
 
 /// Payer-signed; creates the [`Channel`](crate::Channel) PDA, locks the
 /// deposit, and commits the distribution hash.
-pub fn process(program_id: &Address, accounts: &mut [AccountView], args: &OpenArgs) -> ProgramResult {
+pub fn process(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    args: &OpenArgs,
+) -> ProgramResult {
     let accs = OpenAccounts::try_from(accounts)?;
 
     if !accs.payer.is_signer() {
@@ -303,8 +307,13 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], args: &OpenAr
     .invoke()?;
 
     // Transfer the deposit from payer to escrow.
-    TransferTokens::new(accs.payer_token_account, accs.channel_token_account, accs.payer, deposit)
-        .invoke()?;
+    TransferTokens::new(
+        accs.payer_token_account,
+        accs.channel_token_account,
+        accs.payer,
+        deposit,
+    )
+    .invoke()?;
 
     Channel::init_at(
         &mut accs.channel.try_borrow_mut()?,
