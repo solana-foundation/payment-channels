@@ -63,11 +63,8 @@ pub struct OpenArgs {
     /// used; trailing entries must be zeroed.  `open` computes
     /// `blake3(num_recipients_byte || active_entries_bytes)` and stores the
     /// digest as [`Channel::distribution_hash`](crate::Channel::distribution_hash).
-    #[cfg_attr(
-        feature = "idl",
-        codama(type = fixed_count(array, MAX_DISTRIBUTION_RECIPIENTS))
-    )]
-    pub recipients: [DistributionEntry; MAX_DISTRIBUTION_RECIPIENTS],
+    // codama requires a literal array size; MAX_DISTRIBUTION_RECIPIENTS = 30.
+    pub recipients: [DistributionEntry; 30],
 }
 
 impl OpenArgs {

@@ -18,7 +18,7 @@ use payment_channels::PaymentChannelsError;
 use payment_channels::event_engine::{EMIT_EVENT_IX_DISC, EVENT_AUTHORITY_SEED, EVENT_IX_TAG_LE};
 use payment_channels::events::Opened;
 use payment_channels_client::instructions::{Open, OpenInstructionArgs};
-use payment_channels_client::types::OpenArgs;
+use payment_channels_client::types::{DistributionEntry, OpenArgs};
 use solana_instruction::error::InstructionError;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
@@ -60,6 +60,7 @@ fn build_open_ix(payer: &Pubkey, channel: &Pubkey, args: OpenArgs) -> Instructio
         token_program: Pubkey::new_unique(),
         system_program: Pubkey::new_unique(),
         rent: Pubkey::new_unique(),
+        associated_token_program: Pubkey::new_unique(),
         event_authority: event_authority_pubkey,
         self_program: PROGRAM_ID,
     }
@@ -85,11 +86,16 @@ fn open_emits_opened_event_with_anchor_compatible_wire_format() {
     fund(&mut svm, &payer.pubkey(), 10_000_000_000);
     let channel = Pubkey::new_unique();
 
+    let dummy_entry = || DistributionEntry {
+        recipient: Pubkey::new_unique(),
+        amount: 1_000_000,
+    };
     let args = OpenArgs {
         salt: 1,
         deposit: 100_000_000,
         grace_period: 3_600,
-        distribution_hash: [0x42; 32],
+        num_recipients: 1,
+        recipients: core::array::from_fn(|_| dummy_entry()),
     };
     let meta = send_open(&mut svm, &payer, &channel, args).expect("tx ok");
 

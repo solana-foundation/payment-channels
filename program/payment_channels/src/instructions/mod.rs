@@ -83,6 +83,7 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
         codama(account(name = "token_program")),
         codama(account(name = "system_program", default_value = program("system"))),
         codama(account(name = "rent")),
+        codama(account(name = "associated_token_program")),
         codama(account(name = "event_authority")),
         codama(account(name = "self_program"))
     )]

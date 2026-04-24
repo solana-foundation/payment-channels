@@ -170,6 +170,7 @@ pub(super) fn derive_pdas(
 }
 
 /// Build the `open` instruction with all 13 accounts wired up.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn open_ix(
     payer: &Pubkey,
     payee: &Pubkey,
