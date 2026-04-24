@@ -40,4 +40,12 @@ pub enum PaymentChannelsError {
     VoucherSignerMismatch = 12,
     #[error("Distribution hash mismatch")]
     InvalidDistributionHash = 13,
+    #[error("Deposit must be non-zero")]
+    DepositMustBeNonZero = 14,
+    #[error("Recipient count must be between 1 and 30")]
+    InvalidRecipientCount = 15,
+    #[error("Channel account does not match derived PDA")]
+    ChannelAddressMismatch = 16,
+    #[error("Escrow account does not match derived ATA")]
+    EscrowAddressMismatch = 17,
 }

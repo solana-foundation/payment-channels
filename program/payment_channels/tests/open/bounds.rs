@@ -4,6 +4,7 @@
 //! (via `run_open`) is sufficient — no LiteSVM chain needed.
 
 use mollusk_svm::result::ProgramResult;
+use payment_channels::PaymentChannelsError;
 use payment_channels::instructions::open::MAX_DISTRIBUTION_RECIPIENTS;
 use solana_program_error::ProgramError;
 
@@ -17,7 +18,9 @@ const GRACE: u32 = 3600;
 fn zero_deposit_rejected() {
     assert_eq!(
         run_open(open_ix_data(SALT, 0, GRACE, 1)),
-        ProgramResult::Failure(ProgramError::InvalidInstructionData),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::DepositMustBeNonZero as u32
+        )),
     );
 }
 
@@ -25,7 +28,9 @@ fn zero_deposit_rejected() {
 fn zero_recipients_rejected() {
     assert_eq!(
         run_open(open_ix_data(SALT, DEPOSIT, GRACE, 0)),
-        ProgramResult::Failure(ProgramError::InvalidInstructionData),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::InvalidRecipientCount as u32
+        )),
     );
 }
 
@@ -38,6 +43,8 @@ fn too_many_recipients_rejected() {
             GRACE,
             MAX_DISTRIBUTION_RECIPIENTS as u8 + 1
         )),
-        ProgramResult::Failure(ProgramError::InvalidInstructionData),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::InvalidRecipientCount as u32
+        )),
     );
 }

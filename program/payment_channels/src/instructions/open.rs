@@ -6,6 +6,7 @@ use pinocchio_associated_token_account::instructions::Create as CreateAta;
 use pinocchio_system::instructions::CreateAccount;
 use pinocchio_token::instructions::Transfer as TransferTokens;
 
+use crate::errors::PaymentChannelsError;
 use crate::state::Channel;
 
 use crate::event_engine::EventSerialize;
@@ -216,12 +217,12 @@ pub fn process(
 
     let n = args.num_recipients as usize;
     if n == 0 || n > MAX_DISTRIBUTION_RECIPIENTS {
-        return Err(ProgramError::InvalidInstructionData);
+        return Err(PaymentChannelsError::InvalidRecipientCount.into());
     }
 
     let deposit = args.deposit();
     if deposit == 0 {
-        return Err(ProgramError::InvalidInstructionData);
+        return Err(PaymentChannelsError::DepositMustBeNonZero.into());
     }
 
     let distribution_hash = distribution_hash(args, n);
@@ -237,7 +238,7 @@ pub fn process(
     // Client-side derives these addresses; validate explicitly as defense in
     // depth before any mutation (CPI enforcement provides a second layer).
     if accs.channel.address() != &channel_address {
-        return Err(ProgramError::InvalidAccountData);
+        return Err(PaymentChannelsError::ChannelAddressMismatch.into());
     }
     let (expected_ata, _) = Address::find_program_address(
         &[
@@ -248,7 +249,7 @@ pub fn process(
         &pinocchio_associated_token_account::ID,
     );
     if accs.channel_token_account.address() != &expected_ata {
-        return Err(ProgramError::InvalidAccountData);
+        return Err(PaymentChannelsError::EscrowAddressMismatch.into());
     }
 
     // Allocate the channel PDA. The runtime verifies the seeds match

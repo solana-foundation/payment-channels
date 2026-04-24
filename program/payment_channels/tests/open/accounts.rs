@@ -4,6 +4,7 @@
 //! PDA / ATA key checks use LiteSVM (fire after the channel is initialised).
 
 use mollusk_svm::result::ProgramResult;
+use payment_channels::PaymentChannelsError;
 use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_message::Message;
@@ -13,7 +14,7 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 
 use super::{derive_pdas, load_mollusk, open_ix, open_ix_data, run_open, setup_funded_svm};
-use crate::common::{PROGRAM_ID, load_program};
+use crate::common::{PROGRAM_ID, expect_custom_err, load_program};
 
 const SALT: u64 = 1;
 const DEPOSIT: u64 = 1_000_000;
@@ -22,12 +23,14 @@ const GRACE: u32 = 3600;
 // ----- signer checks (Mollusk) -----------------------------------------------
 
 /// A signed payer advances past signer validation and fails at the channel-address
-/// check (`InvalidAccountData`) because the dummy channel pubkey is not the PDA.
+/// check because the dummy channel pubkey is not the PDA.
 #[test]
 fn signed_payer_accepted() {
     assert_eq!(
         run_open(open_ix_data(SALT, DEPOSIT, GRACE, 1)),
-        ProgramResult::Failure(ProgramError::InvalidAccountData),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::ChannelAddressMismatch as u32
+        )),
     );
 }
 
@@ -100,17 +103,9 @@ fn wrong_channel_pda_rejected() {
     );
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
     let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
-    let err = svm.send_transaction(tx).unwrap_err();
-
-    use solana_instruction::error::InstructionError;
-    use solana_transaction_error::TransactionError;
-    assert!(
-        matches!(
-            err.err,
-            TransactionError::InstructionError(_, InstructionError::InvalidAccountData)
-        ),
-        "expected InvalidAccountData, got {:?}",
-        err.err
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::ChannelAddressMismatch,
     );
 }
 
@@ -139,16 +134,8 @@ fn wrong_escrow_ata_rejected() {
     );
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
     let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
-    let err = svm.send_transaction(tx).unwrap_err();
-
-    use solana_instruction::error::InstructionError;
-    use solana_transaction_error::TransactionError;
-    assert!(
-        matches!(
-            err.err,
-            TransactionError::InstructionError(_, InstructionError::InvalidAccountData)
-        ),
-        "expected InvalidAccountData, got {:?}",
-        err.err
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::EscrowAddressMismatch,
     );
 }
