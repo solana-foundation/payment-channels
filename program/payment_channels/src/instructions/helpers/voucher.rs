@@ -33,7 +33,8 @@ pub fn verify_voucher(
     if ix.get_program_id() != &ed25519_ix::ED25519_PROGRAM_ID {
         return Err(PaymentChannelsError::MissingEd25519Verification.into());
     }
-    let parsed = ed25519_ix::parse(ix.get_instruction_data())?;
+    let parsed = ed25519_ix::parse(ix.get_instruction_data())
+        .map_err(|_| PaymentChannelsError::MalformedEd25519Instruction)?;
     verify_parsed(channel_address, channel, voucher, &parsed, now_unix)
 }
 
@@ -81,13 +82,15 @@ fn verify_parsed(
 mod ed25519_ix {
     //! Ed25519 precompile ix parser.
     //!
-    //! All magic constants and layouts are sourced from the official Solana documentation.
-    //! https://solana.com/docs/core/programs/precompiles#verify-ed25519-signature
+    //! Validates the canonical single-signature inline layout and returns
+    //! borrowed slices into the caller's bytes. All magic constants and
+    //! layouts are sourced from the official Solana documentation:
+    //! <https://solana.com/docs/core/programs/precompiles#verify-ed25519-signature>.
 
-    use super::{PaymentChannelsError, VOUCHER_PAYLOAD_SIZE};
-    use pinocchio::{Address, error::ProgramError};
+    use super::VOUCHER_PAYLOAD_SIZE;
+    use pinocchio::Address;
 
-    /// Native program address of Ed25519SigVerify precompile.
+    /// Native program address of the Ed25519SigVerify precompile.
     pub(super) const ED25519_PROGRAM_ID: Address =
         Address::from_str_const("Ed25519SigVerify111111111111111111111111111");
 
@@ -98,8 +101,7 @@ mod ed25519_ix {
     const SIGNATURE_SERIALIZED_SIZE: usize = 64;
 
     /// Byte position of the `Ed25519SignatureOffsets` array — sits
-    /// immediately after the `[num_signatures: u8, padding: u8]`
-    /// header.
+    /// immediately after the `[num_signatures: u8, padding: u8]` header.
     const SIGNATURE_OFFSETS_START: usize = 2;
 
     /// Byte width of one `Ed25519SignatureOffsets` record: seven
@@ -110,50 +112,84 @@ mod ed25519_ix {
     const SIGNATURE_OFFSETS_SERIALIZED_SIZE: usize = 14;
 
     /// Canonical byte offset of the pubkey region in a single-signature
-    /// inline ix (= 16): the first byte after the two-byte header plus
-    /// one offsets record.
+    /// inline ix (= 16): the first byte after the two-byte header plus one
+    /// offsets record.
     const PUBKEY_OFFSET: usize = SIGNATURE_OFFSETS_START + SIGNATURE_OFFSETS_SERIALIZED_SIZE;
 
-    /// Canonical byte offset of the signature region (= 48): pubkey
-    /// region immediately followed by the 64-byte signature.
+    /// Canonical byte offset of the signature region (= 48): pubkey region
+    /// immediately followed by the 64-byte signature.
     const SIGNATURE_OFFSET: usize = PUBKEY_OFFSET + PUBKEY_SERIALIZED_SIZE;
 
     /// Canonical byte offset of the message payload (= 112): signature
-    /// region immediately followed by the message. Message length is
-    /// taken from `message_data_size` (offsets[10..12]).
+    /// region immediately followed by the message. Message length is taken
+    /// from `message_data_size` (offsets[10..12]).
     const MESSAGE_OFFSET: usize = SIGNATURE_OFFSET + SIGNATURE_SERIALIZED_SIZE;
-
-    /// Parsed Ed25519 precompile ix data.
-    pub(super) struct Parsed<'a> {
-        /// Ed25519 pubkey.
-        pub pubkey: &'a [u8],
-        /// Ed25519 message.
-        pub message: &'a [u8],
-    }
 
     /// Canonical inline ix data length.
     const CANONICAL_IX_DATA_LEN: usize = MESSAGE_OFFSET + VOUCHER_PAYLOAD_SIZE;
 
+    /// Parsed Ed25519 precompile ix data. Sized-array refs let the caller
+    /// compare against `[u8; 32]` / `[u8; 48]` fixtures without slice-length
+    /// runtime checks.
+    pub(super) struct Parsed<'a> {
+        pub pubkey: &'a [u8; PUBKEY_SERIALIZED_SIZE],
+        pub message: &'a [u8; VOUCHER_PAYLOAD_SIZE],
+    }
+
+    /// Structural rejection reasons for `parse`. Every variant maps 1:1 to
+    /// a guard below; the enum exists so the test suite can pin which
+    /// guard fires on each malformed input, catching accidental merging
+    /// or removal of guards during refactors. Collapsed to a single
+    /// [`PaymentChannelsError::MalformedEd25519Instruction`] at the caller
+    /// edge, so on-chain error codes are unaffected.
+    ///
+    /// [`PaymentChannelsError::MalformedEd25519Instruction`]:
+    ///     crate::errors::PaymentChannelsError::MalformedEd25519Instruction
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(super) enum Ed25519ParseError {
+        /// `data.len() != CANONICAL_IX_DATA_LEN (= 160)`.
+        Length,
+        /// `num_signatures != 1`. N = 0 verifies nothing; N > 1 appends
+        /// further offsets records whose signatures we never parse, so the
+        /// surrounding ix could appear "verified" while those riders covered
+        /// arbitrary attacker-chosen bytes.
+        NumSignatures,
+        /// Header padding byte is non-zero.
+        Padding,
+        /// One of the three `*_instruction_index` fields is not `u16::MAX`;
+        /// the precompile would read from a sibling ix instead of this one.
+        CrossInstruction,
+        /// `signature_offset`, `public_key_offset`, or `message_data_offset`
+        /// doesn't match the canonical single-signature inline layout. The
+        /// precompile accepts any in-bounds offsets; without this pin a
+        /// non-canonical layout could verify cryptographically while our
+        /// hardcoded slices land on different bytes than the precompile
+        /// checked.
+        NonCanonicalOffsets,
+        /// `message_data_size != VOUCHER_PAYLOAD_SIZE (= 48)`.
+        MessageSize,
+    }
+
     /// Parse a single-signature Ed25519 precompile ix with the canonical
     /// inline layout. Validates every field of `Ed25519SignatureOffsets`.
-    pub(super) fn parse(data: &[u8]) -> Result<Parsed<'_>, ProgramError> {
+    pub(super) fn parse(data: &[u8]) -> Result<Parsed<'_>, Ed25519ParseError> {
         // Full canonical inline layout: `[num_sigs=1, pad=0, offsets×1, pubkey, signature, message]`.
         // Guard — length. Pins the full 160-byte canonical layout.
         if data.len() != CANONICAL_IX_DATA_LEN {
-            return Err(PaymentChannelsError::MalformedEd25519Instruction.into());
+            return Err(Ed25519ParseError::Length);
         }
 
         // Guard — `num_signatures == 1`. N = 0 verifies nothing; N > 1
-        // appends further offsets records whose signatures we never
-        // parse, so the surrounding ix could appear "verified" while
-        // those riders covered arbitrary attacker-chosen bytes.
+        // appends further offsets records whose signatures we never parse,
+        // so the surrounding ix could appear "verified" while those riders
+        // covered arbitrary attacker-chosen bytes.
         if data[0] != 1 {
-            return Err(PaymentChannelsError::MalformedEd25519Instruction.into());
+            return Err(Ed25519ParseError::NumSignatures);
         }
 
         // Guard — padding byte is zero.
         if data[1] != 0 {
-            return Err(PaymentChannelsError::MalformedEd25519Instruction.into());
+            return Err(Ed25519ParseError::Padding);
         }
 
         // Read the offset fields.
@@ -171,37 +207,43 @@ mod ed25519_ix {
         // Guard — cross-instruction indirection.
         // Native sentinel to force the precompile to read from our ix.
         if sig_ix != u16::MAX || pk_ix != u16::MAX || msg_ix != u16::MAX {
-            return Err(PaymentChannelsError::MalformedEd25519Instruction.into());
+            return Err(Ed25519ParseError::CrossInstruction);
         }
 
         // Guard — canonical byte offsets. The precompile accepts any
-        // in-bounds offsets, so without these pins a non-canonical
-        // layout could verify cryptographically while our hardcoded
-        // `data[16..48]` / `data[48..112]` reads land on different
-        // bytes than the precompile checked. Payload-match downstream
-        // would still catch the bypass (unless the signer explicitly
-        // signed the wrong-position bytes), but pinning here keeps
-        // slice bounds compile-time constant and narrows the off-chain
-        // signer contract to one wire encoding.
+        // in-bounds offsets, so without these pins a non-canonical layout
+        // could verify cryptographically while our hardcoded
+        // `data[16..48]` / `data[48..112]` reads land on different bytes
+        // than the precompile checked. Payload-match downstream would
+        // still catch the bypass (unless the signer explicitly signed the
+        // wrong-position bytes), but pinning here keeps slice bounds
+        // compile-time constant and narrows the off-chain signer contract
+        // to one wire encoding.
         if public_key_offset as usize != PUBKEY_OFFSET
             || signature_offset as usize != SIGNATURE_OFFSET
             || message_data_offset as usize != MESSAGE_OFFSET
         {
-            return Err(PaymentChannelsError::MalformedEd25519Instruction.into());
+            return Err(Ed25519ParseError::NonCanonicalOffsets);
         }
 
         // Guard — canonical message length (48 B: `channel_id ||
         // cumulative_amount || expires_at`, LE).
         if message_data_size as usize != VOUCHER_PAYLOAD_SIZE {
-            return Err(PaymentChannelsError::MalformedEd25519Instruction.into());
+            return Err(Ed25519ParseError::MessageSize);
         }
 
-        let message = &data[MESSAGE_OFFSET..MESSAGE_OFFSET + VOUCHER_PAYLOAD_SIZE];
+        // Bounds are compile-time constant thanks to the length + offset
+        // guards above, so slice → array references are infallible.
+        let pubkey: &[u8; PUBKEY_SERIALIZED_SIZE] = data
+            [PUBKEY_OFFSET..PUBKEY_OFFSET + PUBKEY_SERIALIZED_SIZE]
+            .try_into()
+            .unwrap();
+        let message: &[u8; VOUCHER_PAYLOAD_SIZE] = data
+            [MESSAGE_OFFSET..MESSAGE_OFFSET + VOUCHER_PAYLOAD_SIZE]
+            .try_into()
+            .unwrap();
 
-        Ok(Parsed {
-            pubkey: &data[PUBKEY_OFFSET..SIGNATURE_OFFSET],
-            message,
-        })
+        Ok(Parsed { pubkey, message })
     }
 }
 
@@ -282,7 +324,9 @@ mod tests {
     fn valid_parsed(message: &[u8]) -> ed25519_ix::Parsed<'_> {
         ed25519_ix::Parsed {
             pubkey: AUTH.as_array(),
-            message,
+            message: message
+                .try_into()
+                .expect("test message must be VOUCHER_PAYLOAD_SIZE"),
         }
     }
 
@@ -430,21 +474,8 @@ mod tests {
     /// Run `parse` and unwrap the expected error. Panics if parsing
     /// unexpectedly succeeds — structural-failure tests always pass
     /// deliberately malformed data.
-    fn parse_err(data: &[u8]) -> ProgramError {
+    fn parse_err(data: &[u8]) -> ed25519_ix::Ed25519ParseError {
         ed25519_ix::parse(data).err().expect("parse should fail")
-    }
-
-    /// Assert `err` is specifically
-    /// [`PaymentChannelsError::MalformedEd25519Instruction`]. Every
-    /// `parse`-path guard returns this variant, so structural tests
-    /// share this assertion instead of inlining `expect_err` each time.
-    fn assert_malformed(err: ProgramError) {
-        match err {
-            ProgramError::Custom(c) => {
-                assert_eq!(c, PaymentChannelsError::MalformedEd25519Instruction as u32)
-            }
-            other => panic!("expected MalformedEd25519Instruction, got {:?}", other),
-        }
     }
 
     #[test]
@@ -455,7 +486,7 @@ mod tests {
             &AUTH_SIGNATURE,
         );
         data[0] = 0;
-        assert_malformed(parse_err(&data));
+        assert_eq!(parse_err(&data), ed25519_ix::Ed25519ParseError::NumSignatures);
     }
 
     #[test]
@@ -466,7 +497,7 @@ mod tests {
             &AUTH_SIGNATURE,
         );
         data[0] = 2;
-        assert_malformed(parse_err(&data));
+        assert_eq!(parse_err(&data), ed25519_ix::Ed25519ParseError::NumSignatures);
     }
 
     #[test]
@@ -478,7 +509,10 @@ mod tests {
         );
         // signature_offset sits at offsets[0..2] → data[2..4]
         data[2..4].copy_from_slice(&49u16.to_le_bytes());
-        assert_malformed(parse_err(&data));
+        assert_eq!(
+            parse_err(&data),
+            ed25519_ix::Ed25519ParseError::NonCanonicalOffsets,
+        );
     }
 
     #[test]
@@ -490,7 +524,10 @@ mod tests {
         );
         // public_key_offset sits at offsets[4..6] → data[6..8]
         data[6..8].copy_from_slice(&17u16.to_le_bytes());
-        assert_malformed(parse_err(&data));
+        assert_eq!(
+            parse_err(&data),
+            ed25519_ix::Ed25519ParseError::NonCanonicalOffsets,
+        );
     }
 
     #[test]
@@ -502,7 +539,10 @@ mod tests {
         );
         // message_data_offset sits at offsets[8..10] → data[10..12]
         data[10..12].copy_from_slice(&113u16.to_le_bytes());
-        assert_malformed(parse_err(&data));
+        assert_eq!(
+            parse_err(&data),
+            ed25519_ix::Ed25519ParseError::NonCanonicalOffsets,
+        );
     }
 
     #[test]
@@ -516,7 +556,7 @@ mod tests {
             &AUTH_SIGNATURE,
         );
         data[12..14].copy_from_slice(&49u16.to_le_bytes());
-        assert_malformed(parse_err(&data));
+        assert_eq!(parse_err(&data), ed25519_ix::Ed25519ParseError::MessageSize);
     }
 
     #[test]
@@ -527,7 +567,7 @@ mod tests {
             &AUTH_SIGNATURE,
         );
         data[12..14].copy_from_slice(&47u16.to_le_bytes());
-        assert_malformed(parse_err(&data));
+        assert_eq!(parse_err(&data), ed25519_ix::Ed25519ParseError::MessageSize);
     }
 
     #[test]
@@ -536,7 +576,7 @@ mod tests {
         // fail fast before any offsets are read, so short ixs return a
         // clean error instead of panicking on out-of-bounds indexing.
         let short = [0u8; 159];
-        assert_malformed(parse_err(&short));
+        assert_eq!(parse_err(&short), ed25519_ix::Ed25519ParseError::Length);
     }
 
     #[test]
@@ -548,7 +588,7 @@ mod tests {
             &AUTH_SIGNATURE,
         );
         data.push(0u8);
-        assert_malformed(parse_err(&data));
+        assert_eq!(parse_err(&data), ed25519_ix::Ed25519ParseError::Length);
     }
 
     #[test]
@@ -559,7 +599,7 @@ mod tests {
             &AUTH_SIGNATURE,
         );
         data[1] = 1;
-        assert_malformed(parse_err(&data));
+        assert_eq!(parse_err(&data), ed25519_ix::Ed25519ParseError::Padding);
     }
 
     #[test]
@@ -572,7 +612,10 @@ mod tests {
         // offsets[2..4] is signature_instruction_index
         data[4] = 0;
         data[5] = 0;
-        assert_malformed(parse_err(&data));
+        assert_eq!(
+            parse_err(&data),
+            ed25519_ix::Ed25519ParseError::CrossInstruction,
+        );
     }
 
     #[test]
@@ -585,7 +628,10 @@ mod tests {
         // offsets[6..8] is pubkey_instruction_index
         data[8] = 0;
         data[9] = 0;
-        assert_malformed(parse_err(&data));
+        assert_eq!(
+            parse_err(&data),
+            ed25519_ix::Ed25519ParseError::CrossInstruction,
+        );
     }
 
     #[test]
@@ -598,7 +644,10 @@ mod tests {
         // offsets[12..14] is message_instruction_index
         data[14] = 0;
         data[15] = 0;
-        assert_malformed(parse_err(&data));
+        assert_eq!(
+            parse_err(&data),
+            ed25519_ix::Ed25519ParseError::CrossInstruction,
+        );
     }
 
     // --- Ed25519 content failures ----------------------------------------
@@ -623,7 +672,9 @@ mod tests {
         let msg = v.as_bytes();
         let parsed = ed25519_ix::Parsed {
             pubkey: OTHER_PUBKEY.as_array(),
-            message: msg,
+            message: msg
+                .try_into()
+                .expect("test message must be VOUCHER_PAYLOAD_SIZE"),
         };
         expect_err(
             verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
