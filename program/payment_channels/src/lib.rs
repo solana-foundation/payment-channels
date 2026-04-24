@@ -17,6 +17,8 @@ pinocchio::nostd_panic_handler!();
 pub mod constants;
 pub use constants::*;
 
+pub mod ed25519_parse;
+
 pub mod errors;
 pub use errors::*;
 
@@ -28,6 +30,8 @@ pub use instructions::*;
 
 pub mod state;
 pub use state::*;
+
+pub mod voucher_payload;
 
 declare_id!("GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc");
 

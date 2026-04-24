@@ -5,12 +5,18 @@
 //! binding / freshness / cap / strict monotonicity / message / precompile
 //! pubkey against the channel state. Pure validator; the caller is
 //! responsible for writing [`Channel::settled`] back.
+//!
+//! Byte-level payload + precompile-layout pins live in the sibling
+//! crate modules [`crate::voucher_payload`] and [`crate::ed25519_parse`]
+//! so SDKs can vendor them without dragging in pinocchio.
 
 use pinocchio::{AccountView, Address, error::ProgramError, sysvars::instructions::Instructions};
 
+use crate::ed25519_parse::{self, ED25519_PROGRAM_ID};
 use crate::errors::PaymentChannelsError;
 use crate::instructions::VoucherArgs;
 use crate::state::channel::Channel;
+use crate::voucher_payload::build_signed_payload;
 
 /// Verify a voucher against the channel and the preceding Ed25519 ix.
 /// Returns the new watermark on success.
@@ -29,10 +35,11 @@ pub fn verify_voucher(
     let ix = sysvar
         .load_instruction_at(prev_idx as usize)
         .map_err(|_| PaymentChannelsError::MissingEd25519Verification)?;
-    if ix.get_program_id() != &ed25519_ix::ED25519_PROGRAM_ID {
+    if ix.get_program_id().as_array() != &ED25519_PROGRAM_ID {
         return Err(PaymentChannelsError::MissingEd25519Verification.into());
     }
-    let parsed = ed25519_ix::parse(ix.get_instruction_data())?;
+    let parsed = ed25519_parse::parse(ix.get_instruction_data())
+        .map_err(|_| PaymentChannelsError::MalformedEd25519Instruction)?;
     verify_parsed(channel_address, channel, voucher, &parsed, now_unix)
 }
 
@@ -41,7 +48,7 @@ fn verify_parsed(
     channel_address: &Address,
     channel: &Channel,
     voucher: &VoucherArgs,
-    parsed: &ed25519_ix::Parsed<'_>,
+    parsed: &ed25519_parse::Parsed<'_>,
     now_unix: i64,
 ) -> Result<u64, ProgramError> {
     let v_channel_id: Address = voucher.channel_id;
@@ -65,8 +72,8 @@ fn verify_parsed(
         return Err(PaymentChannelsError::VoucherWatermarkNotMonotonic.into());
     }
 
-    let payload = payload::build_signed_payload(voucher);
-    if parsed.message != payload.as_slice() {
+    let payload = build_signed_payload(voucher.channel_id.as_array(), cumulative, expires_at);
+    if parsed.message != &payload {
         return Err(PaymentChannelsError::VoucherMessageMismatch.into());
     }
 
@@ -78,165 +85,13 @@ fn verify_parsed(
     Ok(cumulative)
 }
 
-mod payload {
-    use super::{Address, VoucherArgs};
-
-    /// Byte length of the signed voucher payload — `channel_id (32) ||
-    /// cumulative_amount (8 LE) || expires_at (8 LE)`. Also the canonical
-    /// `message_data_size` the Ed25519 precompile ix must declare; pinned
-    /// by [`super::ed25519_ix::parse`] against a layout where an attacker has the
-    /// precompile verify a truncated or extended message.
-    pub(super) const VOUCHER_PAYLOAD_SIZE: usize = 48;
-
-    /// Borsh(`Voucher { channel_id, cumulative_amount, expires_at }`).
-    /// Hand-rolled because the 48-byte layout is part of the off-chain
-    /// signer contract.
-    pub(super) fn build_signed_payload(v: &VoucherArgs) -> [u8; VOUCHER_PAYLOAD_SIZE] {
-        let channel_id: Address = v.channel_id;
-        let cumulative: u64 = v.cumulative_amount();
-        let expires_at: i64 = v.expires_at();
-
-        let mut out = [0u8; VOUCHER_PAYLOAD_SIZE];
-        out[..32].copy_from_slice(channel_id.as_array());
-        out[32..40].copy_from_slice(&cumulative.to_le_bytes());
-        out[40..48].copy_from_slice(&expires_at.to_le_bytes());
-        out
-    }
-}
-
-mod ed25519_ix {
-    //! Ed25519 precompile ix parser.
-    //!
-    //! All magic constants and layouts are sourced from the official Solana documentation.
-    //! https://solana.com/docs/core/programs/precompiles#verify-ed25519-signature
-
-    use super::{PaymentChannelsError, payload::VOUCHER_PAYLOAD_SIZE};
-    use pinocchio::{Address, error::ProgramError};
-
-    /// Native program address of Ed25519SigVerify precompile.
-    pub(super) const ED25519_PROGRAM_ID: Address =
-        Address::from_str_const("Ed25519SigVerify111111111111111111111111111");
-
-    /// Ed25519 pubkey byte width.
-    const PUBKEY_SERIALIZED_SIZE: usize = 32;
-
-    /// Ed25519 signature byte width.
-    const SIGNATURE_SERIALIZED_SIZE: usize = 64;
-
-    /// Byte position of the `Ed25519SignatureOffsets` array — sits
-    /// immediately after the `[num_signatures: u8, padding: u8]`
-    /// header.
-    const SIGNATURE_OFFSETS_START: usize = 2;
-
-    /// Byte width of one `Ed25519SignatureOffsets` record: seven
-    /// little-endian `u16` fields, in order — `signature_offset`,
-    /// `signature_instruction_index`, `public_key_offset`,
-    /// `public_key_instruction_index`, `message_data_offset`,
-    /// `message_data_size`, `message_instruction_index`.
-    const SIGNATURE_OFFSETS_SERIALIZED_SIZE: usize = 14;
-
-    /// Canonical byte offset of the pubkey region in a single-signature
-    /// inline ix (= 16): the first byte after the two-byte header plus
-    /// one offsets record.
-    const PUBKEY_OFFSET: usize = SIGNATURE_OFFSETS_START + SIGNATURE_OFFSETS_SERIALIZED_SIZE;
-
-    /// Canonical byte offset of the signature region (= 48): pubkey
-    /// region immediately followed by the 64-byte signature.
-    const SIGNATURE_OFFSET: usize = PUBKEY_OFFSET + PUBKEY_SERIALIZED_SIZE;
-
-    /// Canonical byte offset of the message payload (= 112): signature
-    /// region immediately followed by the message. Message length is
-    /// taken from `message_data_size` (offsets[10..12]).
-    const MESSAGE_OFFSET: usize = SIGNATURE_OFFSET + SIGNATURE_SERIALIZED_SIZE;
-
-    /// Parsed Ed25519 precompile ix data.
-    pub(super) struct Parsed<'a> {
-        /// Ed25519 pubkey.
-        pub pubkey: &'a [u8],
-        /// Ed25519 message.
-        pub message: &'a [u8],
-    }
-
-    /// Canonical inline ix data length.
-    const CANONICAL_IX_DATA_LEN: usize = MESSAGE_OFFSET + VOUCHER_PAYLOAD_SIZE;
-
-    /// Parse a single-signature Ed25519 precompile ix with the canonical
-    /// inline layout. Validates every field of `Ed25519SignatureOffsets`.
-    pub(super) fn parse(data: &[u8]) -> Result<Parsed<'_>, ProgramError> {
-        // Full canonical inline layout: `[num_sigs=1, pad=0, offsets×1, pubkey, signature, message]`.
-        // Guard — length. Pins the full 160-byte canonical layout.
-        if data.len() != CANONICAL_IX_DATA_LEN {
-            return Err(PaymentChannelsError::MalformedEd25519Instruction.into());
-        }
-
-        // Guard — `num_signatures == 1`. N = 0 verifies nothing; N > 1
-        // appends further offsets records whose signatures we never
-        // parse, so the surrounding ix could appear "verified" while
-        // those riders covered arbitrary attacker-chosen bytes.
-        if data[0] != 1 {
-            return Err(PaymentChannelsError::MalformedEd25519Instruction.into());
-        }
-
-        // Guard — padding byte is zero.
-        if data[1] != 0 {
-            return Err(PaymentChannelsError::MalformedEd25519Instruction.into());
-        }
-
-        // Read the offset fields.
-        let offsets = &data[SIGNATURE_OFFSETS_START..PUBKEY_OFFSET];
-
-        let read = |i: usize| u16::from_le_bytes([offsets[i], offsets[i + 1]]);
-        let signature_offset = read(0);
-        let sig_ix = read(2);
-        let public_key_offset = read(4);
-        let pk_ix = read(6);
-        let message_data_offset = read(8);
-        let message_data_size = read(10);
-        let msg_ix = read(12);
-
-        // Guard — cross-instruction indirection.
-        // Native sentinel to force the precompile to read from our ix.
-        if sig_ix != u16::MAX || pk_ix != u16::MAX || msg_ix != u16::MAX {
-            return Err(PaymentChannelsError::MalformedEd25519Instruction.into());
-        }
-
-        // Guard — canonical byte offsets. The precompile accepts any
-        // in-bounds offsets, so without these pins a non-canonical
-        // layout could verify cryptographically while our hardcoded
-        // `data[16..48]` / `data[48..112]` reads land on different
-        // bytes than the precompile checked. Payload-match downstream
-        // would still catch the bypass (unless the signer explicitly
-        // signed the wrong-position bytes), but pinning here keeps
-        // slice bounds compile-time constant and narrows the off-chain
-        // signer contract to one wire encoding.
-        if public_key_offset as usize != PUBKEY_OFFSET
-            || signature_offset as usize != SIGNATURE_OFFSET
-            || message_data_offset as usize != MESSAGE_OFFSET
-        {
-            return Err(PaymentChannelsError::MalformedEd25519Instruction.into());
-        }
-
-        // Guard — canonical message length (48 B: `channel_id ||
-        // cumulative_amount || expires_at`, LE).
-        if message_data_size as usize != VOUCHER_PAYLOAD_SIZE {
-            return Err(PaymentChannelsError::MalformedEd25519Instruction.into());
-        }
-
-        let message = &data[MESSAGE_OFFSET..MESSAGE_OFFSET + VOUCHER_PAYLOAD_SIZE];
-
-        Ok(Parsed {
-            pubkey: &data[PUBKEY_OFFSET..SIGNATURE_OFFSET],
-            message,
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     extern crate std;
     use std::vec::Vec;
 
     use super::*;
+    use crate::voucher_payload::VOUCHER_PAYLOAD_SIZE;
 
     const CHANNEL_ID: Address = Address::new_from_array([7u8; 32]);
     /// Channel authorized signer.
@@ -257,6 +112,17 @@ mod tests {
         ch.set_settled(settled);
         ch.authorized_signer = authorized_signer;
         ch
+    }
+
+    /// Thin wrapper so fixture sites read like the old
+    /// `payload::build_signed_payload(&args)` form without threading
+    /// three primitive args through every test.
+    fn payload_for(v: &VoucherArgs) -> [u8; VOUCHER_PAYLOAD_SIZE] {
+        build_signed_payload(
+            v.channel_id.as_array(),
+            v.cumulative_amount(),
+            v.expires_at(),
+        )
     }
 
     /// Encode an Ed25519 precompile ix in the canonical single-signature
@@ -301,12 +167,12 @@ mod tests {
         }
     }
 
-    /// Construct a [`ed25519_ix::Parsed`] that mirrors what `parse`
+    /// Construct a [`ed25519_parse::Parsed`] that mirrors what `parse`
     /// returns for a canonical precompile ix "signed" by [`AUTH`]. Lets
     /// `verify_parsed`-only tests skip both the parse pipeline and
     /// the sysvar plumbing that `verify_voucher` would run.
-    fn valid_parsed(message: &[u8]) -> ed25519_ix::Parsed<'_> {
-        ed25519_ix::Parsed {
+    fn valid_parsed(message: &[u8; VOUCHER_PAYLOAD_SIZE]) -> ed25519_parse::Parsed<'_> {
+        ed25519_parse::Parsed {
             pubkey: AUTH.as_array(),
             message,
         }
@@ -324,7 +190,7 @@ mod tests {
             expires_at: i64,
         }
         let args = VoucherArgs::new(SAMPLE_CUMULATIVE, -1i64, CHANNEL_ID);
-        let built = payload::build_signed_payload(&args);
+        let built = payload_for(&args);
         let borshed = borsh::to_vec(&Voucher {
             channel_id: *CHANNEL_ID.as_array(),
             cumulative_amount: SAMPLE_CUMULATIVE,
@@ -340,7 +206,7 @@ mod tests {
         const CUMULATIVE: u64 = u64::from_le_bytes([119, 102, 85, 68, 51, 34, 17, 0]);
         const EXPIRES_AT: i64 = i64::from_le_bytes([248, 249, 250, 251, 252, 253, 254, 127]);
         let args = VoucherArgs::new(CUMULATIVE, EXPIRES_AT, CHANNEL_ID);
-        let built = payload::build_signed_payload(&args);
+        let built = payload_for(&args);
         assert_eq!(&built[..32], CHANNEL_ID.as_array());
         assert_eq!(&built[32..40], &CUMULATIVE.to_le_bytes());
         assert_eq!(&built[40..48], &EXPIRES_AT.to_le_bytes());
@@ -352,7 +218,7 @@ mod tests {
     fn ok_strict_monotonic_no_expiry() {
         let ch = make_channel(100, 1_000, AUTH);
         let v = VoucherArgs::new(200, 0, CHANNEL_ID);
-        let msg = payload::build_signed_payload(&v);
+        let msg = payload_for(&v);
         let parsed = valid_parsed(&msg);
         let out = verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 1_000_000).unwrap();
         assert_eq!(out, 200);
@@ -362,7 +228,7 @@ mod tests {
     fn ok_expiry_in_future() {
         let ch = make_channel(100, 500, AUTH);
         let v = VoucherArgs::new(500, 2_000, CHANNEL_ID);
-        let msg = payload::build_signed_payload(&v);
+        let msg = payload_for(&v);
         let parsed = valid_parsed(&msg);
         let out = verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 1_999).unwrap();
         assert_eq!(out, 500);
@@ -374,7 +240,7 @@ mod tests {
     fn wrong_channel_id() {
         let ch = make_channel(0, 500, AUTH);
         let v = VoucherArgs::new(100, 0, Address::new_from_array([9u8; 32]));
-        let msg = payload::build_signed_payload(&v);
+        let msg = payload_for(&v);
         let parsed = valid_parsed(&msg);
         expect_err(
             verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
@@ -386,7 +252,7 @@ mod tests {
     fn now_equals_expires_at() {
         let ch = make_channel(0, 500, AUTH);
         let v = VoucherArgs::new(100, 500, CHANNEL_ID);
-        let msg = payload::build_signed_payload(&v);
+        let msg = payload_for(&v);
         let parsed = valid_parsed(&msg);
         expect_err(
             verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 500),
@@ -398,7 +264,7 @@ mod tests {
     fn now_past_expires_at() {
         let ch = make_channel(0, 500, AUTH);
         let v = VoucherArgs::new(100, 500, CHANNEL_ID);
-        let msg = payload::build_signed_payload(&v);
+        let msg = payload_for(&v);
         let parsed = valid_parsed(&msg);
         expect_err(
             verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 501),
@@ -410,7 +276,7 @@ mod tests {
     fn negative_expires_at_fails_closed() {
         let ch = make_channel(0, 500, AUTH);
         let v = VoucherArgs::new(100, -1, CHANNEL_ID);
-        let msg = payload::build_signed_payload(&v);
+        let msg = payload_for(&v);
         let parsed = valid_parsed(&msg);
         expect_err(
             verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
@@ -422,7 +288,7 @@ mod tests {
     fn cumulative_equals_settled() {
         let ch = make_channel(250, 500, AUTH);
         let v = VoucherArgs::new(250, 0, CHANNEL_ID);
-        let msg = payload::build_signed_payload(&v);
+        let msg = payload_for(&v);
         let parsed = valid_parsed(&msg);
         expect_err(
             verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
@@ -434,7 +300,7 @@ mod tests {
     fn cumulative_below_settled() {
         let ch = make_channel(250, 500, AUTH);
         let v = VoucherArgs::new(100, 0, CHANNEL_ID);
-        let msg = payload::build_signed_payload(&v);
+        let msg = payload_for(&v);
         let parsed = valid_parsed(&msg);
         expect_err(
             verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
@@ -446,7 +312,7 @@ mod tests {
     fn cumulative_zero_on_fresh_channel() {
         let ch = make_channel(0, 500, AUTH);
         let v = VoucherArgs::new(0, 0, CHANNEL_ID);
-        let msg = payload::build_signed_payload(&v);
+        let msg = payload_for(&v);
         let parsed = valid_parsed(&msg);
         expect_err(
             verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
@@ -458,7 +324,7 @@ mod tests {
     fn cumulative_above_deposit() {
         let ch = make_channel(0, 500, AUTH);
         let v = VoucherArgs::new(501, 0, CHANNEL_ID);
-        let msg = payload::build_signed_payload(&v);
+        let msg = payload_for(&v);
         let parsed = valid_parsed(&msg);
         expect_err(
             verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
@@ -466,40 +332,33 @@ mod tests {
         );
     }
 
-    // --- Ed25519 structural failures (ed25519_ix::parse) -----------------
+    // --- Ed25519 structural failures (ed25519_parse::parse) --------------
 
     /// Run `parse` and unwrap the expected error. Panics if parsing
     /// unexpectedly succeeds — structural-failure tests always pass
     /// deliberately malformed data.
-    fn parse_err(data: &[u8]) -> ProgramError {
-        ed25519_ix::parse(data).err().expect("parse should fail")
-    }
-
-    /// Assert `err` is specifically
-    /// [`PaymentChannelsError::MalformedEd25519Instruction`]. Every
-    /// `parse`-path guard returns this variant, so structural tests
-    /// share this assertion instead of inlining `expect_err` each time.
-    fn assert_malformed(err: ProgramError) {
-        match err {
-            ProgramError::Custom(c) => {
-                assert_eq!(c, PaymentChannelsError::MalformedEd25519Instruction as u32)
-            }
-            other => panic!("expected MalformedEd25519Instruction, got {:?}", other),
-        }
+    fn parse_err(data: &[u8]) -> ed25519_parse::Ed25519ParseError {
+        ed25519_parse::parse(data).err().expect("parse should fail")
     }
 
     #[test]
     fn num_signatures_zero() {
         let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
         data[0] = 0;
-        assert_malformed(parse_err(&data));
+        assert_eq!(
+            parse_err(&data),
+            ed25519_parse::Ed25519ParseError::NumSignatures
+        );
     }
 
     #[test]
     fn num_signatures_two() {
         let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
         data[0] = 2;
-        assert_malformed(parse_err(&data));
+        assert_eq!(
+            parse_err(&data),
+            ed25519_parse::Ed25519ParseError::NumSignatures
+        );
     }
 
     #[test]
@@ -507,7 +366,10 @@ mod tests {
         let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
         // signature_offset sits at offsets[0..2] → data[2..4]
         data[2..4].copy_from_slice(&49u16.to_le_bytes());
-        assert_malformed(parse_err(&data));
+        assert_eq!(
+            parse_err(&data),
+            ed25519_parse::Ed25519ParseError::NonCanonicalOffsets,
+        );
     }
 
     #[test]
@@ -515,7 +377,10 @@ mod tests {
         let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
         // public_key_offset sits at offsets[4..6] → data[6..8]
         data[6..8].copy_from_slice(&17u16.to_le_bytes());
-        assert_malformed(parse_err(&data));
+        assert_eq!(
+            parse_err(&data),
+            ed25519_parse::Ed25519ParseError::NonCanonicalOffsets,
+        );
     }
 
     #[test]
@@ -523,7 +388,10 @@ mod tests {
         let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
         // message_data_offset sits at offsets[8..10] → data[10..12]
         data[10..12].copy_from_slice(&113u16.to_le_bytes());
-        assert_malformed(parse_err(&data));
+        assert_eq!(
+            parse_err(&data),
+            ed25519_parse::Ed25519ParseError::NonCanonicalOffsets,
+        );
     }
 
     #[test]
@@ -533,14 +401,20 @@ mod tests {
         // to 49. Length guard passes; the dedicated size-check fires.
         let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
         data[12..14].copy_from_slice(&49u16.to_le_bytes());
-        assert_malformed(parse_err(&data));
+        assert_eq!(
+            parse_err(&data),
+            ed25519_parse::Ed25519ParseError::MessageSize
+        );
     }
 
     #[test]
     fn message_data_size_below_canonical_48() {
         let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
         data[12..14].copy_from_slice(&47u16.to_le_bytes());
-        assert_malformed(parse_err(&data));
+        assert_eq!(
+            parse_err(&data),
+            ed25519_parse::Ed25519ParseError::MessageSize
+        );
     }
 
     #[test]
@@ -549,7 +423,7 @@ mod tests {
         // fail fast before any offsets are read, so short ixs return a
         // clean error instead of panicking on out-of-bounds indexing.
         let short = [0u8; 159];
-        assert_malformed(parse_err(&short));
+        assert_eq!(parse_err(&short), ed25519_parse::Ed25519ParseError::Length);
     }
 
     #[test]
@@ -557,14 +431,14 @@ mod tests {
         // 161 bytes — trailing byte past the pinned layout.
         let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
         data.push(0u8);
-        assert_malformed(parse_err(&data));
+        assert_eq!(parse_err(&data), ed25519_parse::Ed25519ParseError::Length);
     }
 
     #[test]
     fn non_zero_padding_rejects() {
         let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
         data[1] = 1;
-        assert_malformed(parse_err(&data));
+        assert_eq!(parse_err(&data), ed25519_parse::Ed25519ParseError::Padding);
     }
 
     #[test]
@@ -573,7 +447,10 @@ mod tests {
         // offsets[2..4] is signature_instruction_index
         data[4] = 0;
         data[5] = 0;
-        assert_malformed(parse_err(&data));
+        assert_eq!(
+            parse_err(&data),
+            ed25519_parse::Ed25519ParseError::CrossInstruction,
+        );
     }
 
     #[test]
@@ -582,7 +459,10 @@ mod tests {
         // offsets[6..8] is pubkey_instruction_index
         data[8] = 0;
         data[9] = 0;
-        assert_malformed(parse_err(&data));
+        assert_eq!(
+            parse_err(&data),
+            ed25519_parse::Ed25519ParseError::CrossInstruction,
+        );
     }
 
     #[test]
@@ -591,7 +471,10 @@ mod tests {
         // offsets[12..14] is message_instruction_index
         data[14] = 0;
         data[15] = 0;
-        assert_malformed(parse_err(&data));
+        assert_eq!(
+            parse_err(&data),
+            ed25519_parse::Ed25519ParseError::CrossInstruction,
+        );
     }
 
     // --- Ed25519 content failures ----------------------------------------
@@ -600,7 +483,7 @@ mod tests {
     fn message_off_by_one_byte() {
         let ch = make_channel(0, 500, AUTH);
         let v = VoucherArgs::new(100, 0, CHANNEL_ID);
-        let mut msg: Vec<u8> = payload::build_signed_payload(&v).to_vec();
+        let mut msg: [u8; VOUCHER_PAYLOAD_SIZE] = payload_for(&v);
         msg[0] ^= 1;
         let parsed = valid_parsed(&msg);
         expect_err(
@@ -613,8 +496,8 @@ mod tests {
     fn precompile_pubkey_not_authorized_signer() {
         let ch = make_channel(0, 500, AUTH);
         let v = VoucherArgs::new(100, 0, CHANNEL_ID);
-        let msg = payload::build_signed_payload(&v);
-        let parsed = ed25519_ix::Parsed {
+        let msg = payload_for(&v);
+        let parsed = ed25519_parse::Parsed {
             pubkey: OTHER_PUBKEY.as_array(),
             message: &msg,
         };
