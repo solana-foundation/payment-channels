@@ -23,30 +23,30 @@ import {
 } from "@solana/kit";
 
 export type VoucherArgs = {
+  channelId: Address;
   cumulativeAmount: bigint;
   expiresAt: bigint;
-  channelId: Address;
 };
 
 export type VoucherArgsArgs = {
+  channelId: Address;
   cumulativeAmount: number | bigint;
   expiresAt: number | bigint;
-  channelId: Address;
 };
 
 export function getVoucherArgsEncoder(): FixedSizeEncoder<VoucherArgsArgs> {
   return getStructEncoder([
+    ["channelId", getAddressEncoder()],
     ["cumulativeAmount", getU64Encoder()],
     ["expiresAt", getI64Encoder()],
-    ["channelId", getAddressEncoder()],
   ]);
 }
 
 export function getVoucherArgsDecoder(): FixedSizeDecoder<VoucherArgs> {
   return getStructDecoder([
+    ["channelId", getAddressDecoder()],
     ["cumulativeAmount", getU64Decoder()],
     ["expiresAt", getI64Decoder()],
-    ["channelId", getAddressDecoder()],
   ]);
 }
 

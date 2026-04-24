@@ -16,7 +16,6 @@ import {
   SolanaError,
   transformEncoder,
   type AccountMeta,
-  type AccountSignerMeta,
   type Address,
   type FixedSizeCodec,
   type FixedSizeDecoder,
@@ -25,9 +24,7 @@ import {
   type InstructionWithAccounts,
   type InstructionWithData,
   type ReadonlyAccount,
-  type ReadonlySignerAccount,
   type ReadonlyUint8Array,
-  type TransactionSigner,
   type WritableAccount,
 } from "@solana/kit";
 import {
@@ -50,7 +47,6 @@ export function getSettleDiscriminatorBytes(): ReadonlyUint8Array {
 
 export type SettleInstruction<
   TProgram extends string = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
-  TAccountMerchant extends string | AccountMeta<string> = string,
   TAccountChannel extends string | AccountMeta<string> = string,
   TAccountInstructionsSysvar extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
@@ -58,10 +54,6 @@ export type SettleInstruction<
   InstructionWithData<ReadonlyUint8Array> &
   InstructionWithAccounts<
     [
-      TAccountMerchant extends string
-        ? ReadonlySignerAccount<TAccountMerchant> &
-            AccountSignerMeta<TAccountMerchant>
-        : TAccountMerchant,
       TAccountChannel extends string
         ? WritableAccount<TAccountChannel>
         : TAccountChannel,
@@ -107,31 +99,23 @@ export function getSettleInstructionDataCodec(): FixedSizeCodec<
 }
 
 export type SettleInput<
-  TAccountMerchant extends string = string,
   TAccountChannel extends string = string,
   TAccountInstructionsSysvar extends string = string,
 > = {
-  merchant: TransactionSigner<TAccountMerchant>;
   channel: Address<TAccountChannel>;
   instructionsSysvar: Address<TAccountInstructionsSysvar>;
   settleArgs: SettleInstructionDataArgs["settleArgs"];
 };
 
 export function getSettleInstruction<
-  TAccountMerchant extends string,
   TAccountChannel extends string,
   TAccountInstructionsSysvar extends string,
   TProgramAddress extends Address = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
 >(
-  input: SettleInput<
-    TAccountMerchant,
-    TAccountChannel,
-    TAccountInstructionsSysvar
-  >,
+  input: SettleInput<TAccountChannel, TAccountInstructionsSysvar>,
   config?: { programAddress?: TProgramAddress },
 ): SettleInstruction<
   TProgramAddress,
-  TAccountMerchant,
   TAccountChannel,
   TAccountInstructionsSysvar
 > {
@@ -141,7 +125,6 @@ export function getSettleInstruction<
 
   // Original accounts.
   const originalAccounts = {
-    merchant: { value: input.merchant ?? null, isWritable: false },
     channel: { value: input.channel ?? null, isWritable: true },
     instructionsSysvar: {
       value: input.instructionsSysvar ?? null,
@@ -159,7 +142,6 @@ export function getSettleInstruction<
   const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
   return Object.freeze({
     accounts: [
-      getAccountMeta("merchant", accounts.merchant),
       getAccountMeta("channel", accounts.channel),
       getAccountMeta("instructionsSysvar", accounts.instructionsSysvar),
     ],
@@ -169,7 +151,6 @@ export function getSettleInstruction<
     programAddress,
   } as SettleInstruction<
     TProgramAddress,
-    TAccountMerchant,
     TAccountChannel,
     TAccountInstructionsSysvar
   >);
@@ -181,9 +162,8 @@ export type ParsedSettleInstruction<
 > = {
   programAddress: Address<TProgram>;
   accounts: {
-    merchant: TAccountMetas[0];
-    channel: TAccountMetas[1];
-    instructionsSysvar: TAccountMetas[2];
+    channel: TAccountMetas[0];
+    instructionsSysvar: TAccountMetas[1];
   };
   data: SettleInstructionData;
 };
@@ -196,12 +176,12 @@ export function parseSettleInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedSettleInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 3) {
+  if (instruction.accounts.length < 2) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 3,
+        expectedAccountMetas: 2,
       },
     );
   }
@@ -214,7 +194,6 @@ export function parseSettleInstruction<
   return {
     programAddress: instruction.programAddress,
     accounts: {
-      merchant: getNextAccount(),
       channel: getNextAccount(),
       instructionsSysvar: getNextAccount(),
     },
