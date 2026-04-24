@@ -5,15 +5,15 @@ use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 
 use crate::errors::PaymentChannelsError;
 use crate::instructions::VoucherArgs;
+use crate::state::{Transmutable, load};
 
 /// Instruction discriminator byte for `settleAndFinalize`.
 pub const DISCRIMINATOR: u8 = 4;
 
-/// Cooperative-close payload. Holds a stable wire size (voucher + tag) so
-/// the struct is `#[repr(C, packed)]`-loadable; [`Self::has_voucher`] is
-/// the option tag because a real `Option<`[`VoucherArgs`]`>` cannot be
-/// zero-copy decoded over a packed wire format.
-#[repr(C, packed)]
+/// Cooperative-close payload. [`Self::has_voucher`] is the option tag
+/// because a Rust `Option<VoucherArgs>` cannot be carried over a zero-copy
+/// wire format; the explicit u8 keeps the struct's length deterministic.
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct SettleAndFinalizeArgs {
@@ -30,11 +30,12 @@ impl SettleAndFinalizeArgs {
     pub const LEN: usize = size_of::<Self>();
 
     pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
-        if data.len() != Self::LEN {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-        Ok(unsafe { &*(data.as_ptr() as *const Self) })
+        unsafe { load::<Self>(data) }.map_err(|_| ProgramError::InvalidInstructionData)
     }
+}
+
+unsafe impl Transmutable for SettleAndFinalizeArgs {
+    const LEN: usize = size_of::<Self>();
 }
 
 pub struct SettleAndFinalizeAccounts<'a> {

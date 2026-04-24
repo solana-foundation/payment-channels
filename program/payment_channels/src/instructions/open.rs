@@ -12,6 +12,7 @@ use crate::event_engine::EventSerialize;
 use crate::event_engine::emit_event;
 use crate::events::Opened;
 use crate::instructions::helpers::channel_signer_seeds;
+use crate::state::{Transmutable, load};
 
 /// Instruction discriminator byte for `open`.
 pub const DISCRIMINATOR: u8 = 1;
@@ -35,21 +36,27 @@ pub struct DistributionEntry {
 /// [`Channel::distribution_hash`](crate::Channel::distribution_hash).
 /// [`distribute`](crate::instructions::distribute) later verifies a matching
 /// preimage before paying out splits.
-#[repr(C, packed)]
+///
+/// Wire layout: `salt(8) | deposit(8) | grace_period(4) | num_recipients(1) |
+/// entries(MAX×40)`.
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct OpenArgs {
     /// PDA disambiguator; stored in [`Channel::salt`](crate::Channel::salt).
     /// Enables concurrent channels for the same
     /// `(payer, payee, mint, authorized_signer)` tuple.
-    pub salt: u64,
+    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    salt: [u8; 8],
     /// Initial escrow; the immutable ceiling on
     /// [`Channel::settled`](crate::Channel::settled) (raised later only by
     /// `topUp`).
-    pub deposit: u64,
+    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    deposit: [u8; 8],
     /// Grace duration (seconds). Governs the `CLOSING → FINALIZED`
     /// unlock for permissionless `finalize`.
-    pub grace_period: u32,
+    #[cfg_attr(feature = "idl", codama(type = number(u32)))]
+    grace_period: [u8; 4],
     /// Number of valid entries in [`Self::recipients`] (1–30).
     pub num_recipients: u8,
     /// Packed distribution plan. Only the first `num_recipients` entries are
@@ -66,38 +73,26 @@ pub struct OpenArgs {
 impl OpenArgs {
     pub const LEN: usize = size_of::<Self>();
 
-    pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
-        if data.len() != Self::LEN {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-        // SAFETY: length == Self::LEN verified above; `OpenArgs` is `repr(C, packed)`
-        // so its alignment requirement is 1 — valid at any byte boundary.  The
-        // returned reference borrows `data` for its full lifetime.
-        Ok(unsafe { &*(data.as_ptr() as *const Self) })
-    }
-
-    /// Read `salt` from the packed struct without creating an unaligned reference.
     #[inline(always)]
     pub fn salt(&self) -> u64 {
-        // SAFETY: `addr_of!` produces a raw pointer without materialising a
-        // reference to the field; `read_unaligned` copies the bytes without
-        // requiring pointer alignment.
-        unsafe { core::ptr::read_unaligned(core::ptr::addr_of!(self.salt)) }
+        u64::from_le_bytes(self.salt)
     }
-
-    /// Read `deposit` from the packed struct without creating an unaligned reference.
     #[inline(always)]
     pub fn deposit(&self) -> u64 {
-        // SAFETY: same as `salt`.
-        unsafe { core::ptr::read_unaligned(core::ptr::addr_of!(self.deposit)) }
+        u64::from_le_bytes(self.deposit)
     }
-
-    /// Read `grace_period` from the packed struct without creating an unaligned reference.
     #[inline(always)]
     pub fn grace_period(&self) -> u32 {
-        // SAFETY: same as `salt`.
-        unsafe { core::ptr::read_unaligned(core::ptr::addr_of!(self.grace_period)) }
+        u32::from_le_bytes(self.grace_period)
     }
+
+    pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
+        unsafe { load::<Self>(data) }.map_err(|_| ProgramError::InvalidInstructionData)
+    }
+}
+
+unsafe impl Transmutable for OpenArgs {
+    const LEN: usize = size_of::<Self>();
 }
 
 /// [`Self::payer`], [`Self::payee`], [`Self::mint`],
@@ -176,10 +171,7 @@ impl<'a> TryFrom<&'a mut [AccountView]> for OpenAccounts<'a> {
 
 /// Compute `blake3(num_recipients_byte || active_entry_bytes)`.
 ///
-/// Reads directly from the packed struct's memory so no field references
-/// through unaligned pointers are created.
-///
-/// # Layout (repr C, packed)
+/// # Layout (repr C, all fields align-1)
 /// ```text
 /// offset  0: salt          (8 bytes)
 /// offset  8: deposit       (8 bytes)
@@ -196,8 +188,7 @@ fn distribution_hash(args: &OpenArgs, n: usize) -> [u8; 32] {
     // The slice covers `num_recipients(1) + n×40` bytes.  Because the caller
     // guarantees `n ≤ MAX_DISTRIBUTION_RECIPIENTS` (30), the maximum length is
     // 1+30×40 = 1201, which fits entirely within the 1221-byte struct body
-    // starting at offset 20.  `OpenArgs` is `repr(C, packed)` so all bytes are
-    // initialised and the pointer arithmetic stays within the allocation.
+    // starting at offset 20.  All fields are align-1 so there is no padding.
     let input = unsafe { core::slice::from_raw_parts(base.add(20), 1 + n * 40) };
     blake3(input)
 }

@@ -5,13 +5,14 @@ use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 
 use crate::errors::PaymentChannelsError;
 use crate::instructions::VoucherArgs;
+use crate::state::{Transmutable, load};
 
 /// Instruction discriminator byte for `settle`.
 pub const DISCRIMINATOR: u8 = 2;
 
 /// Mid-session watermark advance. Carries exactly one voucher; no token
 /// movement — only [`Channel::settled`](crate::Channel::settled) is updated.
-#[repr(C, packed)]
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct SettleArgs {
@@ -23,11 +24,12 @@ impl SettleArgs {
     pub const LEN: usize = size_of::<Self>();
 
     pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
-        if data.len() != Self::LEN {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-        Ok(unsafe { &*(data.as_ptr() as *const Self) })
+        unsafe { load::<Self>(data) }.map_err(|_| ProgramError::InvalidInstructionData)
     }
+}
+
+unsafe impl Transmutable for SettleArgs {
+    const LEN: usize = size_of::<Self>();
 }
 
 pub struct SettleAccounts<'a> {
