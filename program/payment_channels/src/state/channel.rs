@@ -241,12 +241,8 @@ impl Channel {
         authorized_signer: Address,
         mint: Address,
     ) -> Result<(), ProgramError> {
-        if bytes.len() != Self::LEN {
-            return Err(ProgramError::InvalidAccountData);
-        }
-        // SAFETY: length == Self::LEN checked above; `Channel` is `repr(C)` with
-        // alignment 1 (all fields are [u8;N] or u8), valid at any byte boundary.
-        let ch = unsafe { &mut *(bytes.as_mut_ptr() as *mut Self) };
+        // SAFETY: `Channel` is `repr(C)` with alignment 1; load_mut checks length.
+        let ch = unsafe { load_mut::<Self>(bytes) }?;
         ch.discriminator = AccountDiscriminator::Channel as u8;
         ch.version = CURRENT_CHANNEL_VERSION;
         ch.bump = bump;

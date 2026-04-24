@@ -71,8 +71,6 @@ pub struct OpenArgs {
 }
 
 impl OpenArgs {
-    pub const LEN: usize = size_of::<Self>();
-
     #[inline(always)]
     pub fn salt(&self) -> u64 {
         u64::from_le_bytes(self.salt)
@@ -182,15 +180,8 @@ impl<'a> TryFrom<&'a mut [AccountView]> for OpenAccounts<'a> {
 /// `n` must be in `1..=MAX_DISTRIBUTION_RECIPIENTS`; callers are responsible
 /// for validating before calling.
 fn distribution_hash(args: &OpenArgs, n: usize) -> [u8; 32] {
-    let base = args as *const OpenArgs as *const u8;
-    // SAFETY: `args` is a valid `&OpenArgs`; `base.add(20)` is the address of
-    // `num_recipients` (offset = salt(8)+deposit(8)+grace_period(4) = 20).
-    // The slice covers `num_recipients(1) + n×40` bytes.  Because the caller
-    // guarantees `n ≤ MAX_DISTRIBUTION_RECIPIENTS` (30), the maximum length is
-    // 1+30×40 = 1201, which fits entirely within the 1221-byte struct body
-    // starting at offset 20.  All fields are align-1 so there is no padding.
-    let input = unsafe { core::slice::from_raw_parts(base.add(20), 1 + n * 40) };
-    blake3(input)
+    // offset 20 = salt(8) + deposit(8) + grace_period(4); covers num_recipients(1) + n×40 bytes.
+    blake3(&args.as_bytes()[20..21 + n * 40])
 }
 
 /// BPF target: delegate to the `sol_blake3` syscall.
