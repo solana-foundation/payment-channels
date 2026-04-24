@@ -19,6 +19,21 @@ use pinocchio::error::ProgramError;
 pub unsafe trait Transmutable {
     /// On-wire byte length of the type.
     const LEN: usize;
+
+    /// Reverse of [`load`]: reinterpret `self` as its `Self::LEN` raw bytes.
+    #[inline(always)]
+    fn as_bytes(&self) -> &[u8]
+    where
+        Self: Sized,
+    {
+        const {
+            assert!(
+                core::mem::align_of::<Self>() == 1,
+                "Transmutable types must have alignment 1",
+            );
+        };
+        unsafe { core::slice::from_raw_parts(core::ptr::from_ref(self).cast::<u8>(), Self::LEN) }
+    }
 }
 
 /// Reinterpret `bytes` as `&T`. Validates length only and alignment.
@@ -37,7 +52,7 @@ pub unsafe fn load<T: Transmutable>(bytes: &[u8]) -> Result<&T, ProgramError> {
     if bytes.len() != T::LEN {
         return Err(ProgramError::InvalidAccountData);
     }
-    Ok(unsafe { &*(bytes.as_ptr() as *const T) })
+    Ok(unsafe { &*bytes.as_ptr().cast::<T>() })
 }
 
 /// Reinterpret `bytes` as `&mut T`. Validates length only and alignment.
@@ -56,7 +71,7 @@ pub unsafe fn load_mut<T: Transmutable>(bytes: &mut [u8]) -> Result<&mut T, Prog
     if bytes.len() != T::LEN {
         return Err(ProgramError::InvalidAccountData);
     }
-    Ok(unsafe { &mut *(bytes.as_mut_ptr() as *mut T) })
+    Ok(unsafe { &mut *bytes.as_mut_ptr().cast::<T>() })
 }
 
 #[cfg(test)]
@@ -105,6 +120,13 @@ mod tests {
         }
         assert_eq!(bytes[0], 0x42);
         assert_eq!(u64::from_le_bytes(bytes[1..9].try_into().unwrap()), 1234);
+    }
+
+    #[test]
+    fn as_bytes_round_trips_through_load() {
+        let bytes = [0xAB, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01];
+        let s = unsafe { load::<Sample>(&bytes) }.expect("load");
+        assert_eq!(s.as_bytes(), &bytes);
     }
 
     #[test]
