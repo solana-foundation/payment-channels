@@ -1,48 +1,16 @@
 //! Ed25519 precompile ix parser.
 //!
 //! Validates the canonical single-signature inline layout and returns
-//! borrowed slices into the caller's bytes. All magic constants and
-//! layouts are sourced from the official Solana documentation:
+//! borrowed slices into the caller's bytes. Layout constants live in
+//! the sibling `consts` submodule; those names are sourced from the
+//! official Solana documentation:
 //! <https://solana.com/docs/core/programs/precompiles#verify-ed25519-signature>.
 
-use pinocchio::Address;
-
+use super::{
+    MESSAGE_OFFSET, PUBKEY_OFFSET, PUBKEY_SERIALIZED_SIZE, SIGNATURE_OFFSET,
+    SIGNATURE_OFFSETS_START,
+};
 use crate::instructions::VOUCHER_PAYLOAD_SIZE;
-
-/// Native program address of the Ed25519SigVerify precompile.
-pub(super) const ED25519_PROGRAM_ID: Address =
-    Address::from_str_const("Ed25519SigVerify111111111111111111111111111");
-
-/// Ed25519 pubkey byte width.
-const PUBKEY_SERIALIZED_SIZE: usize = 32;
-
-/// Ed25519 signature byte width.
-const SIGNATURE_SERIALIZED_SIZE: usize = 64;
-
-/// Byte position of the `Ed25519SignatureOffsets` array — sits
-/// immediately after the `[num_signatures: u8, padding: u8]` header.
-const SIGNATURE_OFFSETS_START: usize = 2;
-
-/// Byte width of one `Ed25519SignatureOffsets` record: seven
-/// little-endian `u16` fields, in order — `signature_offset`,
-/// `signature_instruction_index`, `public_key_offset`,
-/// `public_key_instruction_index`, `message_data_offset`,
-/// `message_data_size`, `message_instruction_index`.
-const SIGNATURE_OFFSETS_SERIALIZED_SIZE: usize = 14;
-
-/// Canonical byte offset of the pubkey region in a single-signature
-/// inline ix (= 16): the first byte after the two-byte header plus one
-/// offsets record.
-const PUBKEY_OFFSET: usize = SIGNATURE_OFFSETS_START + SIGNATURE_OFFSETS_SERIALIZED_SIZE;
-
-/// Canonical byte offset of the signature region (= 48): pubkey region
-/// immediately followed by the 64-byte signature.
-const SIGNATURE_OFFSET: usize = PUBKEY_OFFSET + PUBKEY_SERIALIZED_SIZE;
-
-/// Canonical byte offset of the message payload (= 112): signature
-/// region immediately followed by the message. Message length is taken
-/// from `message_data_size` (offsets[10..12]).
-const MESSAGE_OFFSET: usize = SIGNATURE_OFFSET + SIGNATURE_SERIALIZED_SIZE;
 
 /// Canonical inline ix data length.
 const CANONICAL_IX_DATA_LEN: usize = MESSAGE_OFFSET + VOUCHER_PAYLOAD_SIZE;
@@ -50,7 +18,7 @@ const CANONICAL_IX_DATA_LEN: usize = MESSAGE_OFFSET + VOUCHER_PAYLOAD_SIZE;
 /// Parsed Ed25519 precompile ix data. Sized-array refs let the caller
 /// compare against `[u8; 32]` / `[u8; 48]` fixtures without slice-length
 /// runtime checks.
-pub(super) struct Parsed<'a> {
+pub struct Parsed<'a> {
     pub pubkey: &'a [u8; PUBKEY_SERIALIZED_SIZE],
     pub message: &'a [u8; VOUCHER_PAYLOAD_SIZE],
 }
@@ -65,7 +33,7 @@ pub(super) struct Parsed<'a> {
 /// [`PaymentChannelsError::MalformedEd25519Instruction`]:
 ///     crate::errors::PaymentChannelsError::MalformedEd25519Instruction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Ed25519ParseError {
+pub enum Ed25519ParseError {
     /// `data.len() != CANONICAL_IX_DATA_LEN (= 160)`.
     Length,
     /// `num_signatures != 1`. N = 0 verifies nothing; N > 1 appends
@@ -91,7 +59,7 @@ pub(super) enum Ed25519ParseError {
 
 /// Parse a single-signature Ed25519 precompile ix with the canonical
 /// inline layout. Validates every field of `Ed25519SignatureOffsets`.
-pub(super) fn parse(data: &[u8]) -> Result<Parsed<'_>, Ed25519ParseError> {
+pub fn parse(data: &[u8]) -> Result<Parsed<'_>, Ed25519ParseError> {
     // Full canonical inline layout: `[num_sigs=1, pad=0, offsets×1, pubkey, signature, message]`.
     // Guard — length. Pins the full 160-byte canonical layout.
     if data.len() != CANONICAL_IX_DATA_LEN {
@@ -156,11 +124,11 @@ pub(super) fn parse(data: &[u8]) -> Result<Parsed<'_>, Ed25519ParseError> {
     let pubkey: &[u8; PUBKEY_SERIALIZED_SIZE] = data
         [PUBKEY_OFFSET..PUBKEY_OFFSET + PUBKEY_SERIALIZED_SIZE]
         .try_into()
-        .unwrap();
+        .expect("length + offset guards pin the canonical pubkey region");
     let message: &[u8; VOUCHER_PAYLOAD_SIZE] = data
         [MESSAGE_OFFSET..MESSAGE_OFFSET + VOUCHER_PAYLOAD_SIZE]
         .try_into()
-        .unwrap();
+        .expect("length + offset guards pin the canonical message region");
 
     Ok(Parsed { pubkey, message })
 }

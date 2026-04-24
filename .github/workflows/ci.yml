@@ -34,6 +34,14 @@ jobs:
       - name: Build client
         run: just build-client
 
+      - name: Verify generated clients are up to date
+        run: |
+          git diff --exit-code -- \
+            program/payment_channels/idl \
+            clients/rust/src/generated \
+            clients/typescript/src/generated \
+            || { echo "::error::generated clients out of date — run 'just generate-client' and commit"; exit 1; }
+
       - name: Upload program SO
         uses: actions/upload-artifact@v7
         with:

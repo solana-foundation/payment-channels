@@ -5,6 +5,7 @@
 use std::str::FromStr;
 
 use litesvm::LiteSVM;
+use payment_channels::ed25519;
 use payment_channels::{PaymentChannelsError, VOUCHER_PAYLOAD_SIZE};
 use payment_channels_client::instructions::{Settle, SettleInstructionArgs};
 use payment_channels_client::types::{SettleArgs, VoucherArgs};
@@ -24,7 +25,7 @@ fn instructions_sysvar_id() -> Pubkey {
 }
 
 fn ed25519_program_id() -> Pubkey {
-    Pubkey::from_str("Ed25519SigVerify111111111111111111111111111").unwrap()
+    Pubkey::new_from_array(*ed25519::PROGRAM_ID.as_array())
 }
 
 /// Seed a `Channel` PDA (208-byte `#[repr(C, packed)]` layout) owned by the
@@ -74,27 +75,26 @@ fn voucher_payload(voucher: &VoucherArgs) -> [u8; VOUCHER_PAYLOAD_SIZE] {
 /// `*_instruction_index` fields pinned to `u16::MAX` so the precompile reads
 /// from this ix's own data.
 fn build_ed25519_ix(
-    pubkey: &[u8; 32],
-    signature: &[u8; 64],
+    pubkey: &[u8; ed25519::PUBKEY_SERIALIZED_SIZE],
+    signature: &[u8; ed25519::SIGNATURE_SERIALIZED_SIZE],
     message: &[u8; VOUCHER_PAYLOAD_SIZE],
 ) -> Instruction {
-    let mut data = Vec::with_capacity(160);
+    let mut data = Vec::with_capacity(ed25519::MESSAGE_OFFSET + VOUCHER_PAYLOAD_SIZE);
     data.push(1u8); // num_signatures
     data.push(0u8); // padding
 
-    let header_len: u16 = 2 + 14;
-    let pubkey_offset = header_len;
-    let signature_offset = pubkey_offset + 32;
-    let message_offset = signature_offset + 64;
-    let message_size: u16 = VOUCHER_PAYLOAD_SIZE as u16;
+    let pubkey_offset = ed25519::PUBKEY_OFFSET as u16;
+    let signature_offset = ed25519::SIGNATURE_OFFSET as u16;
+    let message_offset = ed25519::MESSAGE_OFFSET as u16;
+    let message_size = VOUCHER_PAYLOAD_SIZE as u16;
 
     data.extend_from_slice(&signature_offset.to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes());
+    data.extend_from_slice(&u16::MAX.to_le_bytes()); // signature_instruction_index
     data.extend_from_slice(&pubkey_offset.to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes());
+    data.extend_from_slice(&u16::MAX.to_le_bytes()); // public_key_instruction_index
     data.extend_from_slice(&message_offset.to_le_bytes());
     data.extend_from_slice(&message_size.to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes());
+    data.extend_from_slice(&u16::MAX.to_le_bytes()); // message_instruction_index
 
     data.extend_from_slice(pubkey);
     data.extend_from_slice(signature);
@@ -581,4 +581,56 @@ fn settle_preceding_compute_budget_ix_rejects() {
         svm.send_transaction(tx),
         PaymentChannelsError::MissingEd25519Verification,
     );
+}
+
+#[test]
+fn settle_with_invalid_signature_rejects_before_settle_runs() {
+    // Canonical precompile ix layout (correct pubkey, correct message,
+    // canonical offsets) paired with a zeroed signature: cryptographically
+    // invalid for any (pubkey, message). The native Ed25519SigVerify
+    // precompile must reject at ix index 0 — our settle (ix index 1)
+    // never runs. Distinct from `settle_malformed_ed25519_ix_rejects`,
+    // which tampers a field the precompile ignores and only trips our
+    // program's `parse` guard.
+    use solana_transaction_error::TransactionError;
+
+    let mut svm = load_program();
+    let fee_payer = Keypair::new();
+    svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
+
+    let signer = Keypair::new();
+    let channel = Pubkey::new_unique();
+    seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
+
+    let voucher = VoucherArgs {
+        channel_id: channel,
+        cumulative_amount: 500_000,
+        expires_at: 0,
+    };
+    let payload = voucher_payload(&voucher);
+    let pubkey = signer.pubkey().to_bytes();
+    let forged_signature = [0u8; ed25519::SIGNATURE_SERIALIZED_SIZE];
+
+    let ed25519_ix = build_ed25519_ix(&pubkey, &forged_signature, &payload);
+    let settle_ix = build_settle_ix(&channel, voucher);
+
+    let tx = Transaction::new_signed_with_payer(
+        &[ed25519_ix, settle_ix],
+        Some(&fee_payer.pubkey()),
+        &[&fee_payer],
+        svm.latest_blockhash(),
+    );
+    let failed = svm.send_transaction(tx).expect_err("tx should fail");
+
+    // Pin the failure at instruction index 0 (precompile). A failure at
+    // index 1 would mean our program ran — exactly what this test rules
+    // out. The ix is structurally valid, so the only thing that can fail
+    // at index 0 is signature verification.
+    match failed.err {
+        TransactionError::InstructionError(0, _) => {}
+        other => panic!("expected precompile failure at ix 0, got {other:?}"),
+    }
+
+    // Cross-check: settle never wrote the watermark.
+    assert_eq!(read_settled(&svm, &channel), 0);
 }
