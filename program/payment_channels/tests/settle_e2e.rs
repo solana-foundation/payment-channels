@@ -5,6 +5,7 @@
 use std::str::FromStr;
 
 use litesvm::LiteSVM;
+use payment_channels::ed25519;
 use payment_channels::{PaymentChannelsError, VOUCHER_PAYLOAD_SIZE};
 use payment_channels_client::instructions::{Settle, SettleInstructionArgs};
 use payment_channels_client::types::{SettleArgs, VoucherArgs};
@@ -24,7 +25,7 @@ fn instructions_sysvar_id() -> Pubkey {
 }
 
 fn ed25519_program_id() -> Pubkey {
-    Pubkey::from_str("Ed25519SigVerify111111111111111111111111111").unwrap()
+    Pubkey::new_from_array(*ed25519::PROGRAM_ID.as_array())
 }
 
 /// Seed a `Channel` PDA (208-byte `#[repr(C, packed)]` layout) owned by the
@@ -74,27 +75,26 @@ fn voucher_payload(voucher: &VoucherArgs) -> [u8; VOUCHER_PAYLOAD_SIZE] {
 /// `*_instruction_index` fields pinned to `u16::MAX` so the precompile reads
 /// from this ix's own data.
 fn build_ed25519_ix(
-    pubkey: &[u8; 32],
-    signature: &[u8; 64],
+    pubkey: &[u8; ed25519::PUBKEY_SERIALIZED_SIZE],
+    signature: &[u8; ed25519::SIGNATURE_SERIALIZED_SIZE],
     message: &[u8; VOUCHER_PAYLOAD_SIZE],
 ) -> Instruction {
-    let mut data = Vec::with_capacity(160);
+    let mut data = Vec::with_capacity(ed25519::MESSAGE_OFFSET + VOUCHER_PAYLOAD_SIZE);
     data.push(1u8); // num_signatures
     data.push(0u8); // padding
 
-    let header_len: u16 = 2 + 14;
-    let pubkey_offset = header_len;
-    let signature_offset = pubkey_offset + 32;
-    let message_offset = signature_offset + 64;
-    let message_size: u16 = VOUCHER_PAYLOAD_SIZE as u16;
+    let pubkey_offset = ed25519::PUBKEY_OFFSET as u16;
+    let signature_offset = ed25519::SIGNATURE_OFFSET as u16;
+    let message_offset = ed25519::MESSAGE_OFFSET as u16;
+    let message_size = VOUCHER_PAYLOAD_SIZE as u16;
 
     data.extend_from_slice(&signature_offset.to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes());
+    data.extend_from_slice(&u16::MAX.to_le_bytes()); // signature_instruction_index
     data.extend_from_slice(&pubkey_offset.to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes());
+    data.extend_from_slice(&u16::MAX.to_le_bytes()); // public_key_instruction_index
     data.extend_from_slice(&message_offset.to_le_bytes());
     data.extend_from_slice(&message_size.to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes());
+    data.extend_from_slice(&u16::MAX.to_le_bytes()); // message_instruction_index
 
     data.extend_from_slice(pubkey);
     data.extend_from_slice(signature);
