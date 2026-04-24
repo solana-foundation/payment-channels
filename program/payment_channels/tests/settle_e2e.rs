@@ -5,7 +5,7 @@
 use std::str::FromStr;
 
 use litesvm::LiteSVM;
-use payment_channels::PaymentChannelsError;
+use payment_channels::{PaymentChannelsError, VOUCHER_PAYLOAD_SIZE};
 use payment_channels_client::instructions::{Settle, SettleInstructionArgs};
 use payment_channels_client::types::{SettleArgs, VoucherArgs};
 use solana_account::Account;
@@ -62,18 +62,22 @@ fn seed_channel(
 /// order (`channel_id || cumulative_amount || expires_at`) matches the
 /// ed25519-signed payload byte-for-byte, so the client's Borsh output IS
 /// the message the precompile must verify.
-fn voucher_payload(voucher: &VoucherArgs) -> [u8; 48] {
+fn voucher_payload(voucher: &VoucherArgs) -> [u8; VOUCHER_PAYLOAD_SIZE] {
     borsh::to_vec(voucher)
         .expect("voucher borsh encoding")
         .try_into()
-        .expect("48-byte voucher payload")
+        .expect("voucher payload matches VOUCHER_PAYLOAD_SIZE")
 }
 
 /// Canonical single-signature inline Ed25519 precompile ix:
 /// `[num_sigs=1, pad=0, offsets×1, pubkey, signature, message]`; all three
 /// `*_instruction_index` fields pinned to `u16::MAX` so the precompile reads
 /// from this ix's own data.
-fn build_ed25519_ix(pubkey: &[u8; 32], signature: &[u8; 64], message: &[u8; 48]) -> Instruction {
+fn build_ed25519_ix(
+    pubkey: &[u8; 32],
+    signature: &[u8; 64],
+    message: &[u8; VOUCHER_PAYLOAD_SIZE],
+) -> Instruction {
     let mut data = Vec::with_capacity(160);
     data.push(1u8); // num_signatures
     data.push(0u8); // padding
@@ -82,7 +86,7 @@ fn build_ed25519_ix(pubkey: &[u8; 32], signature: &[u8; 64], message: &[u8; 48])
     let pubkey_offset = header_len;
     let signature_offset = pubkey_offset + 32;
     let message_offset = signature_offset + 64;
-    let message_size: u16 = 48;
+    let message_size: u16 = VOUCHER_PAYLOAD_SIZE as u16;
 
     data.extend_from_slice(&signature_offset.to_le_bytes());
     data.extend_from_slice(&u16::MAX.to_le_bytes());

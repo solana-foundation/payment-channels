@@ -58,8 +58,21 @@ impl VoucherArgs {
     }
 }
 
+/// Byte length of the signed voucher payload — `channel_id (32) ||
+/// cumulative_amount (8 LE) || expires_at (8 LE)`, which is exactly the
+/// in-memory layout of [`VoucherArgs`]. Also the canonical
+/// `message_data_size` every Ed25519 precompile ix must declare; pinned
+/// against a layout where an attacker has the precompile verify a
+/// truncated or extended message.
+pub const VOUCHER_PAYLOAD_SIZE: usize = core::mem::size_of::<VoucherArgs>();
+
+/// Pins [`VOUCHER_PAYLOAD_SIZE`] to the Ed25519 precompile's `u16`
+/// `message_data_size` field so the `as u16` casts at ix-build sites
+/// can't silently truncate.
+const _: () = assert!(VOUCHER_PAYLOAD_SIZE <= u16::MAX as usize);
+
 unsafe impl Transmutable for VoucherArgs {
-    const LEN: usize = core::mem::size_of::<Self>();
+    const LEN: usize = VOUCHER_PAYLOAD_SIZE;
 }
 
 /// Byte-0-dispatched instruction codomain. Each variant's discriminant

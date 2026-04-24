@@ -9,7 +9,7 @@
 use pinocchio::{AccountView, Address, error::ProgramError, sysvars::instructions::Instructions};
 
 use crate::errors::PaymentChannelsError;
-use crate::instructions::VoucherArgs;
+use crate::instructions::{VOUCHER_PAYLOAD_SIZE, VoucherArgs};
 use crate::state::Transmutable;
 use crate::state::channel::Channel;
 
@@ -84,16 +84,8 @@ mod ed25519_ix {
     //! All magic constants and layouts are sourced from the official Solana documentation.
     //! https://solana.com/docs/core/programs/precompiles#verify-ed25519-signature
 
-    use super::{PaymentChannelsError, Transmutable, VoucherArgs};
+    use super::{PaymentChannelsError, VOUCHER_PAYLOAD_SIZE};
     use pinocchio::{Address, error::ProgramError};
-
-    /// Byte length of the signed voucher payload — `channel_id (32) ||
-    /// cumulative_amount (8 LE) || expires_at (8 LE)`, which is exactly the
-    /// in-memory layout of [`VoucherArgs`]. Also the canonical
-    /// `message_data_size` the Ed25519 precompile ix must declare; pinned
-    /// against a layout where an attacker has the precompile verify a
-    /// truncated or extended message.
-    const VOUCHER_PAYLOAD_SIZE: usize = <VoucherArgs as Transmutable>::LEN;
 
     /// Native program address of Ed25519SigVerify precompile.
     pub(super) const ED25519_PROGRAM_ID: Address =
@@ -307,7 +299,7 @@ mod tests {
         const EXPIRES_AT: i64 = i64::from_le_bytes([248, 249, 250, 251, 252, 253, 254, 127]);
         let args = VoucherArgs::new(CHANNEL_ID, CUMULATIVE, EXPIRES_AT);
         let bytes = args.as_bytes();
-        assert_eq!(bytes.len(), 48);
+        assert_eq!(bytes.len(), VOUCHER_PAYLOAD_SIZE);
         assert_eq!(&bytes[..32], CHANNEL_ID.as_array());
         assert_eq!(&bytes[32..40], &CUMULATIVE.to_le_bytes());
         assert_eq!(&bytes[40..48], &EXPIRES_AT.to_le_bytes());
@@ -457,21 +449,33 @@ mod tests {
 
     #[test]
     fn num_signatures_zero() {
-        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
+        let mut data = build_ix_data(
+            AUTH.as_array(),
+            &[0u8; VOUCHER_PAYLOAD_SIZE],
+            &AUTH_SIGNATURE,
+        );
         data[0] = 0;
         assert_malformed(parse_err(&data));
     }
 
     #[test]
     fn num_signatures_two() {
-        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
+        let mut data = build_ix_data(
+            AUTH.as_array(),
+            &[0u8; VOUCHER_PAYLOAD_SIZE],
+            &AUTH_SIGNATURE,
+        );
         data[0] = 2;
         assert_malformed(parse_err(&data));
     }
 
     #[test]
     fn signature_offset_non_canonical() {
-        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
+        let mut data = build_ix_data(
+            AUTH.as_array(),
+            &[0u8; VOUCHER_PAYLOAD_SIZE],
+            &AUTH_SIGNATURE,
+        );
         // signature_offset sits at offsets[0..2] → data[2..4]
         data[2..4].copy_from_slice(&49u16.to_le_bytes());
         assert_malformed(parse_err(&data));
@@ -479,7 +483,11 @@ mod tests {
 
     #[test]
     fn public_key_offset_non_canonical() {
-        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
+        let mut data = build_ix_data(
+            AUTH.as_array(),
+            &[0u8; VOUCHER_PAYLOAD_SIZE],
+            &AUTH_SIGNATURE,
+        );
         // public_key_offset sits at offsets[4..6] → data[6..8]
         data[6..8].copy_from_slice(&17u16.to_le_bytes());
         assert_malformed(parse_err(&data));
@@ -487,7 +495,11 @@ mod tests {
 
     #[test]
     fn message_data_offset_non_canonical() {
-        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
+        let mut data = build_ix_data(
+            AUTH.as_array(),
+            &[0u8; VOUCHER_PAYLOAD_SIZE],
+            &AUTH_SIGNATURE,
+        );
         // message_data_offset sits at offsets[8..10] → data[10..12]
         data[10..12].copy_from_slice(&113u16.to_le_bytes());
         assert_malformed(parse_err(&data));
@@ -498,14 +510,22 @@ mod tests {
         // Canonical 160-byte ix, but overwrite the declared
         // `message_data_size` field at offsets[10..12] (= data[12..14])
         // to 49. Length guard passes; the dedicated size-check fires.
-        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
+        let mut data = build_ix_data(
+            AUTH.as_array(),
+            &[0u8; VOUCHER_PAYLOAD_SIZE],
+            &AUTH_SIGNATURE,
+        );
         data[12..14].copy_from_slice(&49u16.to_le_bytes());
         assert_malformed(parse_err(&data));
     }
 
     #[test]
     fn message_data_size_below_canonical_48() {
-        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
+        let mut data = build_ix_data(
+            AUTH.as_array(),
+            &[0u8; VOUCHER_PAYLOAD_SIZE],
+            &AUTH_SIGNATURE,
+        );
         data[12..14].copy_from_slice(&47u16.to_le_bytes());
         assert_malformed(parse_err(&data));
     }
@@ -522,21 +542,33 @@ mod tests {
     #[test]
     fn ix_data_longer_than_canonical() {
         // 161 bytes — trailing byte past the pinned layout.
-        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
+        let mut data = build_ix_data(
+            AUTH.as_array(),
+            &[0u8; VOUCHER_PAYLOAD_SIZE],
+            &AUTH_SIGNATURE,
+        );
         data.push(0u8);
         assert_malformed(parse_err(&data));
     }
 
     #[test]
     fn non_zero_padding_rejects() {
-        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
+        let mut data = build_ix_data(
+            AUTH.as_array(),
+            &[0u8; VOUCHER_PAYLOAD_SIZE],
+            &AUTH_SIGNATURE,
+        );
         data[1] = 1;
         assert_malformed(parse_err(&data));
     }
 
     #[test]
     fn signature_instruction_index_not_u16_max() {
-        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
+        let mut data = build_ix_data(
+            AUTH.as_array(),
+            &[0u8; VOUCHER_PAYLOAD_SIZE],
+            &AUTH_SIGNATURE,
+        );
         // offsets[2..4] is signature_instruction_index
         data[4] = 0;
         data[5] = 0;
@@ -545,7 +577,11 @@ mod tests {
 
     #[test]
     fn public_key_instruction_index_not_u16_max() {
-        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
+        let mut data = build_ix_data(
+            AUTH.as_array(),
+            &[0u8; VOUCHER_PAYLOAD_SIZE],
+            &AUTH_SIGNATURE,
+        );
         // offsets[6..8] is pubkey_instruction_index
         data[8] = 0;
         data[9] = 0;
@@ -554,7 +590,11 @@ mod tests {
 
     #[test]
     fn message_instruction_index_not_u16_max() {
-        let mut data = build_ix_data(AUTH.as_array(), &[0u8; 48], &AUTH_SIGNATURE);
+        let mut data = build_ix_data(
+            AUTH.as_array(),
+            &[0u8; VOUCHER_PAYLOAD_SIZE],
+            &AUTH_SIGNATURE,
+        );
         // offsets[12..14] is message_instruction_index
         data[14] = 0;
         data[15] = 0;
