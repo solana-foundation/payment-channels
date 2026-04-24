@@ -22,22 +22,13 @@ use payment_channels_client::types::OpenArgs;
 use solana_instruction::error::InstructionError;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
-use solana_message::Message;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 
-const PROGRAM_ID: Pubkey = Pubkey::new_from_array(*payment_channels::ID.as_array());
-
-fn load_program() -> LiteSVM {
-    let mut svm = LiteSVM::new();
-    let path = std::env::var("PAYMENT_CHANNELS_SO")
-        .unwrap_or_else(|_| "../../target/deploy/payment_channels.so".into());
-    svm.add_program_from_file(PROGRAM_ID, &path)
-        .unwrap_or_else(|e| panic!("failed to load {path}: {e:?}"));
-    svm
-}
+mod common;
+use common::{PROGRAM_ID, expect_custom_err, load_program};
 
 fn event_authority() -> (Pubkey, u8) {
     Pubkey::find_program_address(&[EVENT_AUTHORITY_SEED], &PROGRAM_ID)
@@ -73,8 +64,12 @@ fn send_open(
     args: OpenArgs,
 ) -> Result<litesvm::types::TransactionMetadata, litesvm::types::FailedTransactionMetadata> {
     let ix = build_open_ix(&payer.pubkey(), channel, args);
-    let msg = Message::new(&[ix], Some(&payer.pubkey()));
-    let tx = Transaction::new(&[payer], msg, svm.latest_blockhash());
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&payer.pubkey()),
+        &[payer],
+        svm.latest_blockhash(),
+    );
     svm.send_transaction(tx)
 }
 
@@ -166,16 +161,16 @@ fn emit_event_rejects_bad_authority() {
 
     // Send with attacker as signer + sole account — not the event PDA.
     let ix = build_direct_emit_event_ix(&attacker.pubkey(), true, &[]);
-    let msg = Message::new(&[ix], Some(&payer.pubkey()));
-    let tx = Transaction::new(&[&payer, &attacker], msg, svm.latest_blockhash());
-    let err = svm.send_transaction(tx).expect_err("should fail");
-    let expected = PaymentChannelsError::InvalidEventAuthority as u32;
-    match err.err {
-        TransactionError::InstructionError(_, InstructionError::Custom(code)) => {
-            assert_eq!(code, expected, "expected InvalidEventAuthority");
-        }
-        other => panic!("unexpected error: {other:?}"),
-    }
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&payer.pubkey()),
+        &[&payer, &attacker],
+        svm.latest_blockhash(),
+    );
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::InvalidEventAuthority,
+    );
 }
 
 #[test]
@@ -187,8 +182,12 @@ fn emit_event_rejects_non_signer_authority() {
 
     // Correct PDA address but not marked signer.
     let ix = build_direct_emit_event_ix(&pda, false, &[]);
-    let msg = Message::new(&[ix], Some(&payer.pubkey()));
-    let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&payer.pubkey()),
+        &[&payer],
+        svm.latest_blockhash(),
+    );
     let err = svm.send_transaction(tx).expect_err("should fail");
     match err.err {
         TransactionError::InstructionError(_, InstructionError::MissingRequiredSignature) => {}
@@ -207,8 +206,12 @@ fn emit_event_rejects_zero_accounts() {
         accounts: vec![],
         data: vec![EMIT_EVENT_IX_DISC],
     };
-    let msg = Message::new(&[ix], Some(&payer.pubkey()));
-    let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&payer.pubkey()),
+        &[&payer],
+        svm.latest_blockhash(),
+    );
     let err = svm.send_transaction(tx).expect_err("should fail");
     match err.err {
         TransactionError::InstructionError(_, InstructionError::NotEnoughAccountKeys) => {}
@@ -226,8 +229,12 @@ fn emit_event_rejects_extra_accounts() {
     // Two accounts (PDA + something else); slice pattern `[event_authority]`
     // matches only exactly 1, so this must fail.
     let ix = build_direct_emit_event_ix(&pda, false, &[Pubkey::new_unique()]);
-    let msg = Message::new(&[ix], Some(&payer.pubkey()));
-    let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&payer.pubkey()),
+        &[&payer],
+        svm.latest_blockhash(),
+    );
     let err = svm.send_transaction(tx).expect_err("should fail");
     match err.err {
         TransactionError::InstructionError(_, InstructionError::NotEnoughAccountKeys) => {}

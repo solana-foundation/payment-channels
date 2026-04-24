@@ -313,6 +313,13 @@
           "fields": [
             {
               "kind": "structFieldTypeNode",
+              "name": "channelId",
+              "type": {
+                "kind": "publicKeyTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
               "name": "cumulativeAmount",
               "type": {
                 "endian": "le",
@@ -327,13 +334,6 @@
                 "endian": "le",
                 "format": "i64",
                 "kind": "numberTypeNode"
-              }
-            },
-            {
-              "kind": "structFieldTypeNode",
-              "name": "channelId",
-              "type": {
-                "kind": "publicKeyTypeNode"
               }
             }
           ],
@@ -586,12 +586,6 @@
       },
       {
         "accounts": [
-          {
-            "isSigner": true,
-            "isWritable": false,
-            "kind": "instructionAccountNode",
-            "name": "merchant"
-          },
           {
             "isSigner": false,
             "isWritable": true,

@@ -55,7 +55,7 @@ build-program: prepare-deploy-keys
 # `cargo build` / `cargo build-sbf` don't touch it (codama is
 # behind the same feature).
 generate-idl:
-    cd {{program_dir}} && cargo build --features idl
+    cd {{program_dir}} && GENERATE_IDL="$RANDOM-$(date +%s)" cargo build --features idl
     @echo "✓ IDL: {{idl_file}}"
 
 generate-client: generate-idl

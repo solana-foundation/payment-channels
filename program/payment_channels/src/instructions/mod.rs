@@ -15,8 +15,9 @@ use pinocchio::{Address, error::ProgramError};
 
 use crate::state::Transmutable;
 
-/// On-chain wire encoding of the voucher. Field order is re-packed vs.
-/// the off-chain JSON shape to make the struct zero-copy loadable.
+/// On-chain wire encoding of the voucher. Field order matches
+/// Borsh(`{ channel_id, cumulative_amount, expires_at }`), so the
+/// struct's raw bytes ARE the ed25519-signed payload — no repack.
 /// Ed25519-only; signature verification is offloaded to a caller-bundled
 /// Ed25519 native-program ix whose message bytes are read back via the
 /// Instructions sysvar.
@@ -24,6 +25,8 @@ use crate::state::Transmutable;
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct VoucherArgs {
+    /// Replay scope; must equal the [`Channel`](crate::Channel) PDA.
+    pub channel_id: Address,
     /// Monotonic watermark. Must satisfy
     /// [`settled`](crate::Channel::settled) `< cumulative_amount ≤`
     /// [`deposit`](crate::Channel::deposit); the strict increase also
@@ -34,16 +37,14 @@ pub struct VoucherArgs {
     /// `expires_at == 0 || now < expires_at`.
     #[cfg_attr(feature = "idl", codama(type = number(i64)))]
     expires_at: [u8; 8],
-    /// Replay scope; must equal the [`Channel`](crate::Channel) PDA.
-    pub channel_id: Address,
 }
 
 impl VoucherArgs {
-    pub fn new(cumulative_amount: u64, expires_at: i64, channel_id: Address) -> Self {
+    pub fn new(channel_id: Address, cumulative_amount: u64, expires_at: i64) -> Self {
         Self {
+            channel_id,
             cumulative_amount: cumulative_amount.to_le_bytes(),
             expires_at: expires_at.to_le_bytes(),
-            channel_id,
         }
     }
 
@@ -57,8 +58,21 @@ impl VoucherArgs {
     }
 }
 
+/// Byte length of the signed voucher payload — `channel_id (32) ||
+/// cumulative_amount (8 LE) || expires_at (8 LE)`, which is exactly the
+/// in-memory layout of [`VoucherArgs`]. Also the canonical
+/// `message_data_size` every Ed25519 precompile ix must declare; pinned
+/// against a layout where an attacker has the precompile verify a
+/// truncated or extended message.
+pub const VOUCHER_PAYLOAD_SIZE: usize = core::mem::size_of::<VoucherArgs>();
+
+/// Pins [`VOUCHER_PAYLOAD_SIZE`] to the Ed25519 precompile's `u16`
+/// `message_data_size` field so the `as u16` casts at ix-build sites
+/// can't silently truncate.
+const _: () = assert!(VOUCHER_PAYLOAD_SIZE <= u16::MAX as usize);
+
 unsafe impl Transmutable for VoucherArgs {
-    const LEN: usize = core::mem::size_of::<Self>();
+    const LEN: usize = VOUCHER_PAYLOAD_SIZE;
 }
 
 /// Byte-0-dispatched instruction codomain. Each variant's discriminant
@@ -88,11 +102,11 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
     )]
     Open(#[cfg_attr(feature = "idl", codama(name = "open_args"))] &'a open::OpenArgs) = 1,
 
-    /// Advances the on-chain [`settled`](crate::Channel::settled) watermark
-    /// against a payer-signed voucher. `OPEN → OPEN`.
+    /// Permissionless crank: advances the on-chain
+    /// [`settled`](crate::Channel::settled) watermark against a payer-signed
+    /// voucher. `OPEN → OPEN`.
     #[cfg_attr(
         feature = "idl",
-        codama(account(name = "merchant", signer)),
         codama(account(name = "channel", writable)),
         codama(account(name = "instructions_sysvar"))
     )]
@@ -218,7 +232,7 @@ mod tests {
     // it back requires a raw-pointer cast because `mem::discriminant`
     // is opaque and variants with payloads can't `as u8`.
     fn tag(v: &PaymentChannelsInstruction<'_>) -> u8 {
-        unsafe { *(v as *const _ as *const u8) }
+        unsafe { *core::ptr::from_ref(v).cast::<u8>() }
     }
 
     #[test]

@@ -14,8 +14,6 @@ pub const SETTLE_DISCRIMINATOR: u8 = 2;
 /// Accounts.
 #[derive(Debug)]
 pub struct Settle {
-    pub merchant: solana_address::Address,
-
     pub channel: solana_address::Address,
 
     pub instructions_sysvar: solana_address::Address,
@@ -32,11 +30,7 @@ impl Settle {
         args: SettleInstructionArgs,
         remaining_accounts: &[solana_instruction::AccountMeta],
     ) -> solana_instruction::Instruction {
-        let mut accounts = Vec::with_capacity(3 + remaining_accounts.len());
-        accounts.push(solana_instruction::AccountMeta::new_readonly(
-            self.merchant,
-            true,
-        ));
+        let mut accounts = Vec::with_capacity(2 + remaining_accounts.len());
         accounts.push(solana_instruction::AccountMeta::new(self.channel, false));
         accounts.push(solana_instruction::AccountMeta::new_readonly(
             self.instructions_sysvar,
@@ -91,12 +85,10 @@ impl SettleInstructionArgs {
 ///
 /// ### Accounts:
 ///
-///   0. `[signer]` merchant
-///   1. `[writable]` channel
-///   2. `[]` instructions_sysvar
+///   0. `[writable]` channel
+///   1. `[]` instructions_sysvar
 #[derive(Clone, Debug, Default)]
 pub struct SettleBuilder {
-    merchant: Option<solana_address::Address>,
     channel: Option<solana_address::Address>,
     instructions_sysvar: Option<solana_address::Address>,
     settle_args: Option<SettleArgs>,
@@ -106,11 +98,6 @@ pub struct SettleBuilder {
 impl SettleBuilder {
     pub fn new() -> Self {
         Self::default()
-    }
-    #[inline(always)]
-    pub fn merchant(&mut self, merchant: solana_address::Address) -> &mut Self {
-        self.merchant = Some(merchant);
-        self
     }
     #[inline(always)]
     pub fn channel(&mut self, channel: solana_address::Address) -> &mut Self {
@@ -148,7 +135,6 @@ impl SettleBuilder {
     #[allow(clippy::clone_on_copy)]
     pub fn instruction(&self) -> solana_instruction::Instruction {
         let accounts = Settle {
-            merchant: self.merchant.expect("merchant is not set"),
             channel: self.channel.expect("channel is not set"),
             instructions_sysvar: self
                 .instructions_sysvar
@@ -164,8 +150,6 @@ impl SettleBuilder {
 
 /// `settle` CPI accounts.
 pub struct SettleCpiAccounts<'a, 'b> {
-    pub merchant: &'b solana_account_info::AccountInfo<'a>,
-
     pub channel: &'b solana_account_info::AccountInfo<'a>,
 
     pub instructions_sysvar: &'b solana_account_info::AccountInfo<'a>,
@@ -175,8 +159,6 @@ pub struct SettleCpiAccounts<'a, 'b> {
 pub struct SettleCpi<'a, 'b> {
     /// The program to invoke.
     pub __program: &'b solana_account_info::AccountInfo<'a>,
-
-    pub merchant: &'b solana_account_info::AccountInfo<'a>,
 
     pub channel: &'b solana_account_info::AccountInfo<'a>,
 
@@ -193,7 +175,6 @@ impl<'a, 'b> SettleCpi<'a, 'b> {
     ) -> Self {
         Self {
             __program: program,
-            merchant: accounts.merchant,
             channel: accounts.channel,
             instructions_sysvar: accounts.instructions_sysvar,
             __args: args,
@@ -222,11 +203,7 @@ impl<'a, 'b> SettleCpi<'a, 'b> {
         signers_seeds: &[&[&[u8]]],
         remaining_accounts: &[(&'b solana_account_info::AccountInfo<'a>, bool, bool)],
     ) -> solana_program_error::ProgramResult {
-        let mut accounts = Vec::with_capacity(3 + remaining_accounts.len());
-        accounts.push(solana_instruction::AccountMeta::new_readonly(
-            *self.merchant.key,
-            true,
-        ));
+        let mut accounts = Vec::with_capacity(2 + remaining_accounts.len());
         accounts.push(solana_instruction::AccountMeta::new(
             *self.channel.key,
             false,
@@ -251,9 +228,8 @@ impl<'a, 'b> SettleCpi<'a, 'b> {
             accounts,
             data,
         };
-        let mut account_infos = Vec::with_capacity(4 + remaining_accounts.len());
+        let mut account_infos = Vec::with_capacity(3 + remaining_accounts.len());
         account_infos.push(self.__program.clone());
-        account_infos.push(self.merchant.clone());
         account_infos.push(self.channel.clone());
         account_infos.push(self.instructions_sysvar.clone());
         remaining_accounts
@@ -272,9 +248,8 @@ impl<'a, 'b> SettleCpi<'a, 'b> {
 ///
 /// ### Accounts:
 ///
-///   0. `[signer]` merchant
-///   1. `[writable]` channel
-///   2. `[]` instructions_sysvar
+///   0. `[writable]` channel
+///   1. `[]` instructions_sysvar
 #[derive(Clone, Debug)]
 pub struct SettleCpiBuilder<'a, 'b> {
     instruction: Box<SettleCpiBuilderInstruction<'a, 'b>>,
@@ -284,18 +259,12 @@ impl<'a, 'b> SettleCpiBuilder<'a, 'b> {
     pub fn new(program: &'b solana_account_info::AccountInfo<'a>) -> Self {
         let instruction = Box::new(SettleCpiBuilderInstruction {
             __program: program,
-            merchant: None,
             channel: None,
             instructions_sysvar: None,
             settle_args: None,
             __remaining_accounts: Vec::new(),
         });
         Self { instruction }
-    }
-    #[inline(always)]
-    pub fn merchant(&mut self, merchant: &'b solana_account_info::AccountInfo<'a>) -> &mut Self {
-        self.instruction.merchant = Some(merchant);
-        self
     }
     #[inline(always)]
     pub fn channel(&mut self, channel: &'b solana_account_info::AccountInfo<'a>) -> &mut Self {
@@ -359,8 +328,6 @@ impl<'a, 'b> SettleCpiBuilder<'a, 'b> {
         let instruction = SettleCpi {
             __program: self.instruction.__program,
 
-            merchant: self.instruction.merchant.expect("merchant is not set"),
-
             channel: self.instruction.channel.expect("channel is not set"),
 
             instructions_sysvar: self
@@ -379,7 +346,6 @@ impl<'a, 'b> SettleCpiBuilder<'a, 'b> {
 #[derive(Clone, Debug)]
 struct SettleCpiBuilderInstruction<'a, 'b> {
     __program: &'b solana_account_info::AccountInfo<'a>,
-    merchant: Option<&'b solana_account_info::AccountInfo<'a>>,
     channel: Option<&'b solana_account_info::AccountInfo<'a>>,
     instructions_sysvar: Option<&'b solana_account_info::AccountInfo<'a>>,
     settle_args: Option<SettleArgs>,
