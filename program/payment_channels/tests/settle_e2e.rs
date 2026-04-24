@@ -582,3 +582,55 @@ fn settle_preceding_compute_budget_ix_rejects() {
         PaymentChannelsError::MissingEd25519Verification,
     );
 }
+
+#[test]
+fn settle_with_invalid_signature_rejects_before_settle_runs() {
+    // Canonical precompile ix layout (correct pubkey, correct message,
+    // canonical offsets) paired with a zeroed signature: cryptographically
+    // invalid for any (pubkey, message). The native Ed25519SigVerify
+    // precompile must reject at ix index 0 — our settle (ix index 1)
+    // never runs. Distinct from `settle_malformed_ed25519_ix_rejects`,
+    // which tampers a field the precompile ignores and only trips our
+    // program's `parse` guard.
+    use solana_transaction_error::TransactionError;
+
+    let mut svm = load_program();
+    let fee_payer = Keypair::new();
+    svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
+
+    let signer = Keypair::new();
+    let channel = Pubkey::new_unique();
+    seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
+
+    let voucher = VoucherArgs {
+        channel_id: channel,
+        cumulative_amount: 500_000,
+        expires_at: 0,
+    };
+    let payload = voucher_payload(&voucher);
+    let pubkey = signer.pubkey().to_bytes();
+    let forged_signature = [0u8; ed25519::SIGNATURE_SERIALIZED_SIZE];
+
+    let ed25519_ix = build_ed25519_ix(&pubkey, &forged_signature, &payload);
+    let settle_ix = build_settle_ix(&channel, voucher);
+
+    let tx = Transaction::new_signed_with_payer(
+        &[ed25519_ix, settle_ix],
+        Some(&fee_payer.pubkey()),
+        &[&fee_payer],
+        svm.latest_blockhash(),
+    );
+    let failed = svm.send_transaction(tx).expect_err("tx should fail");
+
+    // Pin the failure at instruction index 0 (precompile). A failure at
+    // index 1 would mean our program ran — exactly what this test rules
+    // out. The ix is structurally valid, so the only thing that can fail
+    // at index 0 is signature verification.
+    match failed.err {
+        TransactionError::InstructionError(0, _) => {}
+        other => panic!("expected precompile failure at ix 0, got {other:?}"),
+    }
+
+    // Cross-check: settle never wrote the watermark.
+    assert_eq!(read_settled(&svm, &channel), 0);
+}
