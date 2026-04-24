@@ -30,7 +30,7 @@ pub fn verify_voucher(
     let ix = sysvar
         .load_instruction_at(prev_idx as usize)
         .map_err(|_| PaymentChannelsError::MissingEd25519Verification)?;
-    if ix.get_program_id() != &ed25519_ix::ED25519_PROGRAM_ID {
+    if ix.get_program_id() != &crate::ed25519::PROGRAM_ID {
         return Err(PaymentChannelsError::MissingEd25519Verification.into());
     }
     let parsed = ed25519_ix::parse(ix.get_instruction_data())?;
@@ -85,43 +85,10 @@ mod ed25519_ix {
     //! https://solana.com/docs/core/programs/precompiles#verify-ed25519-signature
 
     use super::{PaymentChannelsError, VOUCHER_PAYLOAD_SIZE};
-    use pinocchio::{Address, error::ProgramError};
-
-    /// Native program address of Ed25519SigVerify precompile.
-    pub(super) const ED25519_PROGRAM_ID: Address =
-        Address::from_str_const("Ed25519SigVerify111111111111111111111111111");
-
-    /// Ed25519 pubkey byte width.
-    const PUBKEY_SERIALIZED_SIZE: usize = 32;
-
-    /// Ed25519 signature byte width.
-    const SIGNATURE_SERIALIZED_SIZE: usize = 64;
-
-    /// Byte position of the `Ed25519SignatureOffsets` array — sits
-    /// immediately after the `[num_signatures: u8, padding: u8]`
-    /// header.
-    const SIGNATURE_OFFSETS_START: usize = 2;
-
-    /// Byte width of one `Ed25519SignatureOffsets` record: seven
-    /// little-endian `u16` fields, in order — `signature_offset`,
-    /// `signature_instruction_index`, `public_key_offset`,
-    /// `public_key_instruction_index`, `message_data_offset`,
-    /// `message_data_size`, `message_instruction_index`.
-    const SIGNATURE_OFFSETS_SERIALIZED_SIZE: usize = 14;
-
-    /// Canonical byte offset of the pubkey region in a single-signature
-    /// inline ix (= 16): the first byte after the two-byte header plus
-    /// one offsets record.
-    const PUBKEY_OFFSET: usize = SIGNATURE_OFFSETS_START + SIGNATURE_OFFSETS_SERIALIZED_SIZE;
-
-    /// Canonical byte offset of the signature region (= 48): pubkey
-    /// region immediately followed by the 64-byte signature.
-    const SIGNATURE_OFFSET: usize = PUBKEY_OFFSET + PUBKEY_SERIALIZED_SIZE;
-
-    /// Canonical byte offset of the message payload (= 112): signature
-    /// region immediately followed by the message. Message length is
-    /// taken from `message_data_size` (offsets[10..12]).
-    const MESSAGE_OFFSET: usize = SIGNATURE_OFFSET + SIGNATURE_SERIALIZED_SIZE;
+    use crate::ed25519::{
+        MESSAGE_OFFSET, PUBKEY_OFFSET, SIGNATURE_OFFSET, SIGNATURE_OFFSETS_START,
+    };
+    use pinocchio::error::ProgramError;
 
     /// Parsed Ed25519 precompile ix data.
     pub(super) struct Parsed<'a> {
@@ -239,24 +206,30 @@ mod tests {
     /// `parse` accepts the output by default; tests that exercise guard
     /// failures tamper specific bytes of the returned buffer afterwards.
     fn build_ix_data(pubkey: &[u8; 32], message: &[u8], signature: &[u8; 64]) -> Vec<u8> {
-        let mut data = Vec::with_capacity(2 + 14 + 32 + 64 + message.len());
-        data.push(1u8); // num_sigs
+        use crate::ed25519::{
+            MESSAGE_OFFSET, PUBKEY_OFFSET, PUBKEY_SERIALIZED_SIZE, SIGNATURE_OFFSET,
+            SIGNATURE_SERIALIZED_SIZE,
+        };
+
+        let mut data = Vec::with_capacity(MESSAGE_OFFSET + message.len());
+        data.push(1u8); // num_signatures
         data.push(0u8); // padding
 
-        let header_len: u16 = 2 + 14;
-        let pubkey_offset = header_len;
-        let signature_offset = pubkey_offset + 32;
-        let message_offset = signature_offset + 64;
+        let pubkey_offset = PUBKEY_OFFSET as u16;
+        let signature_offset = SIGNATURE_OFFSET as u16;
+        let message_offset = MESSAGE_OFFSET as u16;
         let message_size = message.len() as u16;
 
         data.extend_from_slice(&signature_offset.to_le_bytes());
         data.extend_from_slice(&u16::MAX.to_le_bytes()); // signature_instruction_index
         data.extend_from_slice(&pubkey_offset.to_le_bytes());
-        data.extend_from_slice(&u16::MAX.to_le_bytes()); // pubkey_instruction_index
+        data.extend_from_slice(&u16::MAX.to_le_bytes()); // public_key_instruction_index
         data.extend_from_slice(&message_offset.to_le_bytes());
         data.extend_from_slice(&message_size.to_le_bytes());
         data.extend_from_slice(&u16::MAX.to_le_bytes()); // message_instruction_index
 
+        debug_assert_eq!(pubkey.len(), PUBKEY_SERIALIZED_SIZE);
+        debug_assert_eq!(signature.len(), SIGNATURE_SERIALIZED_SIZE);
         data.extend_from_slice(pubkey);
         data.extend_from_slice(signature);
         data.extend_from_slice(message);
