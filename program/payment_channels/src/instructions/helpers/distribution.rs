@@ -49,15 +49,17 @@ impl DistributionRecipients {
         Ok(n)
     }
 
-    /// Raw bytes of `count(1) || entries[0..n](n×40)` — the blake3 preimage
-    /// for [`Channel::distribution_hash`](crate::Channel::distribution_hash).
+    /// Raw bytes of `count(1) || entries[0..count](count×40)` — the blake3
+    /// preimage for [`Channel::distribution_hash`](crate::Channel::distribution_hash).
     #[inline(always)]
-    pub fn preimage(&self, n: usize) -> &[u8] {
+    pub fn preimage(&self) -> &[u8] {
+        let n = self.count as usize;
         &self.as_bytes()[..1 + n * 40]
     }
 
-    pub fn hash(&self, n: usize) -> [u8; 32] {
-        let input = self.preimage(n);
+    pub fn preimage_hash(&self) -> [u8; 32] {
+        #[allow(unused_variables)]
+        let input = self.preimage();
         #[cfg(any(target_os = "solana", target_arch = "bpf"))]
         {
             let mut out = [0u8; 32];
@@ -130,25 +132,29 @@ mod tests {
     fn preimage_length_matches_count() {
         for n in 1..=MAX_DISTRIBUTION_RECIPIENTS {
             let r = make_recipients(n as u8);
-            assert_eq!(r.preimage(n).len(), 1 + n * 40);
+            assert_eq!(r.preimage().len(), 1 + n * 40);
         }
     }
 
     #[test]
     fn preimage_first_byte_is_count() {
         let r = make_recipients(7);
-        assert_eq!(r.preimage(7)[0], 7);
+        assert_eq!(r.preimage()[0], 7);
     }
 
     #[test]
-    fn hash_is_deterministic() {
+    fn preimage_hash_is_deterministic() {
         let r = make_recipients(3);
-        assert_eq!(r.hash(3), r.hash(3));
+        assert_eq!(r.preimage_hash(), r.preimage_hash());
     }
 
     #[test]
-    fn hash_differs_by_count() {
-        let r = make_recipients(3);
-        assert_ne!(r.hash(1), r.hash(2));
+    fn preimage_hash_differs_by_count() {
+        let mut r1 = make_recipients(1);
+        let mut r2 = make_recipients(2);
+        // Ensure the active entries differ so the preimages are distinct
+        r1.entries[0].recipient = Address::default();
+        r2.entries[0].recipient = Address::default();
+        assert_ne!(r1.preimage_hash(), r2.preimage_hash());
     }
 }

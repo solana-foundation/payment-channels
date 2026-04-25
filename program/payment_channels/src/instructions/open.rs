@@ -163,14 +163,14 @@ pub fn process(
         return Err(PaymentChannelsError::PayerPayeeMustDiffer.into());
     }
 
-    let n = args.recipients.validate()?;
+    args.recipients.validate()?;
 
     let deposit = args.deposit();
     if deposit == 0 {
         return Err(PaymentChannelsError::DepositMustBeNonZero.into());
     }
 
-    let distribution_hash = args.recipients.hash(n);
+    let distribution_hash = args.recipients.preimage_hash();
 
     let (channel_address, bump) = Channel::find_pda(
         accs.payer.address(),
