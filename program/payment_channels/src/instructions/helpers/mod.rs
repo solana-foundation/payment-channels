@@ -1,6 +1,9 @@
 // Shared helpers for instruction handlers.
 
+pub mod distribution;
 pub mod voucher;
+
+pub use distribution::{DistributionEntry, DistributionRecipients, MAX_DISTRIBUTION_RECIPIENTS};
 
 use crate::state::CHANNEL_SEED;
 use pinocchio::cpi::Seed;

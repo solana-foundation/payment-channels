@@ -1,0 +1,154 @@
+#[cfg(feature = "idl")]
+use codama::CodamaType;
+use core::mem::size_of;
+use pinocchio::{Address, error::ProgramError};
+
+use crate::errors::PaymentChannelsError;
+use crate::state::Transmutable;
+
+/// Maximum number of distribution recipients per channel.
+pub const MAX_DISTRIBUTION_RECIPIENTS: usize = 32;
+
+/// One entry in the distribution plan committed at `open`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "idl", derive(CodamaType))]
+pub struct DistributionEntry {
+    pub recipient: Address,
+    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    amount: [u8; 8],
+}
+
+impl DistributionEntry {
+    #[inline(always)]
+    pub fn amount(&self) -> u64 {
+        u64::from_le_bytes(self.amount)
+    }
+}
+
+/// Packed distribution plan committed at `open` and verified by `distribute`.
+///
+/// Wire layout: `count(1) | entries(32×40)`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "idl", derive(CodamaType))]
+pub struct DistributionRecipients {
+    /// Number of active entries (1–32).
+    pub count: u8,
+    // codama requires a literal array size; MAX_DISTRIBUTION_RECIPIENTS = 32.
+    pub entries: [DistributionEntry; 32],
+}
+
+impl DistributionRecipients {
+    /// Validates `count` is in `1..=MAX_DISTRIBUTION_RECIPIENTS`.
+    pub fn validate(&self) -> Result<usize, ProgramError> {
+        let n = self.count as usize;
+        if n == 0 || n > MAX_DISTRIBUTION_RECIPIENTS {
+            return Err(PaymentChannelsError::InvalidRecipientCount.into());
+        }
+        Ok(n)
+    }
+
+    /// Raw bytes of `count(1) || entries[0..n](n×40)` — the blake3 preimage
+    /// for [`Channel::distribution_hash`](crate::Channel::distribution_hash).
+    #[inline(always)]
+    pub fn preimage(&self, n: usize) -> &[u8] {
+        &self.as_bytes()[..1 + n * 40]
+    }
+
+    pub fn hash(&self, n: usize) -> [u8; 32] {
+        let input = self.preimage(n);
+        #[cfg(any(target_os = "solana", target_arch = "bpf"))]
+        {
+            let mut out = [0u8; 32];
+            let slices: &[&[u8]] = &[input];
+            // SAFETY: sol_blake3 fills exactly 32 bytes; each &[u8] is a fat pointer
+            // (ptr, len) matching the SolBytes C layout on 64-bit BPF.
+            unsafe {
+                pinocchio::syscalls::sol_blake3(slices.as_ptr().cast::<u8>(), 1, out.as_mut_ptr());
+            }
+            out
+        }
+        #[cfg(all(not(any(target_os = "solana", target_arch = "bpf")), test))]
+        {
+            blake3::hash(input).into()
+        }
+        #[cfg(all(not(any(target_os = "solana", target_arch = "bpf")), not(test)))]
+        {
+            panic!("sol_blake3 syscall is unavailable on non-BPF targets");
+        }
+    }
+}
+
+unsafe impl Transmutable for DistributionRecipients {
+    const LEN: usize = size_of::<Self>();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_recipients(count: u8) -> DistributionRecipients {
+        let entry = DistributionEntry {
+            recipient: Address::default(),
+            amount: 500u64.to_le_bytes(),
+        };
+        DistributionRecipients {
+            count,
+            entries: [entry; 32],
+        }
+    }
+
+    #[test]
+    fn validate_zero_count_rejected() {
+        assert!(make_recipients(0).validate().is_err());
+    }
+
+    #[test]
+    fn validate_max_count_accepted() {
+        assert_eq!(
+            make_recipients(MAX_DISTRIBUTION_RECIPIENTS as u8)
+                .validate()
+                .unwrap(),
+            MAX_DISTRIBUTION_RECIPIENTS,
+        );
+    }
+
+    #[test]
+    fn validate_over_max_rejected() {
+        let r = DistributionRecipients {
+            count: MAX_DISTRIBUTION_RECIPIENTS as u8 + 1,
+            entries: [DistributionEntry {
+                recipient: Address::default(),
+                amount: [0u8; 8],
+            }; 32],
+        };
+        assert!(r.validate().is_err());
+    }
+
+    #[test]
+    fn preimage_length_matches_count() {
+        for n in 1..=MAX_DISTRIBUTION_RECIPIENTS {
+            let r = make_recipients(n as u8);
+            assert_eq!(r.preimage(n).len(), 1 + n * 40);
+        }
+    }
+
+    #[test]
+    fn preimage_first_byte_is_count() {
+        let r = make_recipients(7);
+        assert_eq!(r.preimage(7)[0], 7);
+    }
+
+    #[test]
+    fn hash_is_deterministic() {
+        let r = make_recipients(3);
+        assert_eq!(r.hash(3), r.hash(3));
+    }
+
+    #[test]
+    fn hash_differs_by_count() {
+        let r = make_recipients(3);
+        assert_ne!(r.hash(1), r.hash(2));
+    }
+}

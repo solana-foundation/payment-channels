@@ -12,31 +12,12 @@ use crate::state::Channel;
 use crate::event_engine::EventSerialize;
 use crate::event_engine::emit_event;
 use crate::events::Opened;
-use crate::instructions::helpers::channel_signer_seeds;
+pub use crate::instructions::helpers::MAX_DISTRIBUTION_RECIPIENTS;
+use crate::instructions::helpers::{DistributionRecipients, channel_signer_seeds};
 use crate::state::{Transmutable, load};
 
 /// Instruction discriminator byte for `open`.
 pub const DISCRIMINATOR: u8 = 1;
-
-/// Maximum number of distribution recipients per channel.
-pub const MAX_DISTRIBUTION_RECIPIENTS: usize = 30;
-
-/// One entry in the distribution plan committed at `open`.
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-#[cfg_attr(feature = "idl", derive(CodamaType))]
-pub struct DistributionEntry {
-    pub recipient: Address,
-    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
-    amount: [u8; 8],
-}
-
-impl DistributionEntry {
-    #[inline(always)]
-    pub fn amount(&self) -> u64 {
-        u64::from_le_bytes(self.amount)
-    }
-}
 
 /// Init payload. The distribution plan is hashed on-chain with `blake3` and
 /// the digest stored in
@@ -44,8 +25,7 @@ impl DistributionEntry {
 /// [`distribute`](crate::instructions::distribute) later verifies a matching
 /// preimage before paying out splits.
 ///
-/// Wire layout: `salt(8) | deposit(8) | grace_period(4) | num_recipients(1) |
-/// entries(MAX×40)`.
+/// Wire layout: `salt(8) | deposit(8) | grace_period(4) | count(1) | entries(32×40)`.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
@@ -64,14 +44,7 @@ pub struct OpenArgs {
     /// unlock for permissionless `finalize`.
     #[cfg_attr(feature = "idl", codama(type = number(u32)))]
     grace_period: [u8; 4],
-    /// Number of valid entries in [`Self::recipients`] (1–30).
-    pub num_recipients: u8,
-    /// Packed distribution plan. Only the first `num_recipients` entries are
-    /// used; trailing entries must be zeroed.  `open` computes
-    /// `blake3(num_recipients_byte || active_entries_bytes)` and stores the
-    /// digest as [`Channel::distribution_hash`](crate::Channel::distribution_hash).
-    // codama requires a literal array size; MAX_DISTRIBUTION_RECIPIENTS = 30.
-    pub recipients: [DistributionEntry; 30],
+    pub recipients: DistributionRecipients,
 }
 
 impl OpenArgs {
@@ -88,14 +61,6 @@ impl OpenArgs {
     #[inline(always)]
     pub fn grace_period(&self) -> u32 {
         u32::from_le_bytes(self.grace_period)
-    }
-
-    /// Raw bytes of `num_recipients(1) || recipients[0..n](n×40)` — the
-    /// preimage fed to `blake3` for [`Channel::distribution_hash`](crate::Channel::distribution_hash).
-    #[inline(always)]
-    pub fn distribution_preimage(&self, n: usize) -> &[u8] {
-        // offset 20 = salt(8) + deposit(8) + grace_period(4)
-        &self.as_bytes()[20..21 + n * 40]
     }
 
     pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
@@ -181,42 +146,6 @@ impl<'a> TryFrom<&'a mut [AccountView]> for OpenAccounts<'a> {
     }
 }
 
-/// Compute `blake3(num_recipients_byte || active_entry_bytes)`.
-///
-/// # Layout (repr C, all fields align-1)
-/// ```text
-/// offset  0: salt          (8 bytes)
-/// offset  8: deposit       (8 bytes)
-/// offset 16: grace_period  (4 bytes)
-/// offset 20: num_recipients(1 byte)
-/// offset 21: recipients    (30 × 40 bytes)
-/// ```
-/// `n` must be in `1..=MAX_DISTRIBUTION_RECIPIENTS`; callers are responsible
-/// for validating before calling.
-fn distribution_hash(args: &OpenArgs, n: usize) -> [u8; 32] {
-    blake3(args.distribution_preimage(n))
-}
-
-/// BPF target: delegate to the `sol_blake3` syscall.
-#[cfg(any(target_os = "solana", target_arch = "bpf"))]
-fn blake3(input: &[u8]) -> [u8; 32] {
-    let mut hash = [0u8; 32];
-    let slices: &[&[u8]] = &[input];
-    // SAFETY: sol_blake3 fills exactly 32 bytes; each &[u8] is a fat pointer
-    // (ptr, len) matching the SolBytes C layout on 64-bit BPF.
-    unsafe {
-        pinocchio::syscalls::sol_blake3(slices.as_ptr().cast::<u8>(), 1, hash.as_mut_ptr());
-    }
-    hash
-}
-
-/// Non-BPF (host) stub — the syscall is unavailable off-chain.
-/// Never executed at runtime; present only so `cargo check --tests` succeeds.
-#[cfg(not(any(target_os = "solana", target_arch = "bpf")))]
-fn blake3(_input: &[u8]) -> [u8; 32] {
-    [0u8; 32]
-}
-
 /// Payer-signed; creates the [`Channel`](crate::Channel) PDA, locks the
 /// deposit, and commits the distribution hash.
 pub fn process(
@@ -234,17 +163,14 @@ pub fn process(
         return Err(PaymentChannelsError::PayerPayeeMustDiffer.into());
     }
 
-    let n = args.num_recipients as usize;
-    if n == 0 || n > MAX_DISTRIBUTION_RECIPIENTS {
-        return Err(PaymentChannelsError::InvalidRecipientCount.into());
-    }
+    let n = args.recipients.validate()?;
 
     let deposit = args.deposit();
     if deposit == 0 {
         return Err(PaymentChannelsError::DepositMustBeNonZero.into());
     }
 
-    let distribution_hash = distribution_hash(args, n);
+    let distribution_hash = args.recipients.hash(n);
 
     let (channel_address, bump) = Channel::find_pda(
         accs.payer.address(),
