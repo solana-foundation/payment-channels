@@ -75,6 +75,50 @@ fn unsigned_payer_rejected() {
     );
 }
 
+#[test]
+fn payer_equals_payee_rejected() {
+    let mollusk = load_mollusk();
+    let same = Pubkey::new_unique();
+
+    let ix = Instruction::new_with_bytes(
+        PROGRAM_ID,
+        &open_ix_data(SALT, DEPOSIT, GRACE, 1),
+        vec![
+            AccountMeta::new(same, true),                           // payer
+            AccountMeta::new_readonly(same, false),                 // payee — same as payer
+            AccountMeta::new_readonly(Pubkey::new_unique(), false), // mint
+            AccountMeta::new_readonly(Pubkey::new_unique(), false), // authorized_signer
+            AccountMeta::new(Pubkey::new_unique(), false),          // channel
+            AccountMeta::new(Pubkey::new_unique(), false),          // payer_token_account
+            AccountMeta::new(Pubkey::new_unique(), false),          // channel_token_account
+            AccountMeta::new_readonly(Pubkey::new_unique(), false), // token_program
+            AccountMeta::new_readonly(Pubkey::new_unique(), false), // system_program
+            AccountMeta::new_readonly(Pubkey::new_unique(), false), // rent
+            AccountMeta::new_readonly(Pubkey::new_unique(), false), // associated_token_program
+            AccountMeta::new_readonly(Pubkey::new_unique(), false), // event_authority
+            AccountMeta::new_readonly(PROGRAM_ID, false),           // self_program
+        ],
+    );
+
+    let dummy = Account {
+        lamports: 1_000_000,
+        ..Default::default()
+    };
+    let accounts: Vec<(Pubkey, Account)> = ix
+        .accounts
+        .iter()
+        .filter(|m| m.pubkey != PROGRAM_ID)
+        .map(|m| (m.pubkey, dummy.clone()))
+        .collect();
+
+    assert_eq!(
+        mollusk.process_instruction(&ix, &accounts).program_result,
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::PayerPayeeMustDiffer as u32
+        )),
+    );
+}
+
 // ----- PDA / ATA key checks (LiteSVM) ----------------------------------------
 
 #[test]

@@ -22,14 +22,20 @@ pub const DISCRIMINATOR: u8 = 1;
 pub const MAX_DISTRIBUTION_RECIPIENTS: usize = 30;
 
 /// One entry in the distribution plan committed at `open`.
-#[repr(C, packed)]
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct DistributionEntry {
-    /// Token destination for this split.
     pub recipient: Address,
-    /// Token amount for this recipient.
-    pub amount: u64,
+    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    amount: [u8; 8],
+}
+
+impl DistributionEntry {
+    #[inline(always)]
+    pub fn amount(&self) -> u64 {
+        u64::from_le_bytes(self.amount)
+    }
 }
 
 /// Init payload. The distribution plan is hashed on-chain with `blake3` and
@@ -73,13 +79,23 @@ impl OpenArgs {
     pub fn salt(&self) -> u64 {
         u64::from_le_bytes(self.salt)
     }
+
     #[inline(always)]
     pub fn deposit(&self) -> u64 {
         u64::from_le_bytes(self.deposit)
     }
+
     #[inline(always)]
     pub fn grace_period(&self) -> u32 {
         u32::from_le_bytes(self.grace_period)
+    }
+
+    /// Raw bytes of `num_recipients(1) || recipients[0..n](n×40)` — the
+    /// preimage fed to `blake3` for [`Channel::distribution_hash`](crate::Channel::distribution_hash).
+    #[inline(always)]
+    pub fn distribution_preimage(&self, n: usize) -> &[u8] {
+        // offset 20 = salt(8) + deposit(8) + grace_period(4)
+        &self.as_bytes()[20..21 + n * 40]
     }
 
     pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
@@ -178,8 +194,7 @@ impl<'a> TryFrom<&'a mut [AccountView]> for OpenAccounts<'a> {
 /// `n` must be in `1..=MAX_DISTRIBUTION_RECIPIENTS`; callers are responsible
 /// for validating before calling.
 fn distribution_hash(args: &OpenArgs, n: usize) -> [u8; 32] {
-    // offset 20 = salt(8) + deposit(8) + grace_period(4); covers num_recipients(1) + n×40 bytes.
-    blake3(&args.as_bytes()[20..21 + n * 40])
+    blake3(args.distribution_preimage(n))
 }
 
 /// BPF target: delegate to the `sol_blake3` syscall.
@@ -190,7 +205,7 @@ fn blake3(input: &[u8]) -> [u8; 32] {
     // SAFETY: sol_blake3 fills exactly 32 bytes; each &[u8] is a fat pointer
     // (ptr, len) matching the SolBytes C layout on 64-bit BPF.
     unsafe {
-        pinocchio::syscalls::sol_blake3(slices.as_ptr() as *const u8, 1, hash.as_mut_ptr());
+        pinocchio::syscalls::sol_blake3(slices.as_ptr().cast::<u8>(), 1, hash.as_mut_ptr());
     }
     hash
 }
@@ -213,6 +228,10 @@ pub fn process(
 
     if !accs.payer.is_signer() {
         return Err(ProgramError::MissingRequiredSignature);
+    }
+
+    if accs.payer.address() == accs.payee.address() {
+        return Err(PaymentChannelsError::PayerPayeeMustDiffer.into());
     }
 
     let n = args.num_recipients as usize;

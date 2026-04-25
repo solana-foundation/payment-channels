@@ -48,4 +48,6 @@ pub enum PaymentChannelsError {
     ChannelAddressMismatch = 16,
     #[error("Escrow account does not match derived ATA")]
     EscrowAddressMismatch = 17,
+    #[error("Payer and payee must be different accounts")]
+    PayerPayeeMustDiffer = 18,
 }
