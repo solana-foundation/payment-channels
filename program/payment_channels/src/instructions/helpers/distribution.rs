@@ -6,8 +6,14 @@ use pinocchio::{Address, error::ProgramError};
 use crate::errors::PaymentChannelsError;
 use crate::state::Transmutable;
 
+macro_rules! max_distribution_recipients {
+    () => {
+        32
+    };
+}
+
 /// Maximum number of distribution recipients per channel.
-pub const MAX_DISTRIBUTION_RECIPIENTS: usize = 32;
+pub const MAX_DISTRIBUTION_RECIPIENTS: usize = max_distribution_recipients!();
 
 /// One entry in the distribution plan committed at `open`.
 #[repr(C)]
@@ -35,15 +41,15 @@ impl DistributionEntry {
 pub struct DistributionRecipients {
     /// Number of active entries (1–32).
     pub count: u8,
-    // codama requires a literal array size; MAX_DISTRIBUTION_RECIPIENTS = 32.
-    pub entries: [DistributionEntry; 32],
+    // The distribution recipient entries.
+    pub entries: [DistributionEntry; max_distribution_recipients!()],
 }
 
 impl DistributionRecipients {
     /// Validates `count` is in `1..=MAX_DISTRIBUTION_RECIPIENTS`.
     pub fn validate(&self) -> Result<usize, ProgramError> {
         let n = self.count as usize;
-        if n == 0 || n > MAX_DISTRIBUTION_RECIPIENTS {
+        if n == 0 || n > max_distribution_recipients!() {
             return Err(PaymentChannelsError::InvalidRecipientCount.into());
         }
         Ok(n)
@@ -97,7 +103,7 @@ mod tests {
         };
         DistributionRecipients {
             count,
-            entries: [entry; 32],
+            entries: [entry; max_distribution_recipients!()],
         }
     }
 
@@ -123,7 +129,7 @@ mod tests {
             entries: [DistributionEntry {
                 recipient: Address::default(),
                 amount: [0u8; 8],
-            }; 32],
+            }; max_distribution_recipients!()],
         };
         assert!(r.validate().is_err());
     }
