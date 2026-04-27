@@ -1,5 +1,4 @@
-mod accounts;
-mod bounds;
+mod integration;
 
 use mollusk_svm::{Mollusk, result::ProgramResult};
 use payment_channels::instructions::top_up::DISCRIMINATOR;
