@@ -12,8 +12,7 @@ use pinocchio_token_2022::instructions::{CloseAccount, TransferChecked};
 use crate::constants::TREASURY_OWNER;
 use crate::errors::PaymentChannelsError;
 use crate::instructions::helpers::{
-    BPS_DENOMINATOR, DistributionRecipients, derive_ata, overflow, validate_mint,
-    validate_token_account,
+    BPS_DENOMINATOR, DistributionRecipients, derive_ata, validate_mint, validate_token_account,
 };
 use crate::state::channel::{CHANNEL_SEED, Channel, ChannelStatus};
 use crate::state::{Transmutable, load};
@@ -349,4 +348,10 @@ fn share(pool: u64, bps: u32) -> Result<u64, ProgramError> {
         .ok_or_else(overflow)?;
     let q = prod / (BPS_DENOMINATOR as u128);
     Ok(q as u64)
+}
+
+/// Shaped to fit `Option::ok_or_else` / `checked_*` call sites in this module.
+#[inline]
+fn overflow() -> ProgramError {
+    PaymentChannelsError::ArithmeticOverflow.into()
 }

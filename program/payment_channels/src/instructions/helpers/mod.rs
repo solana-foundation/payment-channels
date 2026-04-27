@@ -10,7 +10,7 @@ pub use distribution::{
     BPS_DENOMINATOR, DistributionEntry, DistributionRecipients, MAX_DISTRIBUTION_RECIPIENTS,
 };
 pub use hash::blake3;
-pub use token::{derive_ata, overflow, validate_mint, validate_token_account};
+pub use token::{derive_ata, validate_mint, validate_token_account};
 
 use crate::state::CHANNEL_SEED;
 use pinocchio::cpi::Seed;

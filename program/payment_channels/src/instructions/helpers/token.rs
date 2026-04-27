@@ -41,13 +41,6 @@ mod extension_id {
     pub(super) const TOKEN_GROUP_MEMBER: u16 = 23;
 }
 
-/// Convenience constructor for the program's `ArithmeticOverflow` error,
-/// shaped to fit `Option::ok_or_else` / `checked_*` call sites.
-#[inline]
-pub fn overflow() -> ProgramError {
-    PaymentChannelsError::ArithmeticOverflow.into()
-}
-
 /// Derives the associated-token-account address for `(owner, mint, token_program)`
 /// under the ATA program.
 #[inline]
@@ -172,7 +165,7 @@ fn scan_tlv_extensions(mut data: &[u8], is_mint: bool) -> ProgramResult {
         let value_len = u16::from_le_bytes([data[2], data[3]]) as usize;
         let next = tlv::HEADER_LEN
             .checked_add(value_len)
-            .ok_or_else(overflow)?;
+            .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
         if next > data.len() {
             return Err(PaymentChannelsError::UnsupportedTokenExtensions.into());
         }
