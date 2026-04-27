@@ -67,6 +67,9 @@ pub enum PaymentChannelsError {
     /// 18 - Payer and payee must be different accounts
     #[error("Payer and payee must be different accounts")]
     PayerPayeeMustDiffer = 0x12,
+    /// 19 - Caller is not the channel payer
+    #[error("Caller is not the channel payer")]
+    UnauthorizedPayer = 0x13,
 }
 
 impl From<PaymentChannelsError> for solana_program_error::ProgramError {
