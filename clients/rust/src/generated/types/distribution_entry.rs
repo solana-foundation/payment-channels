@@ -5,14 +5,12 @@
 //! <https://github.com/codama-idl/codama>
 //!
 
-use crate::generated::types::DistributionRecipients;
 use borsh::BorshDeserialize;
 use borsh::BorshSerialize;
+use solana_address::Address;
 
 #[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Eq, PartialEq)]
-pub struct OpenArgs {
-    pub salt: u64,
-    pub deposit: u64,
-    pub grace_period: u32,
-    pub recipients: DistributionRecipients,
+pub struct DistributionEntry {
+    pub recipient: Address,
+    pub amount: u64,
 }

@@ -8,33 +8,35 @@
 
 import {
   combineCodec,
-  getArrayDecoder,
-  getArrayEncoder,
   getStructDecoder,
   getStructEncoder,
   getU32Decoder,
   getU32Encoder,
   getU64Decoder,
   getU64Encoder,
-  getU8Decoder,
-  getU8Encoder,
   type FixedSizeCodec,
   type FixedSizeDecoder,
   type FixedSizeEncoder,
 } from "@solana/kit";
+import {
+  getDistributionRecipientsDecoder,
+  getDistributionRecipientsEncoder,
+  type DistributionRecipients,
+  type DistributionRecipientsArgs,
+} from ".";
 
 export type OpenArgs = {
   salt: bigint;
   deposit: bigint;
   gracePeriod: number;
-  distributionHash: Array<number>;
+  recipients: DistributionRecipients;
 };
 
 export type OpenArgsArgs = {
   salt: number | bigint;
   deposit: number | bigint;
   gracePeriod: number;
-  distributionHash: Array<number>;
+  recipients: DistributionRecipientsArgs;
 };
 
 export function getOpenArgsEncoder(): FixedSizeEncoder<OpenArgsArgs> {
@@ -42,7 +44,7 @@ export function getOpenArgsEncoder(): FixedSizeEncoder<OpenArgsArgs> {
     ["salt", getU64Encoder()],
     ["deposit", getU64Encoder()],
     ["gracePeriod", getU32Encoder()],
-    ["distributionHash", getArrayEncoder(getU8Encoder(), { size: 32 })],
+    ["recipients", getDistributionRecipientsEncoder()],
   ]);
 }
 
@@ -51,7 +53,7 @@ export function getOpenArgsDecoder(): FixedSizeDecoder<OpenArgs> {
     ["salt", getU64Decoder()],
     ["deposit", getU64Decoder()],
     ["gracePeriod", getU32Decoder()],
-    ["distributionHash", getArrayDecoder(getU8Decoder(), { size: 32 })],
+    ["recipients", getDistributionRecipientsDecoder()],
   ]);
 }
 

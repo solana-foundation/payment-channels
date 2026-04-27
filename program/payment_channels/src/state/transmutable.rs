@@ -20,8 +20,7 @@ pub unsafe trait Transmutable {
     /// On-wire byte length of the type.
     const LEN: usize;
 
-    /// Reverse of [`load`]: reinterpret `self` as its `Self::LEN` raw
-    /// bytes.
+    /// Reverse of [`load`]: reinterpret `self` as its `Self::LEN` raw bytes.
     #[inline(always)]
     fn as_bytes(&self) -> &[u8]
     where

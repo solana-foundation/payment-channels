@@ -44,6 +44,15 @@
             },
             {
               "kind": "structFieldTypeNode",
+              "name": "salt",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
               "name": "deposit",
               "type": {
                 "endian": "le",
@@ -195,6 +204,64 @@
       },
       {
         "kind": "definedTypeNode",
+        "name": "distributionEntry",
+        "type": {
+          "fields": [
+            {
+              "kind": "structFieldTypeNode",
+              "name": "recipient",
+              "type": {
+                "kind": "publicKeyTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "amount",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            }
+          ],
+          "kind": "structTypeNode"
+        }
+      },
+      {
+        "kind": "definedTypeNode",
+        "name": "distributionRecipients",
+        "type": {
+          "fields": [
+            {
+              "kind": "structFieldTypeNode",
+              "name": "count",
+              "type": {
+                "endian": "le",
+                "format": "u8",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "entries",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 32
+                },
+                "item": {
+                  "kind": "definedTypeLinkNode",
+                  "name": "distributionEntry"
+                },
+                "kind": "arrayTypeNode"
+              }
+            }
+          ],
+          "kind": "structTypeNode"
+        }
+      },
+      {
+        "kind": "definedTypeNode",
         "name": "openArgs",
         "type": {
           "fields": [
@@ -227,18 +294,10 @@
             },
             {
               "kind": "structFieldTypeNode",
-              "name": "distributionHash",
+              "name": "recipients",
               "type": {
-                "count": {
-                  "kind": "fixedCountNode",
-                  "value": 32
-                },
-                "item": {
-                  "endian": "le",
-                  "format": "u8",
-                  "kind": "numberTypeNode"
-                },
-                "kind": "arrayTypeNode"
+                "kind": "definedTypeLinkNode",
+                "name": "distributionRecipients"
               }
             }
           ],
@@ -467,6 +526,42 @@
         "kind": "errorNode",
         "message": "Voucher signer does not match channel authorized_signer",
         "name": "voucherSignerMismatch"
+      },
+      {
+        "code": 13,
+        "kind": "errorNode",
+        "message": "Distribution hash mismatch",
+        "name": "invalidDistributionHash"
+      },
+      {
+        "code": 14,
+        "kind": "errorNode",
+        "message": "Deposit must be non-zero",
+        "name": "depositMustBeNonZero"
+      },
+      {
+        "code": 15,
+        "kind": "errorNode",
+        "message": "Recipient count must be between 1 and 30",
+        "name": "invalidRecipientCount"
+      },
+      {
+        "code": 16,
+        "kind": "errorNode",
+        "message": "Channel account does not match derived PDA",
+        "name": "channelAddressMismatch"
+      },
+      {
+        "code": 17,
+        "kind": "errorNode",
+        "message": "Escrow account does not match derived ATA",
+        "name": "escrowAddressMismatch"
+      },
+      {
+        "code": 18,
+        "kind": "errorNode",
+        "message": "Payer and payee must be different accounts",
+        "name": "payerPayeeMustDiffer"
       }
     ],
     "events": [],
@@ -536,6 +631,12 @@
             "isWritable": false,
             "kind": "instructionAccountNode",
             "name": "rent"
+          },
+          {
+            "isSigner": false,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "associatedTokenProgram"
           },
           {
             "isSigner": false,

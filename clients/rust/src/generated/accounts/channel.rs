@@ -15,6 +15,7 @@ pub struct Channel {
     pub version: u8,
     pub bump: u8,
     pub status: u8,
+    pub salt: u64,
     pub deposit: u64,
     pub settled: u64,
     pub paid_out: u64,

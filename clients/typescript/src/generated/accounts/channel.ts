@@ -44,6 +44,7 @@ export type Channel = {
   version: number;
   bump: number;
   status: number;
+  salt: bigint;
   deposit: bigint;
   settled: bigint;
   paidOut: bigint;
@@ -62,6 +63,7 @@ export type ChannelArgs = {
   version: number;
   bump: number;
   status: number;
+  salt: number | bigint;
   deposit: number | bigint;
   settled: number | bigint;
   paidOut: number | bigint;
@@ -82,6 +84,7 @@ export function getChannelEncoder(): FixedSizeEncoder<ChannelArgs> {
     ["version", getU8Encoder()],
     ["bump", getU8Encoder()],
     ["status", getU8Encoder()],
+    ["salt", getU64Encoder()],
     ["deposit", getU64Encoder()],
     ["settled", getU64Encoder()],
     ["paidOut", getU64Encoder()],
@@ -103,6 +106,7 @@ export function getChannelDecoder(): FixedSizeDecoder<Channel> {
     ["version", getU8Decoder()],
     ["bump", getU8Decoder()],
     ["status", getU8Decoder()],
+    ["salt", getU64Decoder()],
     ["deposit", getU64Decoder()],
     ["settled", getU64Decoder()],
     ["paidOut", getU64Decoder()],
