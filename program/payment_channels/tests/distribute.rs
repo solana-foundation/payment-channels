@@ -1,21 +1,21 @@
 //! End-to-end validation of `distribute` against the compiled .so.
 //!
-//! We fabricate the Channel state directly (bypassing the stub `open`) because
-//! `open` does not yet persist the distribution commitment or escrow balance.
-//! Once `open` lands, these tests can be migrated to the canonical flow; the
-//! split-config rehash, pool math, and tombstone semantics being exercised are
-//! independent of how the channel got there.
+//! Byte-level mutation stands in for fields whose owning instructions are
+//! still stubbed: `status` (`request_close` / `finalize`),
+//! `payer_withdrawn_at` (`withdraw_payer`), and `paid_out` (post-prior-
+//! distribute simulation). Once those stubs land, the helpers in
+//! `tests/common/channel_state.rs` get deleted and each call site becomes
+//! a one-line ix submission.
 
 #![allow(clippy::result_large_err)]
 
 use std::str::FromStr;
 
 use litesvm::LiteSVM;
-use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
+use litesvm_token::CreateAssociatedTokenAccount;
 use payment_channels::PaymentChannelsError;
 use payment_channels_client::instructions::{Distribute, DistributeInstructionArgs};
 use payment_channels_client::types::DistributeArgs;
-use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -23,16 +23,28 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 
 mod common;
-use common::{PROGRAM_ID, expect_custom_err, load_program};
+use common::channel_state;
+use common::open::{
+    SPL_TOKEN, Split, TOKEN_2022, open_channel, setup_funded_svm_with_token_program,
+};
+use common::settle::settle_to;
+use common::token_2022::{
+    EXT_CPI_GUARD, EXT_GROUP_MEMBER_POINTER, EXT_GROUP_POINTER, EXT_IMMUTABLE_OWNER,
+    EXT_MEMO_TRANSFER, EXT_METADATA_POINTER, EXT_MINT_CLOSE_AUTHORITY, EXT_TOKEN_GROUP,
+    EXT_TOKEN_GROUP_MEMBER, EXT_TOKEN_METADATA, EXT_TRANSFER_FEE_CONFIG, EXT_TRANSFER_HOOK,
+    POINTER_EXTENSION_LEN, TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN,
+    add_account_extension, add_mint_extension,
+};
+use common::{expect_custom_err, load_program};
 
-// ---------------------------------------------------------------------------
-// Constants (mirroring the on-chain program — kept in sync by compile failure
-// if the client types drift).
-
-const CHANNEL_SEED: &[u8] = b"channel";
 const MAX_DISTRIBUTION_RECIPIENTS: usize = 32;
 const ENTRY_LEN: usize = 34;
 const MAX_DISTRIBUTE_PREIMAGE: usize = 1 + MAX_DISTRIBUTION_RECIPIENTS * ENTRY_LEN;
+const STATUS_OPEN: u8 = 0;
+const STATUS_FINALIZED: u8 = 1;
+const STATUS_CLOSING: u8 = 2;
+const GRACE_PERIOD: u32 = 3600;
+const DEFAULT_SALT: u64 = 0x1234_5678_9abc_def0;
 
 /// Match `constants::TREASURY_OWNER` — alternating `0xBE 0xEF` × 16.
 fn treasury_owner() -> Pubkey {
@@ -44,75 +56,23 @@ fn treasury_owner() -> Pubkey {
     Pubkey::new_from_array(b)
 }
 
-const TOKEN_2022_ACCOUNT_TYPE_OFFSET: usize = 165;
-const TOKEN_2022_TLV_START: usize = TOKEN_2022_ACCOUNT_TYPE_OFFSET + 1;
-const TOKEN_2022_ACCOUNT_TYPE_MINT: u8 = 1;
-const TOKEN_2022_ACCOUNT_TYPE_ACCOUNT: u8 = 2;
-const EXT_TRANSFER_FEE_CONFIG: u16 = 1;
-const EXT_MINT_CLOSE_AUTHORITY: u16 = 3;
-const EXT_IMMUTABLE_OWNER: u16 = 7;
-const EXT_MEMO_TRANSFER: u16 = 8;
-const EXT_CPI_GUARD: u16 = 11;
-const EXT_TRANSFER_HOOK: u16 = 14;
-const EXT_METADATA_POINTER: u16 = 18;
-const EXT_TOKEN_METADATA: u16 = 19;
-const EXT_GROUP_POINTER: u16 = 20;
-const EXT_TOKEN_GROUP: u16 = 21;
-const EXT_GROUP_MEMBER_POINTER: u16 = 22;
-const EXT_TOKEN_GROUP_MEMBER: u16 = 23;
-const POINTER_EXTENSION_LEN: usize = 64;
-const TOKEN_METADATA_MIN_LEN: usize = 80;
-const TOKEN_GROUP_LEN: usize = 80;
-const TOKEN_GROUP_MEMBER_LEN: usize = 72;
-
 fn token_2022_program_id() -> Pubkey {
-    Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb").unwrap()
+    TOKEN_2022
 }
 
 fn spl_token_program_id() -> Pubkey {
-    Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").unwrap()
+    SPL_TOKEN
 }
 
 fn compute_budget_ix(units: u32) -> Instruction {
     let mut data = Vec::with_capacity(5);
-    data.push(2); // ComputeBudgetInstruction::SetComputeUnitLimit
+    data.push(0x02);
     data.extend_from_slice(&units.to_le_bytes());
     Instruction {
         program_id: Pubkey::from_str("ComputeBudget111111111111111111111111111111").unwrap(),
-        accounts: vec![],
+        accounts: Vec::new(),
         data,
     }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-
-/// Pair of `(recipient_owner, bps)` that fully specifies one split.
-#[derive(Clone, Copy)]
-struct Split {
-    owner: Pubkey,
-    bps: u16,
-}
-
-/// Channel PDA derivation mirroring `Channel::find_pda`.
-fn find_channel_pda(
-    payer: &Pubkey,
-    payee: &Pubkey,
-    mint: &Pubkey,
-    authorized_signer: &Pubkey,
-    salt: u64,
-) -> (Pubkey, u8) {
-    Pubkey::find_program_address(
-        &[
-            CHANNEL_SEED,
-            payer.as_ref(),
-            payee.as_ref(),
-            mint.as_ref(),
-            authorized_signer.as_ref(),
-            &salt.to_le_bytes(),
-        ],
-        &PROGRAM_ID,
-    )
 }
 
 /// Build the `num_recipients(1) || entries(n × 34)` preimage.
@@ -137,55 +97,6 @@ fn preimage_buffer(active: &[u8]) -> [u8; MAX_DISTRIBUTE_PREIMAGE] {
     buf
 }
 
-/// Seed a Channel PDA with the fields the distribute path reads.
-#[allow(clippy::too_many_arguments)]
-fn seed_channel(
-    svm: &mut LiteSVM,
-    channel: &Pubkey,
-    bump: u8,
-    status: u8,
-    salt: u64,
-    deposit: u64,
-    settled: u64,
-    paid_out: u64,
-    payer_withdrawn_at: i64,
-    distribution_hash: [u8; 32],
-    payer: &Pubkey,
-    payee: &Pubkey,
-    authorized_signer: &Pubkey,
-    mint: &Pubkey,
-) {
-    let mut data = vec![0u8; 216];
-    data[0] = 1; // AccountDiscriminator::Channel
-    data[1] = 1; // CURRENT_CHANNEL_VERSION
-    data[2] = bump;
-    data[3] = status;
-    data[4..12].copy_from_slice(&salt.to_le_bytes());
-    data[12..20].copy_from_slice(&deposit.to_le_bytes());
-    data[20..28].copy_from_slice(&settled.to_le_bytes());
-    data[28..36].copy_from_slice(&paid_out.to_le_bytes());
-    // 36..44 closure_started_at = 0
-    data[44..52].copy_from_slice(&payer_withdrawn_at.to_le_bytes());
-    // 52..56 grace_period = 0
-    data[56..88].copy_from_slice(&distribution_hash);
-    data[88..120].copy_from_slice(payer.as_ref());
-    data[120..152].copy_from_slice(payee.as_ref());
-    data[152..184].copy_from_slice(authorized_signer.as_ref());
-    data[184..216].copy_from_slice(mint.as_ref());
-
-    svm.set_account(
-        *channel,
-        Account {
-            lamports: 10_000_000,
-            data,
-            owner: PROGRAM_ID,
-            executable: false,
-            rent_epoch: 0,
-        },
-    )
-    .expect("set_account");
-}
-
 /// Read the `amount` field (bytes 64..72) of a classic SPL Token account.
 fn token_balance(svm: &LiteSVM, token_account: &Pubkey) -> u64 {
     let acct = svm
@@ -196,61 +107,24 @@ fn token_balance(svm: &LiteSVM, token_account: &Pubkey) -> u64 {
     u64::from_le_bytes(buf)
 }
 
+/// Set the `amount` field on a token account directly. Stand-in for the
+/// stubbed `withdraw_payer` when a test needs the channel ATA to start at
+/// less than the original `deposit`.
+fn set_token_balance(svm: &mut LiteSVM, token_account: &Pubkey, amount: u64) {
+    let mut acct = svm
+        .get_account(token_account)
+        .expect("token account exists");
+    acct.data[64..72].copy_from_slice(&amount.to_le_bytes());
+    svm.set_account(*token_account, acct)
+        .expect("overwrite token account");
+}
+
 /// Read `paid_out` from the channel account (bytes 28..36).
 fn read_paid_out(svm: &LiteSVM, channel: &Pubkey) -> u64 {
     let acct = svm.get_account(channel).expect("channel exists");
     let mut buf = [0u8; 8];
     buf.copy_from_slice(&acct.data[28..36]);
     u64::from_le_bytes(buf)
-}
-
-fn add_mint_extension(svm: &mut LiteSVM, mint: &Pubkey, extension_type: u16, value_len: usize) {
-    let mut acct = svm.get_account(mint).expect("mint exists");
-    add_token_2022_extension(
-        &mut acct.data,
-        82,
-        TOKEN_2022_ACCOUNT_TYPE_MINT,
-        extension_type,
-        value_len,
-    );
-    svm.set_account(*mint, acct).expect("overwrite mint");
-}
-
-fn add_account_extension(
-    svm: &mut LiteSVM,
-    token_account: &Pubkey,
-    extension_type: u16,
-    value_len: usize,
-) {
-    let mut acct = svm
-        .get_account(token_account)
-        .expect("token account exists");
-    add_token_2022_extension(
-        &mut acct.data,
-        165,
-        TOKEN_2022_ACCOUNT_TYPE_ACCOUNT,
-        extension_type,
-        value_len,
-    );
-    svm.set_account(*token_account, acct)
-        .expect("overwrite token account");
-}
-
-fn add_token_2022_extension(
-    data: &mut Vec<u8>,
-    base_len: usize,
-    account_type: u8,
-    extension_type: u16,
-    value_len: usize,
-) {
-    if data.len() < TOKEN_2022_TLV_START {
-        data.resize(TOKEN_2022_TLV_START, 0);
-    }
-    data[base_len..TOKEN_2022_ACCOUNT_TYPE_OFFSET].fill(0);
-    data[TOKEN_2022_ACCOUNT_TYPE_OFFSET] = account_type;
-    data.extend_from_slice(&extension_type.to_le_bytes());
-    data.extend_from_slice(&(value_len as u16).to_le_bytes());
-    data.resize(data.len() + value_len, 0);
 }
 
 /// Full distribute ix build with the 7-slot fixed head + dynamic recipient tail.
@@ -291,8 +165,9 @@ fn build_distribute_ix(
     )
 }
 
-/// One-stop scenario fixture: `LiteSVM` + the channel/mint/account keys needed
-/// for a happy-path distribute test.
+/// One-stop scenario fixture. `status`, `paid_out`, and `payer_withdrawn_at`
+/// are mutated through the stub stand-in helpers in `common::channel_state`
+/// (`request_close` / `finalize` / `withdraw_payer` are not yet implemented).
 struct Scenario {
     svm: LiteSVM,
     fee_payer: Keypair,
@@ -308,7 +183,7 @@ struct Scenario {
 }
 
 impl Scenario {
-    /// Fabricate a Token-2022 scenario with the given splits + channel balances.
+    /// Token-2022 default.
     fn build(splits: Vec<Split>, deposit: u64, settled: u64, paid_out: u64, status: u8) -> Self {
         Self::build_with_token_program(
             splits,
@@ -320,9 +195,6 @@ impl Scenario {
         )
     }
 
-    /// Fabricate a scenario with the given splits + channel balances. Creates
-    /// the mint/ATAs under `token_program`, and mints `deposit` tokens into the
-    /// channel ATA.
     fn build_with_token_program(
         splits: Vec<Split>,
         deposit: u64,
@@ -334,39 +206,47 @@ impl Scenario {
         let mut svm = load_program();
         let fee_payer = Keypair::new();
         svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
-
-        let payer = Pubkey::new_unique();
-        let payee = Pubkey::new_unique();
-        let authorized_signer = Pubkey::new_unique();
-        let salt: u64 = 0x1234_5678_9abc_def0;
-
-        let mint = CreateMint::new(&mut svm, &fee_payer)
-            .decimals(6)
-            .token_program_id(&token_program)
-            .send()
-            .expect("create mint");
-
-        let (channel, bump) = find_channel_pda(&payer, &payee, &mint, &authorized_signer, salt);
-
-        // Fund the payer so the payer ATA can be owned by a live key — ATAs
-        // don't require the owner to have lamports, but some litesvm paths
-        // need the wallet account to exist. Airdropping is cheap.
-        svm.airdrop(&payer, 1_000_000_000).unwrap();
         svm.airdrop(&treasury_owner(), 1_000_000_000).unwrap();
 
-        let channel_ata = CreateAssociatedTokenAccount::new(&mut svm, &fee_payer, &mint)
-            .owner(&channel)
-            .token_program_id(&token_program)
-            .send()
-            .expect("channel ATA");
-        let payer_ata = CreateAssociatedTokenAccount::new(&mut svm, &fee_payer, &mint)
-            .owner(&payer)
-            .token_program_id(&token_program)
-            .send()
-            .expect("payer ATA");
-        let treasury = treasury_owner();
+        let (payer_kp, mint, payer_ata) =
+            setup_funded_svm_with_token_program(&mut svm, deposit, &token_program);
+        let payer = payer_kp.pubkey();
+
+        let opened = open_channel(
+            &mut svm,
+            &payer_kp,
+            &mint,
+            &payer_ata,
+            DEFAULT_SALT,
+            deposit,
+            GRACE_PERIOD,
+            &splits,
+            &token_program,
+        );
+        let channel = opened.channel;
+        let channel_ata = opened.channel_ata;
+
+        if settled > 0 {
+            settle_to(
+                &mut svm,
+                &fee_payer,
+                &channel,
+                &opened.authorized_signer,
+                settled,
+                0,
+            );
+        }
+
+        if paid_out > 0 {
+            channel_state::set_paid_out(&mut svm, &channel, paid_out);
+        }
+
+        if status != STATUS_OPEN {
+            channel_state::set_status(&mut svm, &channel, status);
+        }
+
         let treasury_ata = CreateAssociatedTokenAccount::new(&mut svm, &fee_payer, &mint)
-            .owner(&treasury)
+            .owner(&treasury_owner())
             .token_program_id(&token_program)
             .send()
             .expect("treasury ATA");
@@ -381,8 +261,6 @@ impl Scenario {
                 recipient_atas.push(*ata);
                 continue;
             }
-
-            // Fund each recipient wallet so ATA creation works cleanly.
             svm.airdrop(&s.owner, 1_000_000).ok();
             let r_ata = CreateAssociatedTokenAccount::new(&mut svm, &fee_payer, &mint)
                 .owner(&s.owner)
@@ -392,39 +270,6 @@ impl Scenario {
             created_recipient_atas.push((s.owner, r_ata));
             recipient_atas.push(r_ata);
         }
-
-        // Fund the channel ATA with `deposit` tokens (simulating what `open`
-        // would have transferred).
-        MintTo::new(&mut svm, &fee_payer, &mint, &channel_ata, deposit)
-            .token_program_id(&token_program)
-            .send()
-            .expect("mint to channel");
-
-        // Commit preimage hash so `distribute` accepts the preimage we'll send.
-        let preimage = build_preimage(&splits);
-        let hash = blake3::hash(&preimage);
-
-        seed_channel(
-            &mut svm,
-            &channel,
-            bump,
-            status,
-            salt,
-            deposit,
-            settled,
-            paid_out,
-            0,
-            *hash.as_bytes(),
-            &payer,
-            &payee,
-            &authorized_signer,
-            &mint,
-        );
-
-        // `payee`, `authorized_signer`, `bump` are PDA seed inputs only; we
-        // keep them as scenario fields for reconstruction but never touch them
-        // post-seed.
-        let _ = (payee, authorized_signer, bump);
 
         Self {
             svm,
@@ -441,7 +286,7 @@ impl Scenario {
         }
     }
 
-    /// Borsh preimage for the scenario's declared splits.
+    /// Borsh-free preimage for the scenario's declared splits.
     fn preimage(&self) -> Vec<u8> {
         build_preimage(&self.splits)
     }
@@ -501,7 +346,7 @@ fn happy_path_open_splits() {
         },
     ];
     let (deposit, settled, paid_out) = pool(200_000, 0, 100_000);
-    let mut s = Scenario::build(splits.clone(), deposit, settled, paid_out, 0);
+    let mut s = Scenario::build(splits.clone(), deposit, settled, paid_out, STATUS_OPEN);
 
     let pool_amount = settled - paid_out;
     s.send(s.distribute_ix()).expect("distribute ok");
@@ -532,7 +377,7 @@ fn happy_path_open_splits_spl_token() {
         deposit,
         settled,
         paid_out,
-        0,
+        STATUS_OPEN,
         spl_token_program_id(),
     );
 
@@ -550,10 +395,10 @@ fn happy_path_finalized_tombstone() {
         owner: Pubkey::new_unique(),
         bps: 5000,
     }];
-    // Finalized (status=1), deposit=200k, settled=150k, paid_out=0.
-    // Pool = 150k. Payer ATA should receive (50% * 150k)=75k + (deposit-settled)=50k = 125k.
+    // Finalized, deposit=200k, settled=150k, paid_out=0.
+    // Pool = 150k. Payer ATA receives (50% * 150k)=75k + (deposit-settled)=50k = 125k.
     let (deposit, settled, paid_out) = pool(200_000, 0, 150_000);
-    let mut s = Scenario::build(splits.clone(), deposit, settled, paid_out, 1);
+    let mut s = Scenario::build(splits.clone(), deposit, settled, paid_out, STATUS_FINALIZED);
 
     let payer_balance_before = s.svm.get_account(&s.payer).unwrap().lamports;
     let channel_lamports_before = s.svm.get_account(&s.channel).unwrap().lamports;
@@ -561,15 +406,11 @@ fn happy_path_finalized_tombstone() {
 
     s.send(s.distribute_ix()).expect("distribute ok");
 
-    // Recipient balance = 50% of pool.
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
-    // Payer implicit share (50%) + refund (deposit − settled).
     assert_eq!(token_balance(&s.svm, &s.payer_ata), 75_000 + 50_000);
-    // Treasury got nothing (exact math).
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
 
-    // Tombstone: channel PDA rent + channel_token_account rent both flow to
-    // the payer SOL wallet. Channel account.lamports=0 after close().
+    // Tombstone: channel PDA rent + channel_token_account rent flow to payer.
     let payer_after = s.svm.get_account(&s.payer).unwrap().lamports;
     let channel_lamports_after = s
         .svm
@@ -595,7 +436,7 @@ fn happy_path_finalized_tombstone_spl_token() {
         deposit,
         settled,
         paid_out,
-        1,
+        STATUS_FINALIZED,
         spl_token_program_id(),
     );
 
@@ -619,15 +460,11 @@ fn finalized_zero_pool_still_refunds_and_tombstones() {
         bps: 1000,
     }];
     let (deposit, settled, paid_out) = pool(200_000, 100_000, 100_000);
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, 1);
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_FINALIZED);
 
-    // Simulate a prior OPEN distribution that already paid the whole settled
-    // pool; only the payer refund remains in escrow.
-    let mut channel_ata = s.svm.get_account(&s.channel_ata).unwrap();
-    channel_ata.data[64..72].copy_from_slice(&(deposit - settled).to_le_bytes());
-    s.svm
-        .set_account(s.channel_ata, channel_ata)
-        .expect("overwrite channel ATA balance");
+    // Simulate a prior OPEN distribution that already paid the entire settled
+    // pool; only the payer refund (deposit − settled) remains in escrow.
+    set_token_balance(&mut s.svm, &s.channel_ata, deposit - settled);
 
     s.send(s.distribute_ix()).expect("finalized zero pool ok");
 
@@ -649,105 +486,20 @@ fn happy_path_finalized_already_withdrawn() {
         bps: 5000,
     }];
     let (deposit, settled, paid_out) = pool(200_000, 0, 150_000);
-    let mut svm = load_program();
-    let fee_payer = Keypair::new();
-    svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_FINALIZED);
 
-    let payer = Pubkey::new_unique();
-    let payee = Pubkey::new_unique();
-    let _ = payee; // suppress
-    let authorized_signer = Pubkey::new_unique();
-    let salt: u64 = 42;
+    // `withdraw_payer` is stubbed, so simulate it: payer pulled
+    // (deposit − settled) out of escrow earlier and `payer_withdrawn_at` is
+    // set, so distribute must skip the refund leg.
+    channel_state::set_payer_withdrawn_at(&mut s.svm, &s.channel, 1_700_000_000);
+    set_token_balance(&mut s.svm, &s.channel_ata, settled - paid_out);
 
-    let mint = CreateMint::new(&mut svm, &fee_payer)
-        .decimals(6)
-        .send()
-        .unwrap();
-    let (channel, bump) = find_channel_pda(&payer, &payee, &mint, &authorized_signer, salt);
+    s.send(s.distribute_ix()).expect("distribute ok");
 
-    svm.airdrop(&payer, 1_000_000_000).unwrap();
-    svm.airdrop(&treasury_owner(), 1_000_000_000).unwrap();
-
-    let channel_ata = CreateAssociatedTokenAccount::new(&mut svm, &fee_payer, &mint)
-        .owner(&channel)
-        .send()
-        .unwrap();
-    let payer_ata = CreateAssociatedTokenAccount::new(&mut svm, &fee_payer, &mint)
-        .owner(&payer)
-        .send()
-        .unwrap();
-    let treasury = treasury_owner();
-    let treasury_ata = CreateAssociatedTokenAccount::new(&mut svm, &fee_payer, &mint)
-        .owner(&treasury)
-        .send()
-        .unwrap();
-    svm.airdrop(&splits[0].owner, 1_000_000).ok();
-    let recipient_ata = CreateAssociatedTokenAccount::new(&mut svm, &fee_payer, &mint)
-        .owner(&splits[0].owner)
-        .send()
-        .unwrap();
-
-    // Only fund what is actually owed to the recipient. The payer already
-    // withdrew `deposit - settled`; the ATA for the payer-refund leg should NOT
-    // be topped up because the distribute path must skip that leg when
-    // `payer_withdrawn_at != 0`.
-    MintTo::new(
-        &mut svm,
-        &fee_payer,
-        &mint,
-        &channel_ata,
-        paid_out_balance(settled, paid_out),
-    )
-    .send()
-    .unwrap();
-
-    let preimage = build_preimage(&splits);
-    let hash = blake3::hash(&preimage);
-    seed_channel(
-        &mut svm,
-        &channel,
-        bump,
-        1, // Finalized
-        salt,
-        deposit,
-        settled,
-        paid_out,
-        1_700_000_000, // payer already withdrew
-        *hash.as_bytes(),
-        &payer,
-        &payee,
-        &authorized_signer,
-        &mint,
-    );
-
-    let ix = build_distribute_ix(
-        &channel,
-        &payer,
-        &channel_ata,
-        &payer_ata,
-        &treasury_ata,
-        &mint,
-        &token_2022_program_id(),
-        &[recipient_ata],
-        &preimage,
-    );
-    let blockhash = svm.latest_blockhash();
-    let tx = Transaction::new_signed_with_payer(
-        &[ix],
-        Some(&fee_payer.pubkey()),
-        &[&fee_payer],
-        blockhash,
-    );
-    svm.send_transaction(tx).expect("distribute ok");
-
-    // Recipient got their 50% share (of 150k pool = 75k); payer-refund leg did
-    // NOT run (so no extra 50k added).
-    assert_eq!(token_balance(&svm, &recipient_ata), 75_000);
-    assert_eq!(token_balance(&svm, &payer_ata), 75_000);
-}
-
-fn paid_out_balance(settled: u64, paid_out: u64) -> u64 {
-    settled.saturating_sub(paid_out)
+    // Recipient gets 50% of the 150k pool. Payer-refund leg did NOT run, so
+    // the payer ATA only sees its 50% implicit share.
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), 75_000);
 }
 
 #[test]
@@ -757,7 +509,7 @@ fn bad_preimage_hash() {
         bps: 1000,
     }];
     let (deposit, settled, paid_out) = pool(200_000, 0, 100_000);
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, 0);
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
 
     // Tamper the on-chain distribution_hash so the rehash diverges.
     let mut acct = s.svm.get_account(&s.channel).unwrap();
@@ -770,55 +522,13 @@ fn bad_preimage_hash() {
 }
 
 #[test]
-fn bps_sum_equals_10000_is_not_revalidated_after_hash_match() {
-    // `open` rejects this config, but a fabricated hash-matching channel is
-    // paid according to its committed preimage rather than revalidating split
-    // semantics in `distribute`.
-    let splits = vec![
-        Split {
-            owner: Pubkey::new_unique(),
-            bps: 5000,
-        },
-        Split {
-            owner: Pubkey::new_unique(),
-            bps: 5000,
-        },
-    ];
-    let (deposit, settled, paid_out) = pool(200_000, 0, 100_000);
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, 0);
-
-    s.send(s.distribute_ix()).expect("distribute ok");
-
-    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 50_000);
-    assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 50_000);
-    assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
-    assert_eq!(read_paid_out(&s.svm, &s.channel), 100_000);
-}
-
-#[test]
-fn bps_zero_is_not_revalidated_after_hash_match() {
-    let splits = vec![Split {
-        owner: Pubkey::new_unique(),
-        bps: 0,
-    }];
-    let (deposit, settled, paid_out) = pool(200_000, 0, 100_000);
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, 0);
-
-    s.send(s.distribute_ix()).expect("distribute ok");
-
-    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
-    assert_eq!(token_balance(&s.svm, &s.payer_ata), 100_000);
-    assert_eq!(read_paid_out(&s.svm, &s.channel), 100_000);
-}
-
-#[test]
 fn token_2022_allowed_mint_and_immutable_owner_account_extensions_succeed() {
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 5000,
     }];
     let (deposit, settled, paid_out) = pool(200_000, 0, 100_000);
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, 0);
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
     for (extension_type, value_len) in [
         (EXT_METADATA_POINTER, POINTER_EXTENSION_LEN),
         (EXT_TOKEN_METADATA, TOKEN_METADATA_MIN_LEN),
@@ -849,7 +559,7 @@ fn unsupported_token_2022_mint_extensions_reject_without_state_changes() {
             owner: Pubkey::new_unique(),
             bps: 5000,
         }];
-        let mut s = Scenario::build(splits, 200_000, 0, 100_000, 0);
+        let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
         let paid_out_before = read_paid_out(&s.svm, &s.channel);
         add_mint_extension(&mut s.svm, &s.mint, extension_type, value_len);
 
@@ -869,7 +579,7 @@ fn unsupported_token_2022_account_extensions_reject_without_state_changes() {
             owner: Pubkey::new_unique(),
             bps: 5000,
         }];
-        let mut s = Scenario::build(splits, 200_000, 0, 100_000, 0);
+        let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
         let paid_out_before = read_paid_out(&s.svm, &s.channel);
         add_account_extension(&mut s.svm, &s.recipient_atas[0], extension_type, 1);
 
@@ -884,80 +594,27 @@ fn unsupported_token_2022_account_extensions_reject_without_state_changes() {
 
 #[test]
 fn num_recipients_zero() {
-    // Preimage = [0x00] — one byte, num_recipients=0. The commitment hash in
-    // the channel still matches this preimage but the on-chain validator must
-    // reject num_recipients=0.
-    let splits = vec![];
-    let mut svm = load_program();
-    let fee_payer = Keypair::new();
-    svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
-
-    let payer = Pubkey::new_unique();
-    let payee = Pubkey::new_unique();
-    let authorized_signer = Pubkey::new_unique();
-    let salt: u64 = 7;
-    let mint = CreateMint::new(&mut svm, &fee_payer)
-        .decimals(6)
-        .send()
-        .unwrap();
-    let (channel, bump) = find_channel_pda(&payer, &payee, &mint, &authorized_signer, salt);
-
-    svm.airdrop(&payer, 1_000_000_000).unwrap();
-    svm.airdrop(&treasury_owner(), 1_000_000_000).unwrap();
-    let channel_ata = CreateAssociatedTokenAccount::new(&mut svm, &fee_payer, &mint)
-        .owner(&channel)
-        .send()
-        .unwrap();
-    let payer_ata = CreateAssociatedTokenAccount::new(&mut svm, &fee_payer, &mint)
-        .owner(&payer)
-        .send()
-        .unwrap();
-    let treasury_ata = CreateAssociatedTokenAccount::new(&mut svm, &fee_payer, &mint)
-        .owner(&treasury_owner())
-        .send()
-        .unwrap();
-
-    let preimage = build_preimage(&splits);
-    let hash = blake3::hash(&preimage);
-    seed_channel(
-        &mut svm,
-        &channel,
-        bump,
-        0,
-        salt,
-        200_000,
-        100_000,
-        0,
-        0,
-        *hash.as_bytes(),
-        &payer,
-        &payee,
-        &authorized_signer,
-        &mint,
-    );
-
+    // The distribute count guard fires before the hash check, so opening with
+    // valid splits and submitting a malformed `[0x00]` preimage exercises the
+    // n==0 reject path without needing a hash match.
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 1000,
+    }];
+    let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
+    let bad_preimage = vec![0u8];
     let ix = build_distribute_ix(
-        &channel,
-        &payer,
-        &channel_ata,
-        &payer_ata,
-        &treasury_ata,
-        &mint,
-        &token_2022_program_id(),
+        &s.channel,
+        &s.payer,
+        &s.channel_ata,
+        &s.payer_ata,
+        &s.treasury_ata,
+        &s.mint,
+        &s.token_program,
         &[],
-        &preimage,
+        &bad_preimage,
     );
-    let blockhash = svm.latest_blockhash();
-    let tx = Transaction::new_signed_with_payer(
-        &[ix],
-        Some(&fee_payer.pubkey()),
-        &[&fee_payer],
-        blockhash,
-    );
-    expect_custom_err(
-        svm.send_transaction(tx),
-        PaymentChannelsError::InvalidRecipientCount,
-    );
+    expect_custom_err(s.send(ix), PaymentChannelsError::InvalidRecipientCount);
 }
 
 #[test]
@@ -966,11 +623,11 @@ fn wrong_recipient_ata() {
         owner: Pubkey::new_unique(),
         bps: 1000,
     }];
-    let mut s = Scenario::build(splits, 200_000, 0, 100_000, 0);
-    // Replace recipient ATA with some other ATA.
+    let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
     let rogue_owner = Pubkey::new_unique();
     s.svm.airdrop(&rogue_owner, 1_000_000).ok();
     let rogue_ata = CreateAssociatedTokenAccount::new(&mut s.svm, &s.fee_payer, &s.mint)
+        .token_program_id(&s.token_program)
         .owner(&rogue_owner)
         .send()
         .unwrap();
@@ -981,7 +638,7 @@ fn wrong_recipient_ata() {
         &s.payer_ata,
         &s.treasury_ata,
         &s.mint,
-        &token_2022_program_id(),
+        &s.token_program,
         &[rogue_ata],
         &s.preimage(),
     );
@@ -994,11 +651,11 @@ fn wrong_treasury_ata() {
         owner: Pubkey::new_unique(),
         bps: 1000,
     }];
-    let mut s = Scenario::build(splits, 200_000, 0, 100_000, 0);
-    // Swap treasury ATA with a non-treasury ATA.
+    let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
     let rogue_owner = Pubkey::new_unique();
     s.svm.airdrop(&rogue_owner, 1_000_000).ok();
     let rogue_ata = CreateAssociatedTokenAccount::new(&mut s.svm, &s.fee_payer, &s.mint)
+        .token_program_id(&s.token_program)
         .owner(&rogue_owner)
         .send()
         .unwrap();
@@ -1009,7 +666,7 @@ fn wrong_treasury_ata() {
         &s.payer_ata,
         &rogue_ata,
         &s.mint,
-        &token_2022_program_id(),
+        &s.token_program,
         &s.recipient_atas,
         &s.preimage(),
     );
@@ -1022,8 +679,8 @@ fn wrong_token_program() {
         owner: Pubkey::new_unique(),
         bps: 1000,
     }];
-    let mut s = Scenario::build(splits, 200_000, 0, 100_000, 0);
-    let system_id = Pubkey::default(); // all-zero = System program
+    let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
+    let system_id = Pubkey::default();
     let ix = build_distribute_ix(
         &s.channel,
         &s.payer,
@@ -1044,9 +701,8 @@ fn pool_zero_rejects() {
         owner: Pubkey::new_unique(),
         bps: 1000,
     }];
-    // settled == paid_out → pool = 0.
-    let (deposit, settled, paid_out) = pool(200_000, 100_000, 100_000);
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, 0);
+    // Right after open: settled = 0, paid_out = 0 → pool = 0.
+    let mut s = Scenario::build(splits, 200_000, 0, 0, STATUS_OPEN);
     expect_custom_err(
         s.send(s.distribute_ix()),
         PaymentChannelsError::NothingToDistribute,
@@ -1059,8 +715,7 @@ fn status_closing_rejects() {
         owner: Pubkey::new_unique(),
         bps: 1000,
     }];
-    // status=2 (Closing) is disallowed for distribute.
-    let mut s = Scenario::build(splits, 200_000, 0, 100_000, 2);
+    let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_CLOSING);
     expect_custom_err(
         s.send(s.distribute_ix()),
         PaymentChannelsError::ChannelNotClosable,
@@ -1073,10 +728,10 @@ fn preimage_length_mismatch() {
         owner: Pubkey::new_unique(),
         bps: 1000,
     }];
-    let mut s = Scenario::build(splits, 200_000, 0, 100_000, 0);
-    // Submit a preimage that declares 1 entry but spans 2*34+1 bytes.
+    let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
+    // Submit a preimage that declares 1 entry but spans `1 + 2*34` bytes.
     let mut bad = s.preimage();
-    bad.extend_from_slice(&[0u8; 34]); // one extra entry's worth of trailing bytes
+    bad.extend_from_slice(&[0u8; 34]);
     let ix = build_distribute_ix(
         &s.channel,
         &s.payer,
@@ -1084,7 +739,7 @@ fn preimage_length_mismatch() {
         &s.payer_ata,
         &s.treasury_ata,
         &s.mint,
-        &token_2022_program_id(),
+        &s.token_program,
         &s.recipient_atas,
         &bad,
     );
@@ -1095,14 +750,13 @@ fn preimage_length_mismatch() {
 fn num_recipients_exceeds_max() {
     // 33 > MAX_DISTRIBUTION_RECIPIENTS = 32. The count guard runs *after*
     // preimage_len bounds-check but *before* `preimage_len == 1 + n*34`
-    // consistency, so we can pass a 1-byte preimage containing just `0x21`
-    // and trip the count guard without having to build 33 ATAs or match a
-    // valid hash.
+    // consistency, so a 1-byte `0x21` preimage trips the count guard
+    // without needing 33 ATAs or a hash match.
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 1000,
     }];
-    let mut s = Scenario::build(splits, 200_000, 0, 100_000, 0);
+    let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
     let preimage = vec![33u8];
     let ix = build_distribute_ix(
         &s.channel,
@@ -1111,7 +765,7 @@ fn num_recipients_exceeds_max() {
         &s.payer_ata,
         &s.treasury_ata,
         &s.mint,
-        &token_2022_program_id(),
+        &s.token_program,
         &s.recipient_atas,
         &preimage,
     );
@@ -1128,7 +782,7 @@ fn max_recipients_accepted() {
         })
         .collect();
     let (deposit, settled, paid_out) = pool(2_000_000, 0, 1_000_000);
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, 0);
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
 
     s.send(s.distribute_ix()).expect("distribute ok");
 

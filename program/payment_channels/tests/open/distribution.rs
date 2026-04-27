@@ -19,6 +19,13 @@ use super::{
     derive_pdas_with_token_program, open_ix_data, open_ix_with_token_program, run_open,
     setup_funded_svm, setup_funded_svm_with_token_program,
 };
+use crate::common::token_2022::{
+    EXT_CPI_GUARD, EXT_GROUP_MEMBER_POINTER, EXT_GROUP_POINTER, EXT_IMMUTABLE_OWNER,
+    EXT_MEMO_TRANSFER, EXT_METADATA_POINTER, EXT_MINT_CLOSE_AUTHORITY, EXT_TOKEN_GROUP,
+    EXT_TOKEN_GROUP_MEMBER, EXT_TOKEN_METADATA, EXT_TRANSFER_FEE_CONFIG, EXT_TRANSFER_HOOK,
+    POINTER_EXTENSION_LEN, TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN,
+    add_account_extension, add_mint_extension,
+};
 use crate::common::{PROGRAM_ID, expect_custom_err, load_program};
 
 const SALT: u64 = 1;
@@ -27,26 +34,6 @@ const GRACE: u32 = 3600;
 const FIRST_RECIPIENT_OFFSET: usize = 1 + 8 + 8 + 4 + 1;
 const FIRST_BPS_OFFSET: usize = FIRST_RECIPIENT_OFFSET + 32;
 const ENTRY_LEN: usize = 34;
-const TOKEN_2022_ACCOUNT_TYPE_OFFSET: usize = 165;
-const TOKEN_2022_TLV_START: usize = TOKEN_2022_ACCOUNT_TYPE_OFFSET + 1;
-const TOKEN_2022_ACCOUNT_TYPE_MINT: u8 = 1;
-const TOKEN_2022_ACCOUNT_TYPE_ACCOUNT: u8 = 2;
-const EXT_TRANSFER_FEE_CONFIG: u16 = 1;
-const EXT_MINT_CLOSE_AUTHORITY: u16 = 3;
-const EXT_IMMUTABLE_OWNER: u16 = 7;
-const EXT_MEMO_TRANSFER: u16 = 8;
-const EXT_CPI_GUARD: u16 = 11;
-const EXT_TRANSFER_HOOK: u16 = 14;
-const EXT_METADATA_POINTER: u16 = 18;
-const EXT_TOKEN_METADATA: u16 = 19;
-const EXT_GROUP_POINTER: u16 = 20;
-const EXT_TOKEN_GROUP: u16 = 21;
-const EXT_GROUP_MEMBER_POINTER: u16 = 22;
-const EXT_TOKEN_GROUP_MEMBER: u16 = 23;
-const POINTER_EXTENSION_LEN: usize = 64;
-const TOKEN_METADATA_MIN_LEN: usize = 80;
-const TOKEN_GROUP_LEN: usize = 80;
-const TOKEN_GROUP_MEMBER_LEN: usize = 72;
 
 fn open_ix_data_with_first_recipient(recipient: &Pubkey) -> Vec<u8> {
     let mut data = open_ix_data(SALT, DEPOSIT, GRACE, 1);
@@ -66,60 +53,6 @@ fn token_balance(svm: &litesvm::LiteSVM, token_account: &Pubkey) -> u64 {
     let mut buf = [0u8; 8];
     buf.copy_from_slice(&acct.data[64..72]);
     u64::from_le_bytes(buf)
-}
-
-fn add_mint_extension(
-    svm: &mut litesvm::LiteSVM,
-    mint: &Pubkey,
-    extension_type: u16,
-    value_len: usize,
-) {
-    let mut acct = svm.get_account(mint).expect("mint exists");
-    add_token_2022_extension(
-        &mut acct.data,
-        82,
-        TOKEN_2022_ACCOUNT_TYPE_MINT,
-        extension_type,
-        value_len,
-    );
-    svm.set_account(*mint, acct).expect("overwrite mint");
-}
-
-fn add_account_extension(
-    svm: &mut litesvm::LiteSVM,
-    token_account: &Pubkey,
-    extension_type: u16,
-    value_len: usize,
-) {
-    let mut acct = svm
-        .get_account(token_account)
-        .expect("token account exists");
-    add_token_2022_extension(
-        &mut acct.data,
-        165,
-        TOKEN_2022_ACCOUNT_TYPE_ACCOUNT,
-        extension_type,
-        value_len,
-    );
-    svm.set_account(*token_account, acct)
-        .expect("overwrite token account");
-}
-
-fn add_token_2022_extension(
-    data: &mut Vec<u8>,
-    base_len: usize,
-    account_type: u8,
-    extension_type: u16,
-    value_len: usize,
-) {
-    if data.len() < TOKEN_2022_TLV_START {
-        data.resize(TOKEN_2022_TLV_START, 0);
-    }
-    data[base_len..TOKEN_2022_ACCOUNT_TYPE_OFFSET].fill(0);
-    data[TOKEN_2022_ACCOUNT_TYPE_OFFSET] = account_type;
-    data.extend_from_slice(&extension_type.to_le_bytes());
-    data.extend_from_slice(&(value_len as u16).to_le_bytes());
-    data.resize(data.len() + value_len, 0);
 }
 
 #[test]

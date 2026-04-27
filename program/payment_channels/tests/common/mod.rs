@@ -2,6 +2,11 @@
 
 #![allow(dead_code)]
 
+pub mod channel_state;
+pub mod open;
+pub mod settle;
+pub mod token_2022;
+
 use litesvm::LiteSVM;
 use payment_channels::PaymentChannelsError;
 use solana_instruction::error::InstructionError;
