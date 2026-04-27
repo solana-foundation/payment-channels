@@ -14,8 +14,3 @@ test-ledger/
 # Local env / config
 .env
 config.json
-
-# Generated — re-emitted by `just generate-client`
-clients/rust/src/generated/
-clients/typescript/src/generated/
-program/payment_channels/idl/

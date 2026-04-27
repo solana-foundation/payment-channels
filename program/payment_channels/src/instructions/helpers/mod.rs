@@ -1,6 +1,7 @@
 // Shared helpers for instruction handlers.
 
 pub mod distribution;
+pub mod ed25519;
 pub mod voucher;
 
 pub use distribution::{DistributionEntry, DistributionRecipients, MAX_DISTRIBUTION_RECIPIENTS};
