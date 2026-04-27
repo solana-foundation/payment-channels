@@ -1,9 +1,7 @@
 pub mod channel;
 pub mod common;
-pub mod hash;
 pub mod transmutable;
 
 pub use channel::{CHANNEL_SEED, Channel, ChannelStatus};
 pub use common::{AccountDiscriminator, CURRENT_CHANNEL_VERSION};
-pub use hash::blake3;
 pub use transmutable::{Transmutable, load, load_mut};

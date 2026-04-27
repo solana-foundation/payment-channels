@@ -2,12 +2,14 @@
 
 pub mod distribution;
 pub mod ed25519;
+pub mod hash;
 pub mod token;
 pub mod voucher;
 
 pub use distribution::{
     BPS_DENOMINATOR, DistributionEntry, DistributionRecipients, MAX_DISTRIBUTION_RECIPIENTS,
 };
+pub use hash::blake3;
 pub use token::{
     close_token_account, derive_ata, overflow, transfer_checked, transfer_checked_signed,
     validate_mint, validate_token_account, validate_token_program,

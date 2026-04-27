@@ -83,27 +83,7 @@ impl DistributionRecipients {
     }
 
     pub fn preimage_hash(&self) -> [u8; 32] {
-        #[allow(unused_variables)]
-        let input = self.preimage();
-        #[cfg(any(target_os = "solana", target_arch = "bpf"))]
-        {
-            let mut out = [0u8; 32];
-            let slices: &[&[u8]] = &[input];
-            // SAFETY: sol_blake3 fills exactly 32 bytes; each &[u8] is a fat pointer
-            // (ptr, len) matching the SolBytes C layout on 64-bit BPF.
-            unsafe {
-                pinocchio::syscalls::sol_blake3(slices.as_ptr().cast::<u8>(), 1, out.as_mut_ptr());
-            }
-            out
-        }
-        #[cfg(all(not(any(target_os = "solana", target_arch = "bpf")), test))]
-        {
-            blake3::hash(input).into()
-        }
-        #[cfg(all(not(any(target_os = "solana", target_arch = "bpf")), not(test)))]
-        {
-            panic!("sol_blake3 syscall is unavailable on non-BPF targets");
-        }
+        super::blake3(self.preimage())
     }
 }
 

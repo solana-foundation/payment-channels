@@ -11,7 +11,7 @@ use pinocchio::{
 use crate::constants::TREASURY_OWNER;
 use crate::errors::PaymentChannelsError;
 use crate::instructions::helpers::{
-    BPS_DENOMINATOR, DistributionEntry, MAX_DISTRIBUTION_RECIPIENTS, close_token_account,
+    BPS_DENOMINATOR, DistributionEntry, MAX_DISTRIBUTION_RECIPIENTS, blake3, close_token_account,
     derive_ata, overflow, transfer_checked_signed, validate_mint, validate_token_account,
     validate_token_program,
 };
@@ -196,7 +196,7 @@ pub fn process(
     }
 
     // Blake3 rehash.
-    let digest = crate::state::blake3(&args.preimage[..preimage_len]);
+    let digest = blake3(&args.preimage[..preimage_len]);
     if digest != ch.distribution_hash {
         return Err(PaymentChannelsError::InvalidDistributionHash.into());
     }
