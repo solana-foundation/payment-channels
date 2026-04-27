@@ -48,8 +48,10 @@ export function getDistributeDiscriminatorBytes(): ReadonlyUint8Array {
 export type DistributeInstruction<
   TProgram extends string = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
   TAccountChannel extends string | AccountMeta<string> = string,
+  TAccountPayer extends string | AccountMeta<string> = string,
   TAccountChannelTokenAccount extends string | AccountMeta<string> = string,
   TAccountPayerTokenAccount extends string | AccountMeta<string> = string,
+  TAccountTreasuryTokenAccount extends string | AccountMeta<string> = string,
   TAccountMint extends string | AccountMeta<string> = string,
   TAccountTokenProgram extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
@@ -60,12 +62,18 @@ export type DistributeInstruction<
       TAccountChannel extends string
         ? WritableAccount<TAccountChannel>
         : TAccountChannel,
+      TAccountPayer extends string
+        ? WritableAccount<TAccountPayer>
+        : TAccountPayer,
       TAccountChannelTokenAccount extends string
         ? WritableAccount<TAccountChannelTokenAccount>
         : TAccountChannelTokenAccount,
       TAccountPayerTokenAccount extends string
         ? WritableAccount<TAccountPayerTokenAccount>
         : TAccountPayerTokenAccount,
+      TAccountTreasuryTokenAccount extends string
+        ? WritableAccount<TAccountTreasuryTokenAccount>
+        : TAccountTreasuryTokenAccount,
       TAccountMint extends string
         ? ReadonlyAccount<TAccountMint>
         : TAccountMint,
@@ -114,14 +122,18 @@ export function getDistributeInstructionDataCodec(): FixedSizeCodec<
 
 export type DistributeInput<
   TAccountChannel extends string = string,
+  TAccountPayer extends string = string,
   TAccountChannelTokenAccount extends string = string,
   TAccountPayerTokenAccount extends string = string,
+  TAccountTreasuryTokenAccount extends string = string,
   TAccountMint extends string = string,
   TAccountTokenProgram extends string = string,
 > = {
   channel: Address<TAccountChannel>;
+  payer: Address<TAccountPayer>;
   channelTokenAccount: Address<TAccountChannelTokenAccount>;
   payerTokenAccount: Address<TAccountPayerTokenAccount>;
+  treasuryTokenAccount: Address<TAccountTreasuryTokenAccount>;
   mint: Address<TAccountMint>;
   tokenProgram: Address<TAccountTokenProgram>;
   distributeArgs: DistributeInstructionDataArgs["distributeArgs"];
@@ -129,16 +141,20 @@ export type DistributeInput<
 
 export function getDistributeInstruction<
   TAccountChannel extends string,
+  TAccountPayer extends string,
   TAccountChannelTokenAccount extends string,
   TAccountPayerTokenAccount extends string,
+  TAccountTreasuryTokenAccount extends string,
   TAccountMint extends string,
   TAccountTokenProgram extends string,
   TProgramAddress extends Address = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
 >(
   input: DistributeInput<
     TAccountChannel,
+    TAccountPayer,
     TAccountChannelTokenAccount,
     TAccountPayerTokenAccount,
+    TAccountTreasuryTokenAccount,
     TAccountMint,
     TAccountTokenProgram
   >,
@@ -146,8 +162,10 @@ export function getDistributeInstruction<
 ): DistributeInstruction<
   TProgramAddress,
   TAccountChannel,
+  TAccountPayer,
   TAccountChannelTokenAccount,
   TAccountPayerTokenAccount,
+  TAccountTreasuryTokenAccount,
   TAccountMint,
   TAccountTokenProgram
 > {
@@ -158,12 +176,17 @@ export function getDistributeInstruction<
   // Original accounts.
   const originalAccounts = {
     channel: { value: input.channel ?? null, isWritable: true },
+    payer: { value: input.payer ?? null, isWritable: true },
     channelTokenAccount: {
       value: input.channelTokenAccount ?? null,
       isWritable: true,
     },
     payerTokenAccount: {
       value: input.payerTokenAccount ?? null,
+      isWritable: true,
+    },
+    treasuryTokenAccount: {
+      value: input.treasuryTokenAccount ?? null,
       isWritable: true,
     },
     mint: { value: input.mint ?? null, isWritable: false },
@@ -181,8 +204,10 @@ export function getDistributeInstruction<
   return Object.freeze({
     accounts: [
       getAccountMeta("channel", accounts.channel),
+      getAccountMeta("payer", accounts.payer),
       getAccountMeta("channelTokenAccount", accounts.channelTokenAccount),
       getAccountMeta("payerTokenAccount", accounts.payerTokenAccount),
+      getAccountMeta("treasuryTokenAccount", accounts.treasuryTokenAccount),
       getAccountMeta("mint", accounts.mint),
       getAccountMeta("tokenProgram", accounts.tokenProgram),
     ],
@@ -193,8 +218,10 @@ export function getDistributeInstruction<
   } as DistributeInstruction<
     TProgramAddress,
     TAccountChannel,
+    TAccountPayer,
     TAccountChannelTokenAccount,
     TAccountPayerTokenAccount,
+    TAccountTreasuryTokenAccount,
     TAccountMint,
     TAccountTokenProgram
   >);
@@ -207,10 +234,12 @@ export type ParsedDistributeInstruction<
   programAddress: Address<TProgram>;
   accounts: {
     channel: TAccountMetas[0];
-    channelTokenAccount: TAccountMetas[1];
-    payerTokenAccount: TAccountMetas[2];
-    mint: TAccountMetas[3];
-    tokenProgram: TAccountMetas[4];
+    payer: TAccountMetas[1];
+    channelTokenAccount: TAccountMetas[2];
+    payerTokenAccount: TAccountMetas[3];
+    treasuryTokenAccount: TAccountMetas[4];
+    mint: TAccountMetas[5];
+    tokenProgram: TAccountMetas[6];
   };
   data: DistributeInstructionData;
 };
@@ -223,12 +252,12 @@ export function parseDistributeInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedDistributeInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 5) {
+  if (instruction.accounts.length < 7) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 5,
+        expectedAccountMetas: 7,
       },
     );
   }
@@ -242,8 +271,10 @@ export function parseDistributeInstruction<
     programAddress: instruction.programAddress,
     accounts: {
       channel: getNextAccount(),
+      payer: getNextAccount(),
       channelTokenAccount: getNextAccount(),
       payerTokenAccount: getNextAccount(),
+      treasuryTokenAccount: getNextAccount(),
       mint: getNextAccount(),
       tokenProgram: getNextAccount(),
     },

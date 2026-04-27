@@ -9,6 +9,7 @@
 export * from "./accountDiscriminator";
 export * from "./channelStatus";
 export * from "./distributeArgs";
+export * from "./distributionEntry";
 export * from "./openArgs";
 export * from "./opened";
 export * from "./settleAndFinalizeArgs";

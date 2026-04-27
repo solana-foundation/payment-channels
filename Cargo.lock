@@ -3264,6 +3264,7 @@ checksum = "b867cad97c0791bbd3aaa6472142568c6c9e8f71937e98379f584cfb0cf35bec"
 name = "payment_channels"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "borsh",
  "codama",
  "const-crypto",

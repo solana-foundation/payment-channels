@@ -8,6 +8,7 @@
 pub(crate) mod r#account_discriminator;
 pub(crate) mod r#channel_status;
 pub(crate) mod r#distribute_args;
+pub(crate) mod r#distribution_entry;
 pub(crate) mod r#open_args;
 pub(crate) mod r#opened;
 pub(crate) mod r#settle_and_finalize_args;
@@ -18,6 +19,7 @@ pub(crate) mod r#voucher_args;
 pub use self::r#account_discriminator::*;
 pub use self::r#channel_status::*;
 pub use self::r#distribute_args::*;
+pub use self::r#distribution_entry::*;
 pub use self::r#open_args::*;
 pub use self::r#opened::*;
 pub use self::r#settle_and_finalize_args::*;

@@ -7,10 +7,10 @@
 
 use borsh::BorshDeserialize;
 use borsh::BorshSerialize;
+use solana_address::Address;
 
 #[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Eq, PartialEq)]
-pub struct DistributeArgs {
-    pub salt: u64,
-    pub preimage_len: u16,
-    pub preimage: [u8; 1089],
+pub struct DistributionEntry {
+    pub recipient: Address,
+    pub bps: u16,
 }

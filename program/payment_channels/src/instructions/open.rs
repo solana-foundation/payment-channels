@@ -11,6 +11,39 @@ use crate::state::{Transmutable, load};
 /// Instruction discriminator byte for `open`.
 pub const DISCRIMINATOR: u8 = 1;
 
+/// Ceiling on recipients committed at `open` / paid at `distribute`. Sized to
+/// fit a legacy single-tx envelope end-to-end (see repo plan — scaling past
+/// this requires client-side ALTs or an alternative commitment scheme).
+pub const MAX_DISTRIBUTION_RECIPIENTS: usize = 32;
+
+/// One entry in the distribution plan committed at `open`. `recipient` owns
+/// the ATA that receives the bps share at `distribute` time.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "idl", derive(CodamaType))]
+pub struct DistributionEntry {
+    /// Token-account owner; the ATA is re-derived on-chain as
+    /// `ATA(recipient, mint, token_program)`.
+    pub recipient: Address,
+    /// Basis points of the distribute-time pool paid to this recipient.
+    /// `Σbps < 10_000` so the payer always retains an implicit share.
+    #[cfg_attr(feature = "idl", codama(type = number(u16)))]
+    pub bps: [u8; 2],
+}
+
+impl DistributionEntry {
+    #[inline(always)]
+    pub fn bps(&self) -> u16 {
+        u16::from_le_bytes(self.bps)
+    }
+}
+
+unsafe impl Transmutable for DistributionEntry {
+    const LEN: usize = size_of::<Self>();
+}
+
+const _: () = assert!(size_of::<DistributionEntry>() == 34);
+
 /// Init payload. `deposit`, `grace_period`, and `distribution_hash` are
 /// stored on the [`Channel`](crate::Channel) PDA; `salt` is a seed input
 /// (address-only, not persisted).

@@ -160,14 +160,24 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
 
     /// Permissionless crank. Verifies the committed preimage and pays
     /// [`settled`](crate::Channel::settled) `−`
-    /// [`paid_out`](crate::Channel::paid_out) to merchant splits; from
-    /// `FINALIZED` also refunds the payer (if not already withdrawn) and
-    /// tombstones the PDA.
+    /// [`paid_out`](crate::Channel::paid_out) across recipients (per-bps) +
+    /// payer's implicit share + treasury residual. From `FINALIZED` also
+    /// refunds the payer (if not already withdrawn) and tombstones the
+    /// escrow ATA + the Channel PDA.
+    ///
+    /// Recipient token accounts are appended as remaining accounts in the
+    /// same order as the `DistributionEntry`s in the preimage. Codama does
+    /// not express variable-length account tails, so the generated client
+    /// builder emits only the 7-slot head; use the `distribute-helper`
+    /// wrapper in `clients/typescript` (or the Rust counterpart) to append
+    /// recipient ATAs.
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "channel", writable)),
+        codama(account(name = "payer", writable)),
         codama(account(name = "channel_token_account", writable)),
         codama(account(name = "payer_token_account", writable)),
+        codama(account(name = "treasury_token_account", writable)),
         codama(account(name = "mint")),
         codama(account(name = "token_program"))
     )]
