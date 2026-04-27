@@ -2,9 +2,11 @@
 use codama::CodamaType;
 use core::mem::size_of;
 use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
+use pinocchio_token::instructions::Transfer as TransferTokens;
 
 use crate::errors::PaymentChannelsError;
-use crate::state::{Transmutable, load};
+use crate::state::channel::ChannelStatus;
+use crate::state::{Channel, Transmutable, load};
 
 /// Instruction discriminator byte for `topUp`.
 pub const DISCRIMINATOR: u8 = 3;
@@ -41,21 +43,21 @@ unsafe impl Transmutable for TopUpArgs {
 }
 
 pub struct TopUpAccounts<'a> {
-    /// Must equal [`Channel::payer`](crate::Channel::payer).
+    /// Must equal [`Channel::payer`](crate::Channel::payer) and be a signer.
     pub payer: &'a AccountView,
     /// [`deposit`](crate::Channel::deposit) grows by [`TopUpArgs::amount`].
-    pub channel: &'a AccountView,
-    pub payer_token_account: &'a AccountView,
+    pub channel: &'a mut AccountView,
+    pub payer_token_account: &'a mut AccountView,
     /// Escrow ATA owned by the channel PDA.
-    pub channel_token_account: &'a AccountView,
+    pub channel_token_account: &'a mut AccountView,
     pub mint: &'a AccountView,
     pub token_program: &'a AccountView,
 }
 
-impl<'a> TryFrom<&'a [AccountView]> for TopUpAccounts<'a> {
+impl<'a> TryFrom<&'a mut [AccountView]> for TopUpAccounts<'a> {
     type Error = ProgramError;
 
-    fn try_from(accounts: &'a [AccountView]) -> Result<Self, Self::Error> {
+    fn try_from(accounts: &'a mut [AccountView]) -> Result<Self, Self::Error> {
         let [
             payer,
             channel,
@@ -80,13 +82,48 @@ impl<'a> TryFrom<&'a [AccountView]> for TopUpAccounts<'a> {
 
 /// Payer-signed; extends
 /// [`Channel::deposit`](crate::Channel::deposit) by [`TopUpArgs::amount`].
-/// `OPEN` only — disallowed once
-/// [`closure_started_at`](crate::Channel::closure_started_at) `> 0`.
+/// `OPEN` only — only the original payer may call this.
 pub fn process(
     _program_id: &Address,
-    accounts: &[AccountView],
-    _args: &TopUpArgs,
+    accounts: &mut [AccountView],
+    args: &TopUpArgs,
 ) -> ProgramResult {
-    let _accs = TopUpAccounts::try_from(accounts)?;
-    Err(PaymentChannelsError::NotImplemented.into())
+    let accs = TopUpAccounts::try_from(accounts)?;
+
+    if !accs.payer.is_signer() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+
+    let amount = args.amount();
+    if amount == 0 {
+        return Err(PaymentChannelsError::DepositMustBeNonZero.into());
+    }
+
+    {
+        let mut ch = Channel::from_account_mut(accs.channel)?;
+
+        if ch.status != ChannelStatus::Open as u8 {
+            return Err(PaymentChannelsError::InvalidChannelStatus.into());
+        }
+
+        if accs.payer.address() != &ch.payer {
+            return Err(PaymentChannelsError::UnauthorizedPayer.into());
+        }
+
+        let new_deposit = ch
+            .deposit()
+            .checked_add(amount)
+            .ok_or(ProgramError::ArithmeticOverflow)?;
+        ch.set_deposit(new_deposit);
+    }
+
+    TransferTokens::new(
+        accs.payer_token_account,
+        accs.channel_token_account,
+        accs.payer,
+        amount,
+    )
+    .invoke()?;
+
+    Ok(())
 }
