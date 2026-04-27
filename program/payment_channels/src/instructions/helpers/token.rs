@@ -39,30 +39,6 @@ const EXT_TOKEN_GROUP: u16 = 21;
 const EXT_GROUP_MEMBER_POINTER: u16 = 22;
 const EXT_TOKEN_GROUP_MEMBER: u16 = 23;
 
-#[cfg(test)]
-mod token_2022_extension_id_tests {
-    use super::*;
-    use spl_token_2022_interface::extension::ExtensionType;
-
-    #[test]
-    fn mirrored_token_2022_extension_ids_match_upstream_wire_discriminants() {
-        assert_eq!(EXT_UNINITIALIZED, ExtensionType::Uninitialized as u16);
-        assert_eq!(EXT_IMMUTABLE_OWNER, ExtensionType::ImmutableOwner as u16);
-        assert_eq!(EXT_METADATA_POINTER, ExtensionType::MetadataPointer as u16);
-        assert_eq!(EXT_TOKEN_METADATA, ExtensionType::TokenMetadata as u16);
-        assert_eq!(EXT_GROUP_POINTER, ExtensionType::GroupPointer as u16);
-        assert_eq!(EXT_TOKEN_GROUP, ExtensionType::TokenGroup as u16);
-        assert_eq!(
-            EXT_GROUP_MEMBER_POINTER,
-            ExtensionType::GroupMemberPointer as u16
-        );
-        assert_eq!(
-            EXT_TOKEN_GROUP_MEMBER,
-            ExtensionType::TokenGroupMember as u16
-        );
-    }
-}
-
 #[inline]
 pub fn overflow() -> ProgramError {
     PaymentChannelsError::ArithmeticOverflow.into()
@@ -277,4 +253,28 @@ pub fn close_token_account(
         token_program,
     }
     .invoke_signed(core::slice::from_ref(signer))
+}
+
+#[cfg(test)]
+mod token_2022_extension_id_tests {
+    use super::*;
+    use spl_token_2022_interface::extension::ExtensionType;
+
+    #[test]
+    fn mirrored_token_2022_extension_ids_match_upstream_wire_discriminants() {
+        assert_eq!(EXT_UNINITIALIZED, ExtensionType::Uninitialized as u16);
+        assert_eq!(EXT_IMMUTABLE_OWNER, ExtensionType::ImmutableOwner as u16);
+        assert_eq!(EXT_METADATA_POINTER, ExtensionType::MetadataPointer as u16);
+        assert_eq!(EXT_TOKEN_METADATA, ExtensionType::TokenMetadata as u16);
+        assert_eq!(EXT_GROUP_POINTER, ExtensionType::GroupPointer as u16);
+        assert_eq!(EXT_TOKEN_GROUP, ExtensionType::TokenGroup as u16);
+        assert_eq!(
+            EXT_GROUP_MEMBER_POINTER,
+            ExtensionType::GroupMemberPointer as u16
+        );
+        assert_eq!(
+            EXT_TOKEN_GROUP_MEMBER,
+            ExtensionType::TokenGroupMember as u16
+        );
+    }
 }
