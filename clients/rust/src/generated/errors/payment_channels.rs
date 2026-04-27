@@ -70,39 +70,39 @@ pub enum PaymentChannelsError {
     /// 19 - Each shareBps must be non-zero and Σbps must be strictly less than 10_000
     #[error("Each shareBps must be non-zero and Σbps must be strictly less than 10_000")]
     InvalidSplitConfig = 0x13,
-    /// 21 - Recipient token account is not the expected ATA
+    /// 20 - Recipient token account is not the expected ATA
     #[error("Recipient token account is not the expected ATA")]
-    InvalidRecipientAccount = 0x15,
-    /// 22 - Mint account does not match channel.mint
+    InvalidRecipientAccount = 0x14,
+    /// 21 - Mint account does not match channel.mint
     #[error("Mint account does not match channel.mint")]
-    MintAccountMismatch = 0x16,
-    /// 23 - Payer account does not match channel.payer
+    MintAccountMismatch = 0x15,
+    /// 22 - Payer account does not match channel.payer
     #[error("Payer account does not match channel.payer")]
-    PayerAccountMismatch = 0x17,
-    /// 24 - Token program must be SPL Token or Token-2022
+    PayerAccountMismatch = 0x16,
+    /// 23 - Token program must be SPL Token or Token-2022
     #[error("Token program must be SPL Token or Token-2022")]
-    InvalidTokenProgram = 0x18,
-    /// 25 - Treasury token account is not ATA(TREASURY_OWNER, mint, token_program)
+    InvalidTokenProgram = 0x17,
+    /// 24 - Treasury token account is not ATA(TREASURY_OWNER, mint, token_program)
     #[error("Treasury token account is not ATA(TREASURY_OWNER, mint, token_program)")]
-    TreasuryAddressMismatch = 0x19,
-    /// 26 - Arithmetic overflow
+    TreasuryAddressMismatch = 0x18,
+    /// 25 - Arithmetic overflow
     #[error("Arithmetic overflow")]
-    ArithmeticOverflow = 0x1A,
-    /// 27 - Channel is not in OPEN or FINALIZED
+    ArithmeticOverflow = 0x19,
+    /// 26 - Channel is not in OPEN or FINALIZED
     #[error("Channel is not in OPEN or FINALIZED")]
-    ChannelNotClosable = 0x1B,
-    /// 28 - Channel token account is not ATA(channel, mint, token_program)
+    ChannelNotClosable = 0x1A,
+    /// 27 - Channel token account is not ATA(channel, mint, token_program)
     #[error("Channel token account is not ATA(channel, mint, token_program)")]
-    InvalidChannelTokenAccount = 0x1C,
-    /// 29 - Payer token account is not ATA(payer, mint, token_program)
+    InvalidChannelTokenAccount = 0x1B,
+    /// 28 - Payer token account is not ATA(payer, mint, token_program)
     #[error("Payer token account is not ATA(payer, mint, token_program)")]
-    InvalidPayerTokenAccount = 0x1D,
-    /// 30 - Token-2022 mint or token account uses unsupported extensions for exact distribution
+    InvalidPayerTokenAccount = 0x1C,
+    /// 29 - Token-2022 mint or token account uses unsupported extensions for exact distribution
     #[error("Token-2022 mint or token account uses unsupported extensions for exact distribution")]
-    UnsupportedTokenExtensions = 0x1E,
-    /// 31 - No newly settled funds to distribute
+    UnsupportedTokenExtensions = 0x1D,
+    /// 30 - No newly settled funds to distribute
     #[error("No newly settled funds to distribute")]
-    NothingToDistribute = 0x1F,
+    NothingToDistribute = 0x1E,
 }
 
 impl From<PaymentChannelsError> for solana_program_error::ProgramError {

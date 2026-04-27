@@ -53,25 +53,25 @@ pub enum PaymentChannelsError {
     #[error("Each shareBps must be non-zero and Σbps must be strictly less than 10_000")]
     InvalidSplitConfig = 19,
     #[error("Recipient token account is not the expected ATA")]
-    InvalidRecipientAccount = 21,
+    InvalidRecipientAccount = 20,
     #[error("Mint account does not match channel.mint")]
-    MintAccountMismatch = 22,
+    MintAccountMismatch = 21,
     #[error("Payer account does not match channel.payer")]
-    PayerAccountMismatch = 23,
+    PayerAccountMismatch = 22,
     #[error("Token program must be SPL Token or Token-2022")]
-    InvalidTokenProgram = 24,
+    InvalidTokenProgram = 23,
     #[error("Treasury token account is not ATA(TREASURY_OWNER, mint, token_program)")]
-    TreasuryAddressMismatch = 25,
+    TreasuryAddressMismatch = 24,
     #[error("Arithmetic overflow")]
-    ArithmeticOverflow = 26,
+    ArithmeticOverflow = 25,
     #[error("Channel is not in OPEN or FINALIZED")]
-    ChannelNotClosable = 27,
+    ChannelNotClosable = 26,
     #[error("Channel token account is not ATA(channel, mint, token_program)")]
-    InvalidChannelTokenAccount = 28,
+    InvalidChannelTokenAccount = 27,
     #[error("Payer token account is not ATA(payer, mint, token_program)")]
-    InvalidPayerTokenAccount = 29,
+    InvalidPayerTokenAccount = 28,
     #[error("Token-2022 mint or token account uses unsupported extensions for exact distribution")]
-    UnsupportedTokenExtensions = 30,
+    UnsupportedTokenExtensions = 29,
     #[error("No newly settled funds to distribute")]
-    NothingToDistribute = 31,
+    NothingToDistribute = 30,
 }
