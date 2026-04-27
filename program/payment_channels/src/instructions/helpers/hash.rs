@@ -1,7 +1,7 @@
 //! Blake3 hashing via the BPF syscall.
 
 /// Blake3 digest of `input`. Single source of truth for `open` and `distribute`.
-/// 
+///
 /// On-chain uses `sol_blake3`. Host-side test builds use the `blake3` dev-dep
 /// so unit tests can assert digest determinism / distinctness; non-test host
 /// builds panic — there is no silent zero stub to mask digest mismatches.
