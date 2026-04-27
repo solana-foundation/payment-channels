@@ -163,14 +163,12 @@ pub fn process(
         return Err(PaymentChannelsError::PayerPayeeMustDiffer.into());
     }
 
-    args.recipients.validate()?;
+    let recipient_count = args.recipients.validate()?;
 
     let deposit = args.deposit();
     if deposit == 0 {
         return Err(PaymentChannelsError::DepositMustBeNonZero.into());
     }
-
-    let distribution_hash = args.recipients.preimage_hash();
 
     let (channel_address, bump) = Channel::find_pda(
         accs.payer.address(),
@@ -179,6 +177,15 @@ pub fn process(
         accs.authorized_signer.address(),
         args.salt(),
     );
+
+    if args.recipients.entries[..recipient_count]
+        .iter()
+        .any(|entry| entry.recipient == channel_address)
+    {
+        return Err(PaymentChannelsError::InvalidSplitConfig.into());
+    }
+
+    let distribution_hash = args.recipients.preimage_hash();
 
     // Client-side derives these addresses; validate explicitly as defense in
     // depth before any mutation (CPI enforcement provides a second layer).
