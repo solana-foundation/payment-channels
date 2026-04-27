@@ -38,13 +38,14 @@ fn seed_channel(
     settled: u64,
     authorized_signer: &Pubkey,
 ) {
-    let mut data = vec![0u8; 208];
+    let mut data = vec![0u8; 216];
     data[0] = 1; // AccountDiscriminator::Channel
     data[1] = 1; // CURRENT_CHANNEL_VERSION
     data[3] = status;
-    data[4..12].copy_from_slice(&deposit.to_le_bytes());
-    data[12..20].copy_from_slice(&settled.to_le_bytes());
-    data[144..176].copy_from_slice(&authorized_signer.to_bytes());
+    // salt: [u8; 8] at offset 4 — left as zero
+    data[12..20].copy_from_slice(&deposit.to_le_bytes());
+    data[20..28].copy_from_slice(&settled.to_le_bytes());
+    data[152..184].copy_from_slice(&authorized_signer.to_bytes());
 
     svm.set_account(
         *channel,
@@ -120,7 +121,7 @@ fn build_settle_ix(channel: &Pubkey, voucher: VoucherArgs) -> Instruction {
 fn read_settled(svm: &LiteSVM, channel: &Pubkey) -> u64 {
     let acct = svm.get_account(channel).expect("channel exists");
     let mut buf = [0u8; 8];
-    buf.copy_from_slice(&acct.data[12..20]);
+    buf.copy_from_slice(&acct.data[20..28]);
     u64::from_le_bytes(buf)
 }
 
