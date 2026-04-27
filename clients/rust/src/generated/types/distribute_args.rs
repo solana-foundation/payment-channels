@@ -10,7 +10,6 @@ use borsh::BorshSerialize;
 
 #[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Eq, PartialEq)]
 pub struct DistributeArgs {
-    pub salt: u64,
     pub preimage_len: u16,
     pub preimage: [u8; 1089],
 }

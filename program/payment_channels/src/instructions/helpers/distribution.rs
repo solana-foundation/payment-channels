@@ -124,7 +124,7 @@ mod tests {
     fn make_recipients(count: u8) -> DistributionRecipients {
         let entry = DistributionEntry {
             recipient: Address::default(),
-            bps: 500u16.to_le_bytes(),
+            bps: 100u16.to_le_bytes(),
         };
         DistributionRecipients {
             count,

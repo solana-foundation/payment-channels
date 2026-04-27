@@ -264,11 +264,9 @@ fn build_distribute_ix(
     mint: &Pubkey,
     token_program: &Pubkey,
     recipient_atas: &[Pubkey],
-    salt: u64,
     preimage_active: &[u8],
 ) -> Instruction {
     let args = DistributeArgs {
-        salt,
         preimage_len: preimage_active.len() as u16,
         preimage: preimage_buffer(preimage_active),
     };
@@ -300,7 +298,6 @@ struct Scenario {
     fee_payer: Keypair,
     mint: Pubkey,
     payer: Pubkey,
-    salt: u64,
     channel: Pubkey,
     channel_ata: Pubkey,
     payer_ata: Pubkey,
@@ -434,7 +431,6 @@ impl Scenario {
             fee_payer,
             mint,
             payer,
-            salt,
             channel,
             channel_ata,
             payer_ata,
@@ -461,7 +457,6 @@ impl Scenario {
             &self.mint,
             &self.token_program,
             &self.recipient_atas,
-            self.salt,
             &preimage,
         )
     }
@@ -734,7 +729,6 @@ fn happy_path_finalized_already_withdrawn() {
         &mint,
         &token_2022_program_id(),
         &[recipient_ata],
-        salt,
         &preimage,
     );
     let blockhash = svm.latest_blockhash();
@@ -937,7 +931,6 @@ fn num_recipients_zero() {
         &mint,
         &token_2022_program_id(),
         &[],
-        salt,
         &preimage,
     );
     let blockhash = svm.latest_blockhash();
@@ -951,28 +944,6 @@ fn num_recipients_zero() {
         svm.send_transaction(tx),
         PaymentChannelsError::InvalidRecipientCount,
     );
-}
-
-#[test]
-fn wrong_salt() {
-    let splits = vec![Split {
-        owner: Pubkey::new_unique(),
-        bps: 1000,
-    }];
-    let mut s = Scenario::build(splits, 200_000, 0, 100_000, 0);
-    let ix = build_distribute_ix(
-        &s.channel,
-        &s.payer,
-        &s.channel_ata,
-        &s.payer_ata,
-        &s.treasury_ata,
-        &s.mint,
-        &token_2022_program_id(),
-        &s.recipient_atas,
-        s.salt.wrapping_add(1), // wrong salt
-        &s.preimage(),
-    );
-    expect_custom_err(s.send(ix), PaymentChannelsError::ChannelAddressMismatch);
 }
 
 #[test]
@@ -998,7 +969,6 @@ fn wrong_recipient_ata() {
         &s.mint,
         &token_2022_program_id(),
         &[rogue_ata],
-        s.salt,
         &s.preimage(),
     );
     expect_custom_err(s.send(ix), PaymentChannelsError::InvalidRecipientAccount);
@@ -1027,7 +997,6 @@ fn wrong_treasury_ata() {
         &s.mint,
         &token_2022_program_id(),
         &s.recipient_atas,
-        s.salt,
         &s.preimage(),
     );
     expect_custom_err(s.send(ix), PaymentChannelsError::TreasuryAddressMismatch);
@@ -1050,7 +1019,6 @@ fn wrong_token_program() {
         &s.mint,
         &system_id,
         &s.recipient_atas,
-        s.salt,
         &s.preimage(),
     );
     expect_custom_err(s.send(ix), PaymentChannelsError::InvalidTokenProgram);
@@ -1104,7 +1072,6 @@ fn preimage_length_mismatch() {
         &s.mint,
         &token_2022_program_id(),
         &s.recipient_atas,
-        s.salt,
         &bad,
     );
     expect_custom_err(s.send(ix), PaymentChannelsError::InvalidPreimageLength);
@@ -1132,7 +1099,6 @@ fn num_recipients_exceeds_max() {
         &s.mint,
         &token_2022_program_id(),
         &s.recipient_atas,
-        s.salt,
         &preimage,
     );
     expect_custom_err(s.send(ix), PaymentChannelsError::InvalidRecipientCount);

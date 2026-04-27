@@ -59,14 +59,34 @@ const EXT_TOKEN_GROUP: u16 = 21;
 const EXT_GROUP_MEMBER_POINTER: u16 = 22;
 const EXT_TOKEN_GROUP_MEMBER: u16 = 23;
 
+#[cfg(test)]
+mod token_2022_extension_id_tests {
+    use super::*;
+    use spl_token_2022_interface::extension::ExtensionType;
+
+    #[test]
+    fn mirrored_token_2022_extension_ids_match_upstream_wire_discriminants() {
+        assert_eq!(EXT_UNINITIALIZED, ExtensionType::Uninitialized as u16);
+        assert_eq!(EXT_IMMUTABLE_OWNER, ExtensionType::ImmutableOwner as u16);
+        assert_eq!(EXT_METADATA_POINTER, ExtensionType::MetadataPointer as u16);
+        assert_eq!(EXT_TOKEN_METADATA, ExtensionType::TokenMetadata as u16);
+        assert_eq!(EXT_GROUP_POINTER, ExtensionType::GroupPointer as u16);
+        assert_eq!(EXT_TOKEN_GROUP, ExtensionType::TokenGroup as u16);
+        assert_eq!(
+            EXT_GROUP_MEMBER_POINTER,
+            ExtensionType::GroupMemberPointer as u16
+        );
+        assert_eq!(
+            EXT_TOKEN_GROUP_MEMBER,
+            ExtensionType::TokenGroupMember as u16
+        );
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct DistributeArgs {
-    /// PDA seed disambiguator. Combined with the Channel's binding fields to
-    /// re-derive the PDA; verified against `accs.channel.address()`.
-    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
-    salt: [u8; 8],
     /// Active byte count inside [`Self::preimage`]. Bounds both the Blake3
     /// rehash input and the splits parser.
     #[cfg_attr(feature = "idl", codama(type = number(u16)))]
@@ -81,10 +101,6 @@ pub struct DistributeArgs {
 impl DistributeArgs {
     pub const LEN: usize = size_of::<Self>();
 
-    #[inline(always)]
-    pub fn salt(&self) -> u64 {
-        u64::from_le_bytes(self.salt)
-    }
     #[inline(always)]
     pub fn preimage_len(&self) -> u16 {
         u16::from_le_bytes(self.preimage_len)
@@ -183,8 +199,8 @@ pub fn process(
     }
     let decimals = validate_mint(accs.mint, &tp)?;
 
-    // Re-derive PDA — salt-as-ix-arg; gated by bump cross-check.
-    let salt = args.salt();
+    // Re-derive PDA from the channel-stored salt; gated by bump cross-check.
+    let salt = ch.salt();
     let (expected_pda, expected_bump) =
         Channel::find_pda(&ch.payer, &ch.payee, &ch.mint, &ch.authorized_signer, salt);
     if expected_pda != channel_address || expected_bump != ch.bump {

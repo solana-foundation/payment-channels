@@ -16,8 +16,6 @@ import {
   getStructEncoder,
   getU16Decoder,
   getU16Encoder,
-  getU64Decoder,
-  getU64Encoder,
   type FixedSizeCodec,
   type FixedSizeDecoder,
   type FixedSizeEncoder,
@@ -25,20 +23,14 @@ import {
 } from "@solana/kit";
 
 export type DistributeArgs = {
-  salt: bigint;
   preimageLen: number;
   preimage: ReadonlyUint8Array;
 };
 
-export type DistributeArgsArgs = {
-  salt: number | bigint;
-  preimageLen: number;
-  preimage: ReadonlyUint8Array;
-};
+export type DistributeArgsArgs = DistributeArgs;
 
 export function getDistributeArgsEncoder(): FixedSizeEncoder<DistributeArgsArgs> {
   return getStructEncoder([
-    ["salt", getU64Encoder()],
     ["preimageLen", getU16Encoder()],
     ["preimage", fixEncoderSize(getBytesEncoder(), 1089)],
   ]);
@@ -46,7 +38,6 @@ export function getDistributeArgsEncoder(): FixedSizeEncoder<DistributeArgsArgs>
 
 export function getDistributeArgsDecoder(): FixedSizeDecoder<DistributeArgs> {
   return getStructDecoder([
-    ["salt", getU64Decoder()],
     ["preimageLen", getU16Decoder()],
     ["preimage", fixDecoderSize(getBytesDecoder(), 1089)],
   ]);

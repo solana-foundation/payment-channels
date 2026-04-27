@@ -180,15 +180,6 @@
           "fields": [
             {
               "kind": "structFieldTypeNode",
-              "name": "salt",
-              "type": {
-                "endian": "le",
-                "format": "u64",
-                "kind": "numberTypeNode"
-              }
-            },
-            {
-              "kind": "structFieldTypeNode",
               "name": "preimageLen",
               "type": {
                 "endian": "le",

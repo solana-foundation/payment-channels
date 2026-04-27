@@ -49,6 +49,7 @@ blake3                   = { version = "1", default-features = false }
 mollusk-svm              = "0.11.0"
 solana-instructions-sysvar = "^3"
 solana-program-error       = "^3"
+spl-token-2022-interface   = "2.1.0"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
