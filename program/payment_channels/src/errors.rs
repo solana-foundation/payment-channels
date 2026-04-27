@@ -65,7 +65,7 @@ pub enum PaymentChannelsError {
     #[error("Arithmetic overflow")]
     ArithmeticOverflow = 25,
     #[error("Channel is not in OPEN or FINALIZED")]
-    ChannelNotClosable = 26,
+    ChannelNotDistributable = 26,
     #[error("Channel token account is not ATA(channel, mint, token_program)")]
     InvalidChannelTokenAccount = 27,
     #[error("Payer token account is not ATA(payer, mint, token_program)")]

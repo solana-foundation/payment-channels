@@ -110,7 +110,7 @@ pub fn process(
     // Status gate.
     let status = ChannelStatus::try_from(ch.status)?;
     if !matches!(status, ChannelStatus::Open | ChannelStatus::Finalized) {
-        return Err(PaymentChannelsError::ChannelNotClosable.into());
+        return Err(PaymentChannelsError::ChannelNotDistributable.into());
     }
 
     // Identity.
@@ -126,7 +126,7 @@ pub fn process(
     validate_token_program(&tp)?;
     let decimals = validate_mint(accs.mint, &tp)?;
 
-    // Re-derive PDA from the channel-stored salt; gated by bump cross-check.
+    // Re-derive channel PDA
     let salt = ch.salt();
     let (expected_pda, expected_bump) =
         Channel::find_pda(&ch.payer, &ch.payee, &ch.mint, &ch.authorized_signer, salt);

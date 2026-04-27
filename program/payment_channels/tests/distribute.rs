@@ -712,7 +712,7 @@ fn status_closing_rejects() {
     let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_CLOSING);
     expect_custom_err(
         s.send(s.distribute_ix()),
-        PaymentChannelsError::ChannelNotClosable,
+        PaymentChannelsError::ChannelNotDistributable,
     );
 }
 

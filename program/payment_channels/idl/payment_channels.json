@@ -597,7 +597,7 @@
         "code": 26,
         "kind": "errorNode",
         "message": "Channel is not in OPEN or FINALIZED",
-        "name": "channelNotClosable"
+        "name": "channelNotDistributable"
       },
       {
         "code": 27,
