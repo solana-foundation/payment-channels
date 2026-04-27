@@ -1,11 +1,10 @@
 use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer, error::ProgramError};
-use pinocchio_token_2022::state::{Account as TokenAccount, AccountType, Mint as TokenMint};
 
 use crate::constants::{ATA_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID};
 use crate::errors::PaymentChannelsError;
 
 mod base_layout {
-    use pinocchio_token_2022::state::{Account as TokenAccount, AccountState, Mint as TokenMint};
+    use pinocchio_token_2022::state::{Account as TokenAccount, Mint as TokenMint};
 
     /// SPL classic Mint byte length. Token-2022 mints with extensions are longer;
     /// Token-2022's TLV trailer is parsed explicitly so only exact-accounting-safe
@@ -15,10 +14,6 @@ mod base_layout {
     /// SPL classic token account byte length. Token-2022 account extensions follow
     /// the base account region.
     pub(super) const TOKEN_ACCOUNT_LEN: usize = TokenAccount::BASE_LEN;
-
-    /// Offset of `state: u8` within the base token account layout.
-    pub(super) const STATE_OFFSET: usize = 108;
-    pub(super) const INITIALIZED: u8 = AccountState::Initialized as u8;
 }
 
 mod tlv {
@@ -81,29 +76,35 @@ pub fn derive_ata(owner: &Address, mint: &Address, token_program: &Address) -> A
 /// else — most importantly transfer fees, hooks, or confidential transfers —
 /// is rejected so amount accounting cannot diverge from the literal `amount`.
 pub fn validate_mint(mint: &AccountView, token_program: &Address) -> Result<u8, ProgramError> {
-    if !mint.owned_by(token_program) {
-        return Err(PaymentChannelsError::MintAccountMismatch.into());
-    }
+    let decimals = if *token_program == SPL_TOKEN_PROGRAM_ID {
+        // pinocchio_token enforces owner == SPL classic + exact length.
+        pinocchio_token::state::Mint::from_account_view(mint)
+            .map_err(|_| PaymentChannelsError::MintAccountMismatch)?
+            .decimals()
+    } else if *token_program == TOKEN_2022_PROGRAM_ID {
+        // pinocchio_token_2022 enforces owner == Token-2022 and (when
+        // extensions are present) the AccountType discriminator byte.
+        pinocchio_token_2022::state::Mint::from_account_view(mint)
+            .map_err(|_| PaymentChannelsError::MintAccountMismatch)?
+            .decimals()
+    } else {
+        return Err(PaymentChannelsError::InvalidTokenProgram.into());
+    };
 
-    let data = mint.try_borrow()?;
-    if data.len() < base_layout::MINT_LEN {
-        return Err(ProgramError::InvalidAccountData);
-    }
-    // SAFETY: length checked above; TokenMint has alignment 1.
-    let decimals = unsafe { TokenMint::from_bytes_unchecked(&data) }.decimals();
-
-    if *token_program == SPL_TOKEN_PROGRAM_ID {
-        if data.len() != base_layout::MINT_LEN {
-            return Err(ProgramError::InvalidAccountData);
+    if *token_program == TOKEN_2022_PROGRAM_ID {
+        let data = mint.try_borrow()?;
+        if data.len() > base_layout::MINT_LEN {
+            // Upstream's `validate_account_type` checks the discriminator at
+            // `Account::BASE_LEN` but doesn't enforce that the gap between the
+            // mint base region and that offset is zero — guard against
+            // smuggled bytes here, then walk the whitelisted TLV trailer.
+            if !all_zero(&data[base_layout::MINT_LEN..tlv::ACCOUNT_TYPE_OFFSET]) {
+                return Err(PaymentChannelsError::UnsupportedTokenExtensions.into());
+            }
+            scan_tlv_extensions(&data[tlv::START..], true)?;
         }
-        return Ok(decimals);
     }
 
-    if data.len() == base_layout::MINT_LEN {
-        return Ok(decimals);
-    }
-    validate_token_2022_header(&data, base_layout::MINT_LEN, AccountType::Mint)?;
-    scan_tlv_extensions(&data[tlv::START..], true)?;
     Ok(decimals)
 }
 
@@ -119,51 +120,40 @@ pub fn validate_token_account(
     token_program: &Address,
     account_error: PaymentChannelsError,
 ) -> ProgramResult {
-    if !account.owned_by(token_program) {
+    let (mint_addr, owner_addr, initialized) = if *token_program == SPL_TOKEN_PROGRAM_ID {
+        let acc = pinocchio_token::state::Account::from_account_view(account)
+            .map_err(|_| account_error)?;
+        let initialized = matches!(
+            acc.state(),
+            pinocchio_token::state::AccountState::Initialized
+        );
+        (*acc.mint(), *acc.owner(), initialized)
+    } else if *token_program == TOKEN_2022_PROGRAM_ID {
+        let acc = pinocchio_token_2022::state::Account::from_account_view(account)
+            .map_err(|_| account_error)?;
+        let initialized = matches!(
+            acc.state(),
+            pinocchio_token_2022::state::AccountState::Initialized
+        );
+        (*acc.mint(), *acc.owner(), initialized)
+    } else {
+        return Err(PaymentChannelsError::InvalidTokenProgram.into());
+    };
+
+    if &mint_addr != expected_mint || &owner_addr != expected_owner || !initialized {
         return Err(account_error.into());
     }
 
-    let data = account.try_borrow()?;
-    if data.len() < base_layout::TOKEN_ACCOUNT_LEN {
-        return Err(account_error.into());
-    }
-    // SAFETY: length checked above; TokenAccount has alignment 1.
-    let token_account = unsafe { TokenAccount::from_bytes_unchecked(&data) };
-    if token_account.mint() != expected_mint
-        || token_account.owner() != expected_owner
-        || data[base_layout::STATE_OFFSET] != base_layout::INITIALIZED
-    {
-        return Err(account_error.into());
-    }
-
-    if *token_program == SPL_TOKEN_PROGRAM_ID {
-        if data.len() != base_layout::TOKEN_ACCOUNT_LEN {
-            return Err(account_error.into());
+    if *token_program == TOKEN_2022_PROGRAM_ID {
+        let data = account.try_borrow()?;
+        if data.len() > base_layout::TOKEN_ACCOUNT_LEN {
+            // Token-account base layout already aligns with the AccountType
+            // discriminator offset, so there's no padding to police — go
+            // straight to the whitelisted TLV walk.
+            scan_tlv_extensions(&data[tlv::START..], false)?;
         }
-        return Ok(());
     }
 
-    if data.len() == base_layout::TOKEN_ACCOUNT_LEN {
-        return Ok(());
-    }
-    validate_token_2022_header(&data, base_layout::TOKEN_ACCOUNT_LEN, AccountType::Account)?;
-    scan_tlv_extensions(&data[tlv::START..], false)
-}
-
-/// Verifies the Token-2022 padding region between the base layout and the TLV
-/// trailer is zero and that the account-type discriminator byte matches the
-/// expected kind (mint vs token account).
-fn validate_token_2022_header(
-    data: &[u8],
-    base_len: usize,
-    expected_account_type: AccountType,
-) -> ProgramResult {
-    if data.len() < tlv::START
-        || !all_zero(&data[base_len..tlv::ACCOUNT_TYPE_OFFSET])
-        || data[tlv::ACCOUNT_TYPE_OFFSET] != expected_account_type as u8
-    {
-        return Err(PaymentChannelsError::UnsupportedTokenExtensions.into());
-    }
     Ok(())
 }
 
