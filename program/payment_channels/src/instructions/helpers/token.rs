@@ -238,6 +238,7 @@ fn scan_tlv_extensions(mut data: &[u8], is_mint: bool) -> ProgramResult {
 
 /// Invokes a signed `TransferChecked` CPI from a channel-owned token account,
 /// skipping the CPI entirely when `amount == 0`.
+#[allow(clippy::too_many_arguments)]
 pub fn transfer_checked_signed_if_nonzero(
     from: &AccountView,
     mint: &AccountView,
