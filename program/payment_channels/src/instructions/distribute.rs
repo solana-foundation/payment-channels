@@ -11,9 +11,8 @@ use pinocchio::{
 use crate::constants::TREASURY_OWNER;
 use crate::errors::PaymentChannelsError;
 use crate::instructions::helpers::{
-    BPS_DENOMINATOR, DistributionEntry, MAX_DISTRIBUTION_RECIPIENTS, blake3, close_token_account,
-    derive_ata, overflow, transfer_checked_signed, validate_mint, validate_token_account,
-    validate_token_program,
+    BPS_DENOMINATOR, DistributionRecipients, close_token_account, derive_ata, overflow,
+    transfer_checked_signed, validate_mint, validate_token_account, validate_token_program,
 };
 use crate::state::channel::{CHANNEL_SEED, Channel, ChannelStatus};
 use crate::state::{Transmutable, load};
@@ -21,32 +20,17 @@ use crate::state::{Transmutable, load};
 /// Instruction discriminator byte for `distribute`.
 pub const DISCRIMINATOR: u8 = 7;
 
-/// Fixed preimage buffer size. `preimage_len` marks the active prefix; trailing
-/// bytes are ignored by the hash rebuild.
-pub const MAX_DISTRIBUTE_PREIMAGE: usize = 1 + MAX_DISTRIBUTION_RECIPIENTS * DistributionEntry::LEN;
-
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct DistributeArgs {
-    /// Active byte count inside [`Self::preimage`]. Bounds both the Blake3
-    /// rehash input and the splits parser.
-    #[cfg_attr(feature = "idl", codama(type = number(u16)))]
-    preimage_len: [u8; 2],
-    /// `num_recipients(1) || entries(n × DistributionEntry::LEN)`; rebuilt and
-    /// hashed on-chain; digest must equal
-    /// [`Channel::distribution_hash`](crate::Channel::distribution_hash).
-    #[cfg_attr(feature = "idl", codama(type = fixed_size(bytes, 1089)))]
-    pub preimage: [u8; MAX_DISTRIBUTE_PREIMAGE],
+    /// Reveal of the plan committed at `open`. Rehashed on-chain; digest must
+    /// equal [`Channel::distribution_hash`](crate::Channel::distribution_hash).
+    pub recipients: DistributionRecipients,
 }
 
 impl DistributeArgs {
     pub const LEN: usize = size_of::<Self>();
-
-    #[inline(always)]
-    pub fn preimage_len(&self) -> u16 {
-        u16::from_le_bytes(self.preimage_len)
-    }
 
     pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
         unsafe { load::<Self>(data) }.map_err(|_| ProgramError::InvalidInstructionData)
@@ -58,8 +42,8 @@ unsafe impl Transmutable for DistributeArgs {
 }
 
 /// Fixed 7-slot head + dynamic recipient tail. Recipient ATAs sit in
-/// `recipient_token_accounts` in the same order as `DistributionEntry`s in the
-/// preimage; clients append them as remaining accounts.
+/// `recipient_token_accounts` in the same order as the active entries in
+/// `DistributeArgs::recipients`; clients append them as remaining accounts.
 pub struct DistributeAccounts<'a> {
     pub channel: &'a mut AccountView,
     pub payer: &'a mut AccountView,
@@ -179,32 +163,20 @@ pub fn process(
         PaymentChannelsError::TreasuryAddressMismatch,
     )?;
 
-    // Preimage prefix.
-    let preimage_len = args.preimage_len() as usize;
-    if preimage_len == 0 || preimage_len > MAX_DISTRIBUTE_PREIMAGE {
-        return Err(PaymentChannelsError::InvalidPreimageLength.into());
-    }
-    let n = args.preimage[0] as usize;
-    if n == 0 || n > MAX_DISTRIBUTION_RECIPIENTS {
+    // Bounds-check count + recipient-tail length before hashing. validate()
+    // guards preimage_hash() against an out-of-range slice on count > 32.
+    let n = args.recipients.validate()?;
+    if accs.recipient_token_accounts.len() != n {
         return Err(PaymentChannelsError::InvalidRecipientCount.into());
-    }
-    let expected_len = 1usize
-        .checked_add(n.checked_mul(DistributionEntry::LEN).ok_or_else(overflow)?)
-        .ok_or_else(overflow)?;
-    if preimage_len != expected_len || accs.recipient_token_accounts.len() != n {
-        return Err(PaymentChannelsError::InvalidPreimageLength.into());
     }
 
     // Blake3 rehash.
-    let digest = blake3(&args.preimage[..preimage_len]);
+    let digest = args.recipients.preimage_hash();
     if digest != ch.distribution_hash {
         return Err(PaymentChannelsError::InvalidDistributionHash.into());
     }
 
-    // Transmute active entries. SAFETY: align-1 contract, length verified above.
-    let entries: &[DistributionEntry] = unsafe {
-        core::slice::from_raw_parts(args.preimage[1..].as_ptr().cast::<DistributionEntry>(), n)
-    };
+    let entries = &args.recipients.entries[..n];
 
     // ATA match + bps sum. Split config validity is enforced at `open`; here
     // the sum is rebuilt only to calculate the payer's implicit remainder.

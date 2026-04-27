@@ -52,10 +52,6 @@ pub enum PaymentChannelsError {
     PayerPayeeMustDiffer = 18,
     #[error("Each shareBps must be non-zero and Σbps must be strictly less than 10_000")]
     InvalidSplitConfig = 19,
-    #[error(
-        "preimage_len does not match 1 + num_recipients * DistributionEntry::LEN, or recipient-tail length mismatches"
-    )]
-    InvalidPreimageLength = 20,
     #[error("Recipient token account is not the expected ATA")]
     InvalidRecipientAccount = 21,
     #[error("Mint account does not match channel.mint")]

@@ -15,7 +15,8 @@ use litesvm::LiteSVM;
 use litesvm_token::CreateAssociatedTokenAccount;
 use payment_channels::PaymentChannelsError;
 use payment_channels_client::instructions::{Distribute, DistributeInstructionArgs};
-use payment_channels_client::types::DistributeArgs;
+use payment_channels_client::types::{DistributeArgs, DistributionEntry, DistributionRecipients};
+use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -38,8 +39,6 @@ use common::token_2022::{
 use common::{expect_custom_err, load_program};
 
 const MAX_DISTRIBUTION_RECIPIENTS: usize = 32;
-const ENTRY_LEN: usize = 34;
-const MAX_DISTRIBUTE_PREIMAGE: usize = 1 + MAX_DISTRIBUTION_RECIPIENTS * ENTRY_LEN;
 const STATUS_OPEN: u8 = 0;
 const STATUS_FINALIZED: u8 = 1;
 const STATUS_CLOSING: u8 = 2;
@@ -75,26 +74,25 @@ fn compute_budget_ix(units: u32) -> Instruction {
     }
 }
 
-/// Build the `num_recipients(1) || entries(n × 34)` preimage.
-///
-/// No upper-bound assert: callers may intentionally construct oversize
-/// preimages to trigger on-chain length / count validation.
-fn build_preimage(splits: &[Split]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(1 + splits.len() * ENTRY_LEN);
-    out.push(splits.len() as u8);
-    for s in splits {
-        out.extend_from_slice(s.owner.as_ref());
-        out.extend_from_slice(&s.bps.to_le_bytes());
+/// Build a `DistributionRecipients` from `splits`. Trailing entries are zeroed.
+/// `count` is set to `splits.len()`; negative tests mutate it post-hoc to drive
+/// the count guard in `validate()`.
+fn build_recipients(splits: &[Split]) -> DistributionRecipients {
+    let mut entries: [DistributionEntry; MAX_DISTRIBUTION_RECIPIENTS] =
+        std::array::from_fn(|_| DistributionEntry {
+            recipient: Address::from([0u8; 32]),
+            bps: 0,
+        });
+    for (i, s) in splits.iter().enumerate() {
+        entries[i] = DistributionEntry {
+            recipient: Address::from(s.owner.to_bytes()),
+            bps: s.bps,
+        };
     }
-    out
-}
-
-/// Pad the active preimage prefix into the fixed MAX_DISTRIBUTE_PREIMAGE buffer.
-fn preimage_buffer(active: &[u8]) -> [u8; MAX_DISTRIBUTE_PREIMAGE] {
-    assert!(active.len() <= MAX_DISTRIBUTE_PREIMAGE);
-    let mut buf = [0u8; MAX_DISTRIBUTE_PREIMAGE];
-    buf[..active.len()].copy_from_slice(active);
-    buf
+    DistributionRecipients {
+        count: splits.len() as u8,
+        entries,
+    }
 }
 
 /// Read the `amount` field (bytes 64..72) of a classic SPL Token account.
@@ -138,12 +136,9 @@ fn build_distribute_ix(
     mint: &Pubkey,
     token_program: &Pubkey,
     recipient_atas: &[Pubkey],
-    preimage_active: &[u8],
+    recipients: DistributionRecipients,
 ) -> Instruction {
-    let args = DistributeArgs {
-        preimage_len: preimage_active.len() as u16,
-        preimage: preimage_buffer(preimage_active),
-    };
+    let args = DistributeArgs { recipients };
     let remaining: Vec<AccountMeta> = recipient_atas
         .iter()
         .map(|a| AccountMeta::new(*a, false))
@@ -286,13 +281,12 @@ impl Scenario {
         }
     }
 
-    /// Borsh-free preimage for the scenario's declared splits.
-    fn preimage(&self) -> Vec<u8> {
-        build_preimage(&self.splits)
+    /// Typed recipients matching the scenario's declared splits.
+    fn recipients(&self) -> DistributionRecipients {
+        build_recipients(&self.splits)
     }
 
     fn distribute_ix(&self) -> Instruction {
-        let preimage = self.preimage();
         build_distribute_ix(
             &self.channel,
             &self.payer,
@@ -302,7 +296,7 @@ impl Scenario {
             &self.mint,
             &self.token_program,
             &self.recipient_atas,
-            &preimage,
+            self.recipients(),
         )
     }
 
@@ -594,15 +588,15 @@ fn unsupported_token_2022_account_extensions_reject_without_state_changes() {
 
 #[test]
 fn num_recipients_zero() {
-    // The distribute count guard fires before the hash check, so opening with
-    // valid splits and submitting a malformed `[0x00]` preimage exercises the
-    // n==0 reject path without needing a hash match.
+    // validate() runs before the hash check, so a count=0 recipients struct
+    // exercises the n==0 reject path without needing a hash match.
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 1000,
     }];
     let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
-    let bad_preimage = vec![0u8];
+    let mut bad = s.recipients();
+    bad.count = 0;
     let ix = build_distribute_ix(
         &s.channel,
         &s.payer,
@@ -612,7 +606,7 @@ fn num_recipients_zero() {
         &s.mint,
         &s.token_program,
         &[],
-        &bad_preimage,
+        bad,
     );
     expect_custom_err(s.send(ix), PaymentChannelsError::InvalidRecipientCount);
 }
@@ -640,7 +634,7 @@ fn wrong_recipient_ata() {
         &s.mint,
         &s.token_program,
         &[rogue_ata],
-        &s.preimage(),
+        s.recipients(),
     );
     expect_custom_err(s.send(ix), PaymentChannelsError::InvalidRecipientAccount);
 }
@@ -668,7 +662,7 @@ fn wrong_treasury_ata() {
         &s.mint,
         &s.token_program,
         &s.recipient_atas,
-        &s.preimage(),
+        s.recipients(),
     );
     expect_custom_err(s.send(ix), PaymentChannelsError::TreasuryAddressMismatch);
 }
@@ -690,7 +684,7 @@ fn wrong_token_program() {
         &s.mint,
         &system_id,
         &s.recipient_atas,
-        &s.preimage(),
+        s.recipients(),
     );
     expect_custom_err(s.send(ix), PaymentChannelsError::InvalidTokenProgram);
 }
@@ -723,41 +717,16 @@ fn status_closing_rejects() {
 }
 
 #[test]
-fn preimage_length_mismatch() {
-    let splits = vec![Split {
-        owner: Pubkey::new_unique(),
-        bps: 1000,
-    }];
-    let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
-    // Submit a preimage that declares 1 entry but spans `1 + 2*34` bytes.
-    let mut bad = s.preimage();
-    bad.extend_from_slice(&[0u8; 34]);
-    let ix = build_distribute_ix(
-        &s.channel,
-        &s.payer,
-        &s.channel_ata,
-        &s.payer_ata,
-        &s.treasury_ata,
-        &s.mint,
-        &s.token_program,
-        &s.recipient_atas,
-        &bad,
-    );
-    expect_custom_err(s.send(ix), PaymentChannelsError::InvalidPreimageLength);
-}
-
-#[test]
 fn num_recipients_exceeds_max() {
-    // 33 > MAX_DISTRIBUTION_RECIPIENTS = 32. The count guard runs *after*
-    // preimage_len bounds-check but *before* `preimage_len == 1 + n*34`
-    // consistency, so a 1-byte `0x21` preimage trips the count guard
+    // 33 > MAX_DISTRIBUTION_RECIPIENTS = 32 → validate() trips the count guard
     // without needing 33 ATAs or a hash match.
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 1000,
     }];
     let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
-    let preimage = vec![33u8];
+    let mut bad = s.recipients();
+    bad.count = 33;
     let ix = build_distribute_ix(
         &s.channel,
         &s.payer,
@@ -767,7 +736,7 @@ fn num_recipients_exceeds_max() {
         &s.mint,
         &s.token_program,
         &s.recipient_atas,
-        &preimage,
+        bad,
     );
     expect_custom_err(s.send(ix), PaymentChannelsError::InvalidRecipientCount);
 }

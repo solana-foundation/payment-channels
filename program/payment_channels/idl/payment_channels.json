@@ -180,22 +180,10 @@
           "fields": [
             {
               "kind": "structFieldTypeNode",
-              "name": "preimageLen",
+              "name": "recipients",
               "type": {
-                "endian": "le",
-                "format": "u16",
-                "kind": "numberTypeNode"
-              }
-            },
-            {
-              "kind": "structFieldTypeNode",
-              "name": "preimage",
-              "type": {
-                "kind": "fixedSizeTypeNode",
-                "size": 1089,
-                "type": {
-                  "kind": "bytesTypeNode"
-                }
+                "kind": "definedTypeLinkNode",
+                "name": "distributionRecipients"
               }
             }
           ],
@@ -568,12 +556,6 @@
         "kind": "errorNode",
         "message": "Each shareBps must be non-zero and Σbps must be strictly less than 10_000",
         "name": "invalidSplitConfig"
-      },
-      {
-        "code": 20,
-        "kind": "errorNode",
-        "message": "preimage_len does not match 1 + num_recipients * DistributionEntry::LEN, or recipient-tail length mismatches",
-        "name": "invalidPreimageLength"
       },
       {
         "code": 21,

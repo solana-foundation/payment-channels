@@ -70,11 +70,6 @@ pub enum PaymentChannelsError {
     /// 19 - Each shareBps must be non-zero and Σbps must be strictly less than 10_000
     #[error("Each shareBps must be non-zero and Σbps must be strictly less than 10_000")]
     InvalidSplitConfig = 0x13,
-    /// 20 - preimage_len does not match 1 + num_recipients * DistributionEntry::LEN, or recipient-tail length mismatches
-    #[error(
-        "preimage_len does not match 1 + num_recipients * DistributionEntry::LEN, or recipient-tail length mismatches"
-    )]
-    InvalidPreimageLength = 0x14,
     /// 21 - Recipient token account is not the expected ATA
     #[error("Recipient token account is not the expected ATA")]
     InvalidRecipientAccount = 0x15,
