@@ -197,15 +197,15 @@ pub fn process(
         )?;
         bps_sum = bps_sum
             .checked_add(entry.bps() as u32)
-            .ok_or_else(overflow)?;
+            .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
     }
-    let payer_bps = BPS_DENOMINATOR.checked_sub(bps_sum).ok_or_else(overflow)?;
+    let payer_bps = BPS_DENOMINATOR.checked_sub(bps_sum).ok_or(PaymentChannelsError::ArithmeticOverflow)?;
 
     // Pool = settled − paid_out.
     let pool = ch
         .settled()
         .checked_sub(ch.paid_out())
-        .ok_or_else(overflow)?;
+        .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
     if pool == 0 && status == ChannelStatus::Open {
         return Err(PaymentChannelsError::NothingToDistribute.into());
     }
@@ -227,7 +227,7 @@ pub fn process(
     // Update paid_out while `ch` is still borrowed; doing it here leaves the
     // FINALIZED leg to run purely on the cloned snapshots without re-borrows.
     if pool > 0 {
-        let new_paid_out = ch.paid_out().checked_add(pool).ok_or_else(overflow)?;
+        let new_paid_out = ch.paid_out().checked_add(pool).ok_or(PaymentChannelsError::ArithmeticOverflow)?;
         ch.set_paid_out(new_paid_out);
     }
 
@@ -261,7 +261,7 @@ pub fn process(
                     token_program: &tp,
                 }
                 .invoke_signed(core::slice::from_ref(&signer))?;
-                sum_paid = sum_paid.checked_add(amount_i).ok_or_else(overflow)?;
+                sum_paid = sum_paid.checked_add(amount_i).ok_or(PaymentChannelsError::ArithmeticOverflow)?;
             }
         }
 
@@ -279,8 +279,8 @@ pub fn process(
             .invoke_signed(core::slice::from_ref(&signer))?;
         }
 
-        let transferred = sum_paid.checked_add(payer_share).ok_or_else(overflow)?;
-        let residual = pool.checked_sub(transferred).ok_or_else(overflow)?;
+        let transferred = sum_paid.checked_add(payer_share).ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+        let residual = pool.checked_sub(transferred).ok_or(PaymentChannelsError::ArithmeticOverflow)?;
         if residual > 0 {
             TransferChecked {
                 from: accs.channel_token_account,
@@ -331,7 +331,7 @@ pub fn process(
             .payer
             .lamports()
             .checked_add(rent)
-            .ok_or_else(overflow)?;
+            .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
         accs.payer.set_lamports(new_payer_bal);
         accs.channel.set_lamports(0);
         accs.channel.close()?;
@@ -345,13 +345,7 @@ pub fn process(
 fn share(pool: u64, bps: u32) -> Result<u64, ProgramError> {
     let prod = (pool as u128)
         .checked_mul(bps as u128)
-        .ok_or_else(overflow)?;
+        .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
     let q = prod / (BPS_DENOMINATOR as u128);
     Ok(q as u64)
-}
-
-/// Shaped to fit `Option::ok_or_else` / `checked_*` call sites in this module.
-#[inline]
-fn overflow() -> ProgramError {
-    PaymentChannelsError::ArithmeticOverflow.into()
 }
