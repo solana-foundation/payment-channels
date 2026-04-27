@@ -4,7 +4,6 @@ use core::mem::size_of;
 use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer, error::ProgramError};
 use pinocchio_associated_token_account::instructions::Create as CreateAta;
 use pinocchio_system::instructions::CreateAccount;
-use pinocchio_token::instructions::Transfer as TransferTokens;
 
 use crate::errors::PaymentChannelsError;
 use crate::state::Channel;
@@ -13,7 +12,10 @@ use crate::event_engine::EventSerialize;
 use crate::event_engine::emit_event;
 use crate::events::Opened;
 pub use crate::instructions::helpers::MAX_DISTRIBUTION_RECIPIENTS;
-use crate::instructions::helpers::{DistributionRecipients, channel_signer_seeds};
+use crate::instructions::helpers::{
+    DistributionRecipients, channel_signer_seeds, transfer_checked, validate_mint,
+    validate_token_account, validate_token_program,
+};
 use crate::state::{Transmutable, load};
 
 /// Instruction discriminator byte for `open`.
@@ -192,10 +194,11 @@ pub fn process(
     if accs.channel.address() != &channel_address {
         return Err(PaymentChannelsError::ChannelAddressMismatch.into());
     }
+    let token_program = accs.token_program.address();
     let (expected_ata, _) = Address::find_program_address(
         &[
             channel_address.as_ref(),
-            accs.token_program.address().as_ref(),
+            token_program.as_ref(),
             accs.mint.address().as_ref(),
         ],
         &pinocchio_associated_token_account::ID,
@@ -203,6 +206,15 @@ pub fn process(
     if accs.channel_token_account.address() != &expected_ata {
         return Err(PaymentChannelsError::EscrowAddressMismatch.into());
     }
+    validate_token_program(token_program)?;
+    let decimals = validate_mint(accs.mint, token_program)?;
+    validate_token_account(
+        accs.payer_token_account,
+        accs.mint.address(),
+        accs.payer.address(),
+        token_program,
+        PaymentChannelsError::InvalidPayerTokenAccount,
+    )?;
 
     // Allocate the channel PDA. The runtime verifies the seeds match
     // accs.channel.address(); mismatched account → CPI failure.
@@ -239,13 +251,15 @@ pub fn process(
     .invoke()?;
 
     // Transfer the deposit from payer to escrow.
-    TransferTokens::new(
+    transfer_checked(
+        token_program,
         accs.payer_token_account,
+        accs.mint,
         accs.channel_token_account,
         accs.payer,
         deposit,
-    )
-    .invoke()?;
+        decimals,
+    )?;
 
     Channel::init_at(
         &mut accs.channel.try_borrow_mut()?,

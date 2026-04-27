@@ -148,7 +148,7 @@ num_splits (u8) || [ recipient (32 bytes) || shareBps (u16 LE) ] × num_splits
 
 - Only active entries are hashed (variable length, no zero-padding).
 - `shareBps` is a `u16` in basis points (0..10000). Every active entry MUST have `shareBps > 0`; `open` rejects zero-share entries.
-- `0 < Σ shareBps[0..num_splits] < 10000` is checked at `open`; `distribute` also defensively revalidates every active entry, rejects zero-share entries, and enforces the strict sum bound after the hash match.
+- `0 < Σ shareBps[0..num_splits] < 10000` is checked at `open`; `distribute` verifies only that the submitted preimage matches the immutable hash commitment, then uses the committed bps values for payout math.
 - Recipient `i` receives `floor((settled - paid_out) * shareBps[i] / 10000)`.
 - The payer receives the implicit remainder share `floor((settled - paid_out) * (10000 - Σ shareBps) / 10000)`.
 - Any residual dust from flooring is sent to the treasury ATA.
@@ -184,7 +184,7 @@ Fully close the PDA at end-of-life and add an `init_id: i64` field to `Channel`,
 
 ### Rejected Token-2022 Extensions
 
-`open` MUST read the mint and reject the channel if any of the following Token-2022 extensions is present (or active, where applicable). `distribute` re-checks these invariants until `open` is fully implemented. Each rejected extension would either trap funds, distort the deposit/settled accounting, add CPI account requirements, or undermine the program's custody guarantee:
+`open` MUST read the mint and reject the channel if any of the following Token-2022 extensions is present (or active, where applicable). `distribute` continues to validate runtime token accounts supplied for payout before transfer. Each rejected extension would either trap funds, distort the deposit/settled accounting, add CPI account requirements, or undermine the program's custody guarantee:
 
 | Extension | Reason |
 |---|---|

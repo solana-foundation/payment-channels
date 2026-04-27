@@ -756,7 +756,8 @@ fn bad_preimage_hash() {
         owner: Pubkey::new_unique(),
         bps: 1000,
     }];
-    let mut s = Scenario::build(splits, 200_000, 0, 100_000, 0);
+    let (deposit, settled, paid_out) = pool(200_000, 0, 100_000);
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, 0);
 
     // Tamper the on-chain distribution_hash so the rehash diverges.
     let mut acct = s.svm.get_account(&s.channel).unwrap();
@@ -769,8 +770,10 @@ fn bad_preimage_hash() {
 }
 
 #[test]
-fn bps_sum_equals_10000() {
-    // Two splits summing to exactly 10_000 → strict `<` rejects.
+fn bps_sum_equals_10000_is_not_revalidated_after_hash_match() {
+    // `open` rejects this config, but a fabricated hash-matching channel is
+    // paid according to its committed preimage rather than revalidating split
+    // semantics in `distribute`.
     let splits = vec![
         Split {
             owner: Pubkey::new_unique(),
@@ -781,20 +784,31 @@ fn bps_sum_equals_10000() {
             bps: 5000,
         },
     ];
-    let mut s = Scenario::build(splits, 200_000, 0, 100_000, 0);
-    let res = s.send(s.distribute_ix());
-    expect_custom_err(res, PaymentChannelsError::InvalidSplitConfig);
+    let (deposit, settled, paid_out) = pool(200_000, 0, 100_000);
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, 0);
+
+    s.send(s.distribute_ix()).expect("distribute ok");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 50_000);
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 50_000);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
+    assert_eq!(read_paid_out(&s.svm, &s.channel), 100_000);
 }
 
 #[test]
-fn bps_zero_rejects() {
+fn bps_zero_is_not_revalidated_after_hash_match() {
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 0,
     }];
-    let mut s = Scenario::build(splits, 200_000, 0, 100_000, 0);
-    let res = s.send(s.distribute_ix());
-    expect_custom_err(res, PaymentChannelsError::InvalidSplitConfig);
+    let (deposit, settled, paid_out) = pool(200_000, 0, 100_000);
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, 0);
+
+    s.send(s.distribute_ix()).expect("distribute ok");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), 100_000);
+    assert_eq!(read_paid_out(&s.svm, &s.channel), 100_000);
 }
 
 #[test]

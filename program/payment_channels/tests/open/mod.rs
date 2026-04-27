@@ -18,6 +18,7 @@ use solana_signer::Signer;
 use crate::common::PROGRAM_ID;
 
 pub(super) const SPL_TOKEN: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+pub(super) const TOKEN_2022: Pubkey = pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 pub(super) const ATA_PROGRAM: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 pub(super) const SYSTEM_PROGRAM: Pubkey = pubkey!("11111111111111111111111111111111");
 pub(super) const SYSVAR_RENT: Pubkey = pubkey!("SysvarRent111111111111111111111111111111111");
@@ -125,19 +126,29 @@ pub(super) fn run_open(ix_data: Vec<u8>) -> ProgramResult {
 /// Airdrop, create mint, mint `deposit` tokens to payer's ATA.
 /// Returns `(payer_keypair, mint, payer_token_account)`.
 pub(super) fn setup_funded_svm(svm: &mut LiteSVM, deposit: u64) -> (Keypair, Pubkey, Pubkey) {
+    setup_funded_svm_with_token_program(svm, deposit, &SPL_TOKEN)
+}
+
+/// Airdrop, create mint, mint `deposit` tokens to payer's ATA under
+/// `token_program`. Returns `(payer_keypair, mint, payer_token_account)`.
+pub(super) fn setup_funded_svm_with_token_program(
+    svm: &mut LiteSVM,
+    deposit: u64,
+    token_program: &Pubkey,
+) -> (Keypair, Pubkey, Pubkey) {
     let payer = Keypair::new();
     svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
     let mint = CreateMint::new(svm, &payer)
         .decimals(0)
-        .token_program_id(&SPL_TOKEN)
+        .token_program_id(token_program)
         .send()
         .unwrap();
     let payer_ata = CreateAssociatedTokenAccount::new(svm, &payer, &mint)
-        .token_program_id(&SPL_TOKEN)
+        .token_program_id(token_program)
         .send()
         .unwrap();
     MintTo::new(svm, &payer, &mint, &payer_ata, deposit)
-        .token_program_id(&SPL_TOKEN)
+        .token_program_id(token_program)
         .send()
         .unwrap();
     (payer, mint, payer_ata)
@@ -151,6 +162,18 @@ pub(super) fn derive_pdas(
     authorized_signer: &Pubkey,
     salt: u64,
 ) -> (Pubkey, Pubkey) {
+    derive_pdas_with_token_program(payer, payee, mint, authorized_signer, salt, &SPL_TOKEN)
+}
+
+/// Derive `(channel_pda, channel_ata)` for the given seeds and token program.
+pub(super) fn derive_pdas_with_token_program(
+    payer: &Pubkey,
+    payee: &Pubkey,
+    mint: &Pubkey,
+    authorized_signer: &Pubkey,
+    salt: u64,
+    token_program: &Pubkey,
+) -> (Pubkey, Pubkey) {
     let (channel, _) = Pubkey::find_program_address(
         &[
             b"channel",
@@ -163,7 +186,7 @@ pub(super) fn derive_pdas(
         &PROGRAM_ID,
     );
     let (ata, _) = Pubkey::find_program_address(
-        &[channel.as_ref(), SPL_TOKEN.as_ref(), mint.as_ref()],
+        &[channel.as_ref(), token_program.as_ref(), mint.as_ref()],
         &ATA_PROGRAM,
     );
     (channel, ata)
@@ -184,6 +207,38 @@ pub(super) fn open_ix(
     grace_period: u32,
     num_recipients: u8,
 ) -> Instruction {
+    open_ix_with_token_program(
+        payer,
+        payee,
+        mint,
+        authorized_signer,
+        channel,
+        payer_token_account,
+        channel_token_account,
+        &SPL_TOKEN,
+        salt,
+        deposit,
+        grace_period,
+        num_recipients,
+    )
+}
+
+/// Build the `open` instruction with all 13 accounts wired up.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn open_ix_with_token_program(
+    payer: &Pubkey,
+    payee: &Pubkey,
+    mint: &Pubkey,
+    authorized_signer: &Pubkey,
+    channel: &Pubkey,
+    payer_token_account: &Pubkey,
+    channel_token_account: &Pubkey,
+    token_program: &Pubkey,
+    salt: u64,
+    deposit: u64,
+    grace_period: u32,
+    num_recipients: u8,
+) -> Instruction {
     Instruction::new_with_bytes(
         PROGRAM_ID,
         &open_ix_data(salt, deposit, grace_period, num_recipients),
@@ -195,7 +250,7 @@ pub(super) fn open_ix(
             AccountMeta::new(*channel, false),
             AccountMeta::new(*payer_token_account, false),
             AccountMeta::new(*channel_token_account, false),
-            AccountMeta::new_readonly(SPL_TOKEN, false),
+            AccountMeta::new_readonly(*token_program, false),
             AccountMeta::new_readonly(SYSTEM_PROGRAM, false),
             AccountMeta::new_readonly(SYSVAR_RENT, false),
             AccountMeta::new_readonly(ATA_PROGRAM, false),
