@@ -55,14 +55,6 @@ fn treasury_owner() -> Pubkey {
     Pubkey::new_from_array(b)
 }
 
-fn token_2022_program_id() -> Pubkey {
-    TOKEN_2022
-}
-
-fn spl_token_program_id() -> Pubkey {
-    SPL_TOKEN
-}
-
 fn compute_budget_ix(units: u32) -> Instruction {
     let mut data = Vec::with_capacity(5);
     data.push(0x02);
@@ -189,7 +181,7 @@ impl Scenario {
             settled,
             paid_out,
             status,
-            token_2022_program_id(),
+            TOKEN_2022,
         )
     }
 
@@ -391,7 +383,7 @@ fn happy_path_open_splits_spl_token() {
         settled,
         paid_out,
         STATUS_OPEN,
-        spl_token_program_id(),
+        SPL_TOKEN,
     );
 
     s.send(s.distribute_ix()).expect("spl distribute ok");
@@ -455,7 +447,7 @@ fn happy_path_finalized_tombstone_spl_token() {
         settled,
         paid_out,
         STATUS_FINALIZED,
-        spl_token_program_id(),
+        SPL_TOKEN,
     );
 
     s.send(s.distribute_ix()).expect("spl finalized ok");

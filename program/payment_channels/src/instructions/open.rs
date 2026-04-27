@@ -14,7 +14,8 @@ use crate::event_engine::emit_event;
 use crate::events::Opened;
 pub use crate::instructions::helpers::MAX_DISTRIBUTION_RECIPIENTS;
 use crate::instructions::helpers::{
-    DistributionRecipients, channel_signer_seeds, validate_mint, validate_token_account,
+    DistributionRecipients, channel_signer_seeds, derive_ata, validate_mint,
+    validate_token_account,
 };
 use crate::state::{Transmutable, load};
 
@@ -195,14 +196,7 @@ pub fn process(
         return Err(PaymentChannelsError::ChannelAddressMismatch.into());
     }
     let token_program = accs.token_program.address();
-    let (expected_ata, _) = Address::find_program_address(
-        &[
-            channel_address.as_ref(),
-            token_program.as_ref(),
-            accs.mint.address().as_ref(),
-        ],
-        &pinocchio_associated_token_account::ID,
-    );
+    let expected_ata = derive_ata(&channel_address, accs.mint.address(), token_program);
     if accs.channel_token_account.address() != &expected_ata {
         return Err(PaymentChannelsError::EscrowAddressMismatch.into());
     }

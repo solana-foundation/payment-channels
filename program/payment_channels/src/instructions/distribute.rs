@@ -3,7 +3,7 @@ use codama::CodamaType;
 use core::mem::size_of;
 use pinocchio::{
     AccountView, Address, ProgramResult,
-    cpi::{Seed, Signer},
+    cpi::Signer,
     error::ProgramError,
     sysvars::{Sysvar, clock::Clock},
 };
@@ -12,9 +12,10 @@ use pinocchio_token_2022::instructions::{CloseAccount, TransferChecked};
 use crate::constants::TREASURY_OWNER;
 use crate::errors::PaymentChannelsError;
 use crate::instructions::helpers::{
-    BPS_DENOMINATOR, DistributionRecipients, derive_ata, validate_mint, validate_token_account,
+    BPS_DENOMINATOR, DistributionRecipients, channel_signer_seeds, derive_ata, validate_mint,
+    validate_token_account,
 };
-use crate::state::channel::{CHANNEL_SEED, Channel, ChannelStatus};
+use crate::state::channel::{Channel, ChannelStatus};
 use crate::state::{Transmutable, load};
 
 /// Instruction discriminator byte for `distribute`.
@@ -261,15 +262,14 @@ pub fn process(
     // Release the data borrow so the tombstone path can close() the Channel.
     drop(ch);
 
-    let signer_seeds: [Seed; 7] = [
-        Seed::from(CHANNEL_SEED),
-        Seed::from(&payer_bytes),
-        Seed::from(&payee_bytes),
-        Seed::from(&mint_bytes),
-        Seed::from(&signer_bytes),
-        Seed::from(&salt_le),
-        Seed::from(&bump_arr),
-    ];
+    let signer_seeds = channel_signer_seeds(
+        &payer_bytes,
+        &payee_bytes,
+        &mint_bytes,
+        &signer_bytes,
+        &salt_le,
+        &bump_arr,
+    );
     let signer = Signer::from(&signer_seeds);
 
     // Transfer splits + payee implicit share + treasury residual.
