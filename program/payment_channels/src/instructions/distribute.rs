@@ -47,7 +47,10 @@ unsafe impl Transmutable for DistributeArgs {
 pub struct DistributeAccounts<'a> {
     pub channel: &'a mut AccountView,
     pub payer: &'a mut AccountView,
+    /// Escrow; source for all splits and the payer refund.
     pub channel_token_account: &'a mut AccountView,
+    /// Payer refund destination; populated only from `FINALIZED` with
+    /// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `== 0`.
     pub payer_token_account: &'a mut AccountView,
     pub treasury_token_account: &'a mut AccountView,
     pub mint: &'a mut AccountView,

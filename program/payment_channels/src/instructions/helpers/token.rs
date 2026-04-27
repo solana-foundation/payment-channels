@@ -46,11 +46,14 @@ mod extension_id {
     pub(super) const TOKEN_GROUP_MEMBER: u16 = 23;
 }
 
+/// Convenience constructor for the program's `ArithmeticOverflow` error,
+/// shaped to fit `Option::ok_or_else` / `checked_*` call sites.
 #[inline]
 pub fn overflow() -> ProgramError {
     PaymentChannelsError::ArithmeticOverflow.into()
 }
 
+/// Rejects any program id that is not SPL Token or Token-2022.
 #[inline]
 pub fn validate_token_program(token_program: &Address) -> ProgramResult {
     if *token_program != SPL_TOKEN_PROGRAM_ID && *token_program != TOKEN_2022_PROGRAM_ID {
@@ -59,6 +62,8 @@ pub fn validate_token_program(token_program: &Address) -> ProgramResult {
     Ok(())
 }
 
+/// Derives the associated-token-account address for `(owner, mint, token_program)`
+/// under the ATA program.
 #[inline]
 pub fn derive_ata(owner: &Address, mint: &Address, token_program: &Address) -> Address {
     Address::find_program_address(
@@ -68,6 +73,13 @@ pub fn derive_ata(owner: &Address, mint: &Address, token_program: &Address) -> A
     .0
 }
 
+/// Validates a mint account against `token_program` and returns its decimals.
+///
+/// SPL classic mints must be exactly `MINT_LEN`. Token-2022 mints are accepted
+/// only when their TLV trailer carries extensions whitelisted as
+/// transfer-amount-neutral (metadata/group pointers and payloads); anything
+/// else — most importantly transfer fees, hooks, or confidential transfers —
+/// is rejected so amount accounting cannot diverge from the literal `amount`.
 pub fn validate_mint(mint: &AccountView, token_program: &Address) -> Result<u8, ProgramError> {
     if !mint.owned_by(token_program) {
         return Err(PaymentChannelsError::MintAccountMismatch.into());
@@ -95,6 +107,11 @@ pub fn validate_mint(mint: &AccountView, token_program: &Address) -> Result<u8, 
     Ok(decimals)
 }
 
+/// Validates that `account` is a token account owned by `token_program`, holds
+/// `expected_mint`, is owned by `expected_owner`, and is in the `Initialized`
+/// state. Token-2022 accounts may carry only the `ImmutableOwner` extension.
+/// Any failure surfaces as `account_error` so callers can attribute the fault
+/// to the specific role (source vault, recipient ATA, etc.).
 pub fn validate_token_account(
     account: &AccountView,
     expected_mint: &Address,
@@ -133,6 +150,9 @@ pub fn validate_token_account(
     scan_tlv_extensions(&data[tlv::START..], false)
 }
 
+/// Verifies the Token-2022 padding region between the base layout and the TLV
+/// trailer is zero and that the account-type discriminator byte matches the
+/// expected kind (mint vs token account).
 fn validate_token_2022_header(
     data: &[u8],
     base_len: usize,
@@ -147,6 +167,9 @@ fn validate_token_2022_header(
     Ok(())
 }
 
+/// Walks the Token-2022 TLV trailer and rejects any extension type not
+/// whitelisted for the given account kind. Stops at the first uninitialized
+/// or all-zero region, which marks unused TLV space.
 fn scan_tlv_extensions(mut data: &[u8], is_mint: bool) -> ProgramResult {
     while !data.is_empty() {
         if all_zero(data) {
@@ -178,6 +201,9 @@ fn scan_tlv_extensions(mut data: &[u8], is_mint: bool) -> ProgramResult {
     Ok(())
 }
 
+/// Whitelist of Token-2022 extension type ids that are safe for this program:
+/// metadata/group extensions on mints (no effect on transfer amount) and
+/// `ImmutableOwner` on token accounts.
 fn extension_allowed(extension_type: u16, is_mint: bool) -> bool {
     if is_mint {
         matches!(
@@ -194,10 +220,13 @@ fn extension_allowed(extension_type: u16, is_mint: bool) -> bool {
     }
 }
 
+/// True iff every byte in `bytes` is zero.
 fn all_zero(bytes: &[u8]) -> bool {
     bytes.iter().all(|b| *b == 0)
 }
 
+/// Invokes `TransferChecked` on SPL Token or Token-2022 with a user-controlled
+/// `authority`.
 #[allow(clippy::too_many_arguments)]
 #[inline]
 pub fn transfer_checked(
@@ -221,6 +250,8 @@ pub fn transfer_checked(
     .invoke()
 }
 
+/// `TransferChecked` invoked under PDA `signer` — used when the program's
+/// channel PDA is the source authority.
 #[allow(clippy::too_many_arguments)]
 #[inline]
 pub fn transfer_checked_signed(
@@ -245,6 +276,8 @@ pub fn transfer_checked_signed(
     .invoke_signed(core::slice::from_ref(signer))
 }
 
+/// Invokes `CloseAccount` under PDA `signer`, sweeping rent lamports from
+/// `account` to `destination` and zeroing the token account.
 #[inline]
 pub fn close_token_account(
     token_program: &Address,
