@@ -38,38 +38,44 @@ pub enum PaymentChannelsError {
     VoucherMessageMismatch = 11,
     #[error("Voucher signer does not match channel authorized_signer")]
     VoucherSignerMismatch = 12,
-    #[error("Distribute preimage does not rehash to Channel.distribution_hash")]
+    #[error("Distribution hash mismatch")]
     InvalidDistributionHash = 13,
+    #[error("Deposit must be non-zero")]
+    DepositMustBeNonZero = 14,
     #[error("num_recipients outside [1, MAX_DISTRIBUTION_RECIPIENTS]")]
-    InvalidRecipientCount = 14,
+    InvalidRecipientCount = 15,
+    #[error("Channel account does not match derived PDA")]
+    ChannelAddressMismatch = 16,
+    #[error("Escrow account does not match derived ATA")]
+    EscrowAddressMismatch = 17,
+    #[error("Payer and payee must be different accounts")]
+    PayerPayeeMustDiffer = 18,
     #[error("Each shareBps must be non-zero and Σbps must be strictly less than 10_000")]
-    InvalidSplitConfig = 15,
+    InvalidSplitConfig = 19,
     #[error(
         "preimage_len does not match 1 + num_recipients * DistributionEntry::LEN, or recipient-tail length mismatches"
     )]
-    InvalidPreimageLength = 16,
+    InvalidPreimageLength = 20,
     #[error("Recipient token account is not the expected ATA")]
-    InvalidRecipientAccount = 17,
+    InvalidRecipientAccount = 21,
     #[error("Mint account does not match channel.mint")]
-    MintAccountMismatch = 18,
-    #[error("Channel PDA does not match derive(payer, payee, mint, authorized_signer, salt)")]
-    ChannelAddressMismatch = 19,
+    MintAccountMismatch = 22,
     #[error("Payer account does not match channel.payer")]
-    PayerAccountMismatch = 20,
+    PayerAccountMismatch = 23,
     #[error("Token program must be SPL Token or Token-2022")]
-    InvalidTokenProgram = 21,
+    InvalidTokenProgram = 24,
     #[error("Treasury token account is not ATA(TREASURY_OWNER, mint, token_program)")]
-    TreasuryAddressMismatch = 22,
+    TreasuryAddressMismatch = 25,
     #[error("Arithmetic overflow")]
-    ArithmeticOverflow = 23,
+    ArithmeticOverflow = 26,
     #[error("Channel is not in OPEN or FINALIZED")]
-    ChannelNotClosable = 24,
+    ChannelNotClosable = 27,
     #[error("Channel token account is not ATA(channel, mint, token_program)")]
-    InvalidChannelTokenAccount = 25,
+    InvalidChannelTokenAccount = 28,
     #[error("Payer token account is not ATA(payer, mint, token_program)")]
-    InvalidPayerTokenAccount = 26,
+    InvalidPayerTokenAccount = 29,
     #[error("Token-2022 mint or token account uses unsupported extensions for exact distribution")]
-    UnsupportedTokenExtensions = 27,
+    UnsupportedTokenExtensions = 30,
     #[error("No newly settled funds to distribute")]
-    NothingToDistribute = 28,
+    NothingToDistribute = 31,
 }

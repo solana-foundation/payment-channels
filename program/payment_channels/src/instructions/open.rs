@@ -1,59 +1,38 @@
 #[cfg(feature = "idl")]
 use codama::CodamaType;
 use core::mem::size_of;
-use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
+use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer, error::ProgramError};
+use pinocchio_associated_token_account::instructions::Create as CreateAta;
+use pinocchio_system::instructions::CreateAccount;
+use pinocchio_token::instructions::Transfer as TransferTokens;
+
+use crate::errors::PaymentChannelsError;
+use crate::state::Channel;
 
 use crate::event_engine::EventSerialize;
 use crate::event_engine::emit_event;
 use crate::events::Opened;
+pub use crate::instructions::helpers::MAX_DISTRIBUTION_RECIPIENTS;
+use crate::instructions::helpers::{DistributionRecipients, channel_signer_seeds};
 use crate::state::{Transmutable, load};
 
 /// Instruction discriminator byte for `open`.
 pub const DISCRIMINATOR: u8 = 1;
 
-/// Ceiling on recipients committed at `open` / paid at `distribute`. Sized to
-/// fit a legacy single-tx envelope end-to-end (see repo plan — scaling past
-/// this requires client-side ALTs or an alternative commitment scheme).
-pub const MAX_DISTRIBUTION_RECIPIENTS: usize = 32;
-
-/// One entry in the distribution plan committed at `open`. `recipient` owns
-/// the ATA that receives the bps share at `distribute` time.
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-#[cfg_attr(feature = "idl", derive(CodamaType))]
-pub struct DistributionEntry {
-    /// Token-account owner; the ATA is re-derived on-chain as
-    /// `ATA(recipient, mint, token_program)`.
-    pub recipient: Address,
-    /// Basis points of the distribute-time pool paid to this recipient.
-    /// `Σbps < 10_000` so the payer always retains an implicit share.
-    #[cfg_attr(feature = "idl", codama(type = number(u16)))]
-    pub bps: [u8; 2],
-}
-
-impl DistributionEntry {
-    #[inline(always)]
-    pub fn bps(&self) -> u16 {
-        u16::from_le_bytes(self.bps)
-    }
-}
-
-unsafe impl Transmutable for DistributionEntry {
-    const LEN: usize = size_of::<Self>();
-}
-
-const _: () = assert!(size_of::<DistributionEntry>() == 34);
-
-/// Init payload. `deposit`, `grace_period`, and `distribution_hash` are
-/// stored on the [`Channel`](crate::Channel) PDA; `salt` is a seed input
-/// (address-only, not persisted).
+/// Init payload. The distribution plan is hashed on-chain with `blake3` and
+/// the digest stored in
+/// [`Channel::distribution_hash`](crate::Channel::distribution_hash).
+/// [`distribute`](crate::instructions::distribute) later verifies a matching
+/// preimage before paying out splits.
+///
+/// Wire layout: `salt(8) | deposit(8) | grace_period(4) | count(1) | entries(32×34)`.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct OpenArgs {
-    /// PDA disambiguator; seed-only, not stored. Enables concurrent
-    /// channels for the same `(payer, payee, mint, authorized_signer)`
-    /// tuple.
+    /// PDA disambiguator; stored in [`Channel::salt`](crate::Channel::salt).
+    /// Enables concurrent channels for the same
+    /// `(payer, payee, mint, authorized_signer)` tuple.
     #[cfg_attr(feature = "idl", codama(type = number(u64)))]
     salt: [u8; 8],
     /// Initial escrow; the immutable ceiling on
@@ -65,21 +44,20 @@ pub struct OpenArgs {
     /// unlock for permissionless `finalize`.
     #[cfg_attr(feature = "idl", codama(type = number(u32)))]
     grace_period: [u8; 4],
-    /// Blake3 commitment to the `distribute` splits preimage.
-    pub distribution_hash: [u8; 32],
+    pub recipients: DistributionRecipients,
 }
 
 impl OpenArgs {
-    pub const LEN: usize = size_of::<Self>();
-
     #[inline(always)]
     pub fn salt(&self) -> u64 {
         u64::from_le_bytes(self.salt)
     }
+
     #[inline(always)]
     pub fn deposit(&self) -> u64 {
         u64::from_le_bytes(self.deposit)
     }
+
     #[inline(always)]
     pub fn grace_period(&self) -> u32 {
         u32::from_le_bytes(self.grace_period)
@@ -107,24 +85,31 @@ pub struct OpenAccounts<'a> {
     /// [`Channel::authorized_signer`](crate::Channel::authorized_signer)
     /// (voucher author).
     pub authorized_signer: &'a AccountView,
-    /// Uninitialized; the ix allocates the [`Channel`](crate::Channel) PDA here.
-    pub channel: &'a AccountView,
-    pub payer_token_account: &'a AccountView,
-    /// Escrow ATA owned by the channel PDA.
-    pub channel_token_account: &'a AccountView,
+    /// Channel PDA. Must equal `Channel::find_pda(payer, payee, mint,
+    /// authorized_signer, salt)` — derive client-side and pass as writable.
+    /// Verified on-chain against the derived address before allocation.
+    pub channel: &'a mut AccountView,
+    pub payer_token_account: &'a mut AccountView,
+    /// Escrow ATA owned by the channel PDA. Must equal the associated token
+    /// address for `(channel, token_program, mint)` — derive client-side
+    /// and pass as writable. Verified on-chain before the ATA is created.
+    pub channel_token_account: &'a mut AccountView,
     pub token_program: &'a AccountView,
     pub system_program: &'a AccountView,
     pub rent: &'a AccountView,
+    /// Associated Token Account program; required by the runtime for the
+    /// `CreateAta` CPI.
+    pub associated_token_program: &'a AccountView,
     /// Signer PDA for the self-CPI that emits [`crate::events::Opened`].
     pub event_authority: &'a AccountView,
     /// This program's ID; CPI target for the event emission.
     pub self_program: &'a AccountView,
 }
 
-impl<'a> TryFrom<&'a [AccountView]> for OpenAccounts<'a> {
+impl<'a> TryFrom<&'a mut [AccountView]> for OpenAccounts<'a> {
     type Error = ProgramError;
 
-    fn try_from(accounts: &'a [AccountView]) -> Result<Self, Self::Error> {
+    fn try_from(accounts: &'a mut [AccountView]) -> Result<Self, Self::Error> {
         let [
             payer,
             payee,
@@ -136,6 +121,7 @@ impl<'a> TryFrom<&'a [AccountView]> for OpenAccounts<'a> {
             token_program,
             system_program,
             rent,
+            associated_token_program,
             event_authority,
             self_program,
         ] = accounts
@@ -153,6 +139,7 @@ impl<'a> TryFrom<&'a [AccountView]> for OpenAccounts<'a> {
             token_program,
             system_program,
             rent,
+            associated_token_program,
             event_authority,
             self_program,
         })
@@ -161,8 +148,110 @@ impl<'a> TryFrom<&'a [AccountView]> for OpenAccounts<'a> {
 
 /// Payer-signed; creates the [`Channel`](crate::Channel) PDA, locks the
 /// deposit, and commits the distribution hash.
-pub fn process(program_id: &Address, accounts: &[AccountView], _args: &OpenArgs) -> ProgramResult {
+pub fn process(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    args: &OpenArgs,
+) -> ProgramResult {
     let accs = OpenAccounts::try_from(accounts)?;
+
+    if !accs.payer.is_signer() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+
+    if accs.payer.address() == accs.payee.address() {
+        return Err(PaymentChannelsError::PayerPayeeMustDiffer.into());
+    }
+
+    args.recipients.validate()?;
+
+    let deposit = args.deposit();
+    if deposit == 0 {
+        return Err(PaymentChannelsError::DepositMustBeNonZero.into());
+    }
+
+    let distribution_hash = args.recipients.preimage_hash();
+
+    let (channel_address, bump) = Channel::find_pda(
+        accs.payer.address(),
+        accs.payee.address(),
+        accs.mint.address(),
+        accs.authorized_signer.address(),
+        args.salt(),
+    );
+
+    // Client-side derives these addresses; validate explicitly as defense in
+    // depth before any mutation (CPI enforcement provides a second layer).
+    if accs.channel.address() != &channel_address {
+        return Err(PaymentChannelsError::ChannelAddressMismatch.into());
+    }
+    let (expected_ata, _) = Address::find_program_address(
+        &[
+            channel_address.as_ref(),
+            accs.token_program.address().as_ref(),
+            accs.mint.address().as_ref(),
+        ],
+        &pinocchio_associated_token_account::ID,
+    );
+    if accs.channel_token_account.address() != &expected_ata {
+        return Err(PaymentChannelsError::EscrowAddressMismatch.into());
+    }
+
+    // Allocate the channel PDA. The runtime verifies the seeds match
+    // accs.channel.address(); mismatched account → CPI failure.
+    let salt_bytes = args.salt().to_le_bytes();
+    let bump_byte = [bump];
+    let seeds = channel_signer_seeds(
+        accs.payer.address().as_ref(),
+        accs.payee.address().as_ref(),
+        accs.mint.address().as_ref(),
+        accs.authorized_signer.address().as_ref(),
+        &salt_bytes,
+        &bump_byte,
+    );
+    let channel_signer = Signer::from(&seeds);
+
+    CreateAccount::with_minimum_balance(
+        accs.payer,
+        accs.channel,
+        Channel::LEN as u64,
+        &crate::ID,
+        Some(accs.rent),
+    )?
+    .invoke_signed(&[channel_signer])?;
+
+    // Create the escrow ATA owned by the channel PDA.
+    CreateAta {
+        funding_account: accs.payer,
+        account: accs.channel_token_account,
+        wallet: accs.channel,
+        mint: accs.mint,
+        system_program: accs.system_program,
+        token_program: accs.token_program,
+    }
+    .invoke()?;
+
+    // Transfer the deposit from payer to escrow.
+    TransferTokens::new(
+        accs.payer_token_account,
+        accs.channel_token_account,
+        accs.payer,
+        deposit,
+    )
+    .invoke()?;
+
+    Channel::init_at(
+        &mut accs.channel.try_borrow_mut()?,
+        bump,
+        args.salt(),
+        deposit,
+        args.grace_period(),
+        distribution_hash,
+        *accs.payer.address(),
+        *accs.payee.address(),
+        *accs.authorized_signer.address(),
+        *accs.mint.address(),
+    )?;
 
     let event = Opened {
         channel: *accs.channel.address(),

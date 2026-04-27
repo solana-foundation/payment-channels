@@ -53,7 +53,7 @@ impl TryFrom<u8> for ChannelStatus {
 
 /// Active channel PDA: escrowed deposit, settled watermark, closure
 /// timestamps, distribution commitment, and participant bindings. Fixed
-/// 208-byte layout for zero-copy load.
+/// 216-byte layout for zero-copy load.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaAccount))]
@@ -70,6 +70,11 @@ pub struct Channel {
     pub bump: u8,
     /// [`ChannelStatus`] discriminant.
     pub status: u8,
+    /// PDA disambiguator set at `open`. Stored so downstream instructions
+    /// (`distribute`, `withdraw_payer`) can reconstruct the full PDA seeds
+    /// and sign as the channel PDA without off-chain data.
+    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    salt: [u8; 8],
     /// Initial escrow; immutable ceiling on [`Self::settled`]. Grows only
     /// via `topUp` while [`Self::status`] == [`ChannelStatus::Open`] and
     /// [`Self::closure_started_at`] == 0.
@@ -119,6 +124,11 @@ pub struct Channel {
 
 impl Channel {
     pub const LEN: usize = size_of::<Self>();
+
+    #[inline(always)]
+    pub fn salt(&self) -> u64 {
+        u64::from_le_bytes(self.salt)
+    }
 
     #[inline(always)]
     pub fn deposit(&self) -> u64 {
@@ -214,6 +224,44 @@ impl Channel {
         RefMut::try_map(data, Self::load_mut).map_err(|(_, e)| e)
     }
 
+    /// Write all fields into a freshly-allocated account buffer.
+    ///
+    /// Called by `open` after the system-program CPI that allocates the PDA.
+    /// Fails if `bytes` is not exactly [`Self::LEN`] bytes.
+    #[allow(clippy::too_many_arguments)]
+    pub fn init_at(
+        bytes: &mut [u8],
+        bump: u8,
+        salt: u64,
+        deposit: u64,
+        grace_period: u32,
+        distribution_hash: [u8; 32],
+        payer: Address,
+        payee: Address,
+        authorized_signer: Address,
+        mint: Address,
+    ) -> Result<(), ProgramError> {
+        // SAFETY: `Channel` is `repr(C)` with alignment 1; load_mut checks length.
+        let ch = unsafe { load_mut::<Self>(bytes) }?;
+        ch.discriminator = AccountDiscriminator::Channel as u8;
+        ch.version = CURRENT_CHANNEL_VERSION;
+        ch.bump = bump;
+        ch.status = ChannelStatus::Open as u8;
+        ch.salt = salt.to_le_bytes();
+        ch.deposit = deposit.to_le_bytes();
+        ch.settled = 0u64.to_le_bytes();
+        ch.paid_out = 0u64.to_le_bytes();
+        ch.closure_started_at = 0i64.to_le_bytes();
+        ch.payer_withdrawn_at = 0i64.to_le_bytes();
+        ch.grace_period = grace_period.to_le_bytes();
+        ch.distribution_hash = distribution_hash;
+        ch.payer = payer;
+        ch.payee = payee;
+        ch.authorized_signer = authorized_signer;
+        ch.mint = mint;
+        Ok(())
+    }
+
     fn load(bytes: &[u8]) -> Result<&Self, ProgramError> {
         let channel = unsafe { load::<Self>(bytes) }?;
         Self::validate_header(channel)?;
@@ -241,6 +289,10 @@ unsafe impl Transmutable for Channel {
     const LEN: usize = size_of::<Self>();
 }
 
+const _: () = {
+    assert!(Channel::LEN == 216);
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,8 +305,8 @@ mod tests {
     }
 
     #[test]
-    fn size_is_208_bytes() {
-        assert_eq!(core::mem::size_of::<Channel>(), 208);
+    fn size_is_216_bytes() {
+        assert_eq!(core::mem::size_of::<Channel>(), 216);
     }
 
     #[test]

@@ -49,56 +49,65 @@ pub enum PaymentChannelsError {
     /// 12 - Voucher signer does not match channel authorized_signer
     #[error("Voucher signer does not match channel authorized_signer")]
     VoucherSignerMismatch = 0xC,
-    /// 13 - Distribute preimage does not rehash to Channel.distribution_hash
-    #[error("Distribute preimage does not rehash to Channel.distribution_hash")]
+    /// 13 - Distribution hash mismatch
+    #[error("Distribution hash mismatch")]
     InvalidDistributionHash = 0xD,
-    /// 14 - num_recipients outside [1, MAX_DISTRIBUTION_RECIPIENTS]
+    /// 14 - Deposit must be non-zero
+    #[error("Deposit must be non-zero")]
+    DepositMustBeNonZero = 0xE,
+    /// 15 - num_recipients outside [1, MAX_DISTRIBUTION_RECIPIENTS]
     #[error("num_recipients outside [1, MAX_DISTRIBUTION_RECIPIENTS]")]
-    InvalidRecipientCount = 0xE,
-    /// 15 - Each shareBps must be non-zero and Σbps must be strictly less than 10_000
+    InvalidRecipientCount = 0xF,
+    /// 16 - Channel account does not match derived PDA
+    #[error("Channel account does not match derived PDA")]
+    ChannelAddressMismatch = 0x10,
+    /// 17 - Escrow account does not match derived ATA
+    #[error("Escrow account does not match derived ATA")]
+    EscrowAddressMismatch = 0x11,
+    /// 18 - Payer and payee must be different accounts
+    #[error("Payer and payee must be different accounts")]
+    PayerPayeeMustDiffer = 0x12,
+    /// 19 - Each shareBps must be non-zero and Σbps must be strictly less than 10_000
     #[error("Each shareBps must be non-zero and Σbps must be strictly less than 10_000")]
-    InvalidSplitConfig = 0xF,
-    /// 16 - preimage_len does not match 1 + num_recipients * DistributionEntry::LEN, or recipient-tail length mismatches
+    InvalidSplitConfig = 0x13,
+    /// 20 - preimage_len does not match 1 + num_recipients * DistributionEntry::LEN, or recipient-tail length mismatches
     #[error(
         "preimage_len does not match 1 + num_recipients * DistributionEntry::LEN, or recipient-tail length mismatches"
     )]
-    InvalidPreimageLength = 0x10,
-    /// 17 - Recipient token account is not the expected ATA
+    InvalidPreimageLength = 0x14,
+    /// 21 - Recipient token account is not the expected ATA
     #[error("Recipient token account is not the expected ATA")]
-    InvalidRecipientAccount = 0x11,
-    /// 18 - Mint account does not match channel.mint
+    InvalidRecipientAccount = 0x15,
+    /// 22 - Mint account does not match channel.mint
     #[error("Mint account does not match channel.mint")]
-    MintAccountMismatch = 0x12,
-    /// 19 - Channel PDA does not match derive(payer, payee, mint, authorized_signer, salt)
-    #[error("Channel PDA does not match derive(payer, payee, mint, authorized_signer, salt)")]
-    ChannelAddressMismatch = 0x13,
-    /// 20 - Payer account does not match channel.payer
+    MintAccountMismatch = 0x16,
+    /// 23 - Payer account does not match channel.payer
     #[error("Payer account does not match channel.payer")]
-    PayerAccountMismatch = 0x14,
-    /// 21 - Token program must be SPL Token or Token-2022
+    PayerAccountMismatch = 0x17,
+    /// 24 - Token program must be SPL Token or Token-2022
     #[error("Token program must be SPL Token or Token-2022")]
-    InvalidTokenProgram = 0x15,
-    /// 22 - Treasury token account is not ATA(TREASURY_OWNER, mint, token_program)
+    InvalidTokenProgram = 0x18,
+    /// 25 - Treasury token account is not ATA(TREASURY_OWNER, mint, token_program)
     #[error("Treasury token account is not ATA(TREASURY_OWNER, mint, token_program)")]
-    TreasuryAddressMismatch = 0x16,
-    /// 23 - Arithmetic overflow
+    TreasuryAddressMismatch = 0x19,
+    /// 26 - Arithmetic overflow
     #[error("Arithmetic overflow")]
-    ArithmeticOverflow = 0x17,
-    /// 24 - Channel is not in OPEN or FINALIZED
+    ArithmeticOverflow = 0x1A,
+    /// 27 - Channel is not in OPEN or FINALIZED
     #[error("Channel is not in OPEN or FINALIZED")]
-    ChannelNotClosable = 0x18,
-    /// 25 - Channel token account is not ATA(channel, mint, token_program)
+    ChannelNotClosable = 0x1B,
+    /// 28 - Channel token account is not ATA(channel, mint, token_program)
     #[error("Channel token account is not ATA(channel, mint, token_program)")]
-    InvalidChannelTokenAccount = 0x19,
-    /// 26 - Payer token account is not ATA(payer, mint, token_program)
+    InvalidChannelTokenAccount = 0x1C,
+    /// 29 - Payer token account is not ATA(payer, mint, token_program)
     #[error("Payer token account is not ATA(payer, mint, token_program)")]
-    InvalidPayerTokenAccount = 0x1A,
-    /// 27 - Token-2022 mint or token account uses unsupported extensions for exact distribution
+    InvalidPayerTokenAccount = 0x1D,
+    /// 30 - Token-2022 mint or token account uses unsupported extensions for exact distribution
     #[error("Token-2022 mint or token account uses unsupported extensions for exact distribution")]
-    UnsupportedTokenExtensions = 0x1B,
-    /// 28 - No newly settled funds to distribute
+    UnsupportedTokenExtensions = 0x1E,
+    /// 31 - No newly settled funds to distribute
     #[error("No newly settled funds to distribute")]
-    NothingToDistribute = 0x1C,
+    NothingToDistribute = 0x1F,
 }
 
 impl From<PaymentChannelsError> for solana_program_error::ProgramError {

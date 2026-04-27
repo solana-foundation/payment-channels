@@ -44,6 +44,15 @@
             },
             {
               "kind": "structFieldTypeNode",
+              "name": "salt",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
               "name": "deposit",
               "type": {
                 "endian": "le",
@@ -229,6 +238,39 @@
       },
       {
         "kind": "definedTypeNode",
+        "name": "distributionRecipients",
+        "type": {
+          "fields": [
+            {
+              "kind": "structFieldTypeNode",
+              "name": "count",
+              "type": {
+                "endian": "le",
+                "format": "u8",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "entries",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 32
+                },
+                "item": {
+                  "kind": "definedTypeLinkNode",
+                  "name": "distributionEntry"
+                },
+                "kind": "arrayTypeNode"
+              }
+            }
+          ],
+          "kind": "structTypeNode"
+        }
+      },
+      {
+        "kind": "definedTypeNode",
         "name": "openArgs",
         "type": {
           "fields": [
@@ -261,18 +303,10 @@
             },
             {
               "kind": "structFieldTypeNode",
-              "name": "distributionHash",
+              "name": "recipients",
               "type": {
-                "count": {
-                  "kind": "fixedCountNode",
-                  "value": 32
-                },
-                "item": {
-                  "endian": "le",
-                  "format": "u8",
-                  "kind": "numberTypeNode"
-                },
-                "kind": "arrayTypeNode"
+                "kind": "definedTypeLinkNode",
+                "name": "distributionRecipients"
               }
             }
           ],
@@ -505,95 +539,113 @@
       {
         "code": 13,
         "kind": "errorNode",
-        "message": "Distribute preimage does not rehash to Channel.distribution_hash",
+        "message": "Distribution hash mismatch",
         "name": "invalidDistributionHash"
       },
       {
         "code": 14,
         "kind": "errorNode",
+        "message": "Deposit must be non-zero",
+        "name": "depositMustBeNonZero"
+      },
+      {
+        "code": 15,
+        "kind": "errorNode",
         "message": "num_recipients outside [1, MAX_DISTRIBUTION_RECIPIENTS]",
         "name": "invalidRecipientCount"
       },
       {
-        "code": 15,
+        "code": 16,
+        "kind": "errorNode",
+        "message": "Channel account does not match derived PDA",
+        "name": "channelAddressMismatch"
+      },
+      {
+        "code": 17,
+        "kind": "errorNode",
+        "message": "Escrow account does not match derived ATA",
+        "name": "escrowAddressMismatch"
+      },
+      {
+        "code": 18,
+        "kind": "errorNode",
+        "message": "Payer and payee must be different accounts",
+        "name": "payerPayeeMustDiffer"
+      },
+      {
+        "code": 19,
         "kind": "errorNode",
         "message": "Each shareBps must be non-zero and Σbps must be strictly less than 10_000",
         "name": "invalidSplitConfig"
       },
       {
-        "code": 16,
+        "code": 20,
         "kind": "errorNode",
         "message": "preimage_len does not match 1 + num_recipients * DistributionEntry::LEN, or recipient-tail length mismatches",
         "name": "invalidPreimageLength"
       },
       {
-        "code": 17,
+        "code": 21,
         "kind": "errorNode",
         "message": "Recipient token account is not the expected ATA",
         "name": "invalidRecipientAccount"
       },
       {
-        "code": 18,
+        "code": 22,
         "kind": "errorNode",
         "message": "Mint account does not match channel.mint",
         "name": "mintAccountMismatch"
       },
       {
-        "code": 19,
-        "kind": "errorNode",
-        "message": "Channel PDA does not match derive(payer, payee, mint, authorized_signer, salt)",
-        "name": "channelAddressMismatch"
-      },
-      {
-        "code": 20,
+        "code": 23,
         "kind": "errorNode",
         "message": "Payer account does not match channel.payer",
         "name": "payerAccountMismatch"
       },
       {
-        "code": 21,
+        "code": 24,
         "kind": "errorNode",
         "message": "Token program must be SPL Token or Token-2022",
         "name": "invalidTokenProgram"
       },
       {
-        "code": 22,
+        "code": 25,
         "kind": "errorNode",
         "message": "Treasury token account is not ATA(TREASURY_OWNER, mint, token_program)",
         "name": "treasuryAddressMismatch"
       },
       {
-        "code": 23,
+        "code": 26,
         "kind": "errorNode",
         "message": "Arithmetic overflow",
         "name": "arithmeticOverflow"
       },
       {
-        "code": 24,
+        "code": 27,
         "kind": "errorNode",
         "message": "Channel is not in OPEN or FINALIZED",
         "name": "channelNotClosable"
       },
       {
-        "code": 25,
+        "code": 28,
         "kind": "errorNode",
         "message": "Channel token account is not ATA(channel, mint, token_program)",
         "name": "invalidChannelTokenAccount"
       },
       {
-        "code": 26,
+        "code": 29,
         "kind": "errorNode",
         "message": "Payer token account is not ATA(payer, mint, token_program)",
         "name": "invalidPayerTokenAccount"
       },
       {
-        "code": 27,
+        "code": 30,
         "kind": "errorNode",
         "message": "Token-2022 mint or token account uses unsupported extensions for exact distribution",
         "name": "unsupportedTokenExtensions"
       },
       {
-        "code": 28,
+        "code": 31,
         "kind": "errorNode",
         "message": "No newly settled funds to distribute",
         "name": "nothingToDistribute"
@@ -666,6 +718,12 @@
             "isWritable": false,
             "kind": "instructionAccountNode",
             "name": "rent"
+          },
+          {
+            "isSigner": false,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "associatedTokenProgram"
           },
           {
             "isSigner": false,

@@ -144,6 +144,7 @@ fn seed_channel(
     channel: &Pubkey,
     bump: u8,
     status: u8,
+    salt: u64,
     deposit: u64,
     settled: u64,
     paid_out: u64,
@@ -154,22 +155,23 @@ fn seed_channel(
     authorized_signer: &Pubkey,
     mint: &Pubkey,
 ) {
-    let mut data = vec![0u8; 208];
+    let mut data = vec![0u8; 216];
     data[0] = 1; // AccountDiscriminator::Channel
     data[1] = 1; // CURRENT_CHANNEL_VERSION
     data[2] = bump;
     data[3] = status;
-    data[4..12].copy_from_slice(&deposit.to_le_bytes());
-    data[12..20].copy_from_slice(&settled.to_le_bytes());
-    data[20..28].copy_from_slice(&paid_out.to_le_bytes());
-    // 28..36 closure_started_at = 0
-    data[36..44].copy_from_slice(&payer_withdrawn_at.to_le_bytes());
-    // 44..48 grace_period = 0
-    data[48..80].copy_from_slice(&distribution_hash);
-    data[80..112].copy_from_slice(payer.as_ref());
-    data[112..144].copy_from_slice(payee.as_ref());
-    data[144..176].copy_from_slice(authorized_signer.as_ref());
-    data[176..208].copy_from_slice(mint.as_ref());
+    data[4..12].copy_from_slice(&salt.to_le_bytes());
+    data[12..20].copy_from_slice(&deposit.to_le_bytes());
+    data[20..28].copy_from_slice(&settled.to_le_bytes());
+    data[28..36].copy_from_slice(&paid_out.to_le_bytes());
+    // 36..44 closure_started_at = 0
+    data[44..52].copy_from_slice(&payer_withdrawn_at.to_le_bytes());
+    // 52..56 grace_period = 0
+    data[56..88].copy_from_slice(&distribution_hash);
+    data[88..120].copy_from_slice(payer.as_ref());
+    data[120..152].copy_from_slice(payee.as_ref());
+    data[152..184].copy_from_slice(authorized_signer.as_ref());
+    data[184..216].copy_from_slice(mint.as_ref());
 
     svm.set_account(
         *channel,
@@ -194,11 +196,11 @@ fn token_balance(svm: &LiteSVM, token_account: &Pubkey) -> u64 {
     u64::from_le_bytes(buf)
 }
 
-/// Read `paid_out` from the channel account (bytes 20..28).
+/// Read `paid_out` from the channel account (bytes 28..36).
 fn read_paid_out(svm: &LiteSVM, channel: &Pubkey) -> u64 {
     let acct = svm.get_account(channel).expect("channel exists");
     let mut buf = [0u8; 8];
-    buf.copy_from_slice(&acct.data[20..28]);
+    buf.copy_from_slice(&acct.data[28..36]);
     u64::from_le_bytes(buf)
 }
 
@@ -410,6 +412,7 @@ impl Scenario {
             &channel,
             bump,
             status,
+            salt,
             deposit,
             settled,
             paid_out,
@@ -710,6 +713,7 @@ fn happy_path_finalized_already_withdrawn() {
         &channel,
         bump,
         1, // Finalized
+        salt,
         deposit,
         settled,
         paid_out,
@@ -762,7 +766,7 @@ fn bad_preimage_hash() {
 
     // Tamper the on-chain distribution_hash so the rehash diverges.
     let mut acct = s.svm.get_account(&s.channel).unwrap();
-    acct.data[48] ^= 0xFF;
+    acct.data[56] ^= 0xFF;
     s.svm
         .set_account(s.channel, acct)
         .expect("overwrite channel");
@@ -912,6 +916,7 @@ fn num_recipients_zero() {
         &channel,
         bump,
         0,
+        salt,
         200_000,
         100_000,
         0,

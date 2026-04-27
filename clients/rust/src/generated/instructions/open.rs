@@ -34,6 +34,8 @@ pub struct Open {
 
     pub rent: solana_address::Address,
 
+    pub associated_token_program: solana_address::Address,
+
     pub event_authority: solana_address::Address,
 
     pub self_program: solana_address::Address,
@@ -50,7 +52,7 @@ impl Open {
         args: OpenInstructionArgs,
         remaining_accounts: &[solana_instruction::AccountMeta],
     ) -> solana_instruction::Instruction {
-        let mut accounts = Vec::with_capacity(12 + remaining_accounts.len());
+        let mut accounts = Vec::with_capacity(13 + remaining_accounts.len());
         accounts.push(solana_instruction::AccountMeta::new(self.payer, true));
         accounts.push(solana_instruction::AccountMeta::new_readonly(
             self.payee, false,
@@ -81,6 +83,10 @@ impl Open {
         ));
         accounts.push(solana_instruction::AccountMeta::new_readonly(
             self.rent, false,
+        ));
+        accounts.push(solana_instruction::AccountMeta::new_readonly(
+            self.associated_token_program,
+            false,
         ));
         accounts.push(solana_instruction::AccountMeta::new_readonly(
             self.event_authority,
@@ -149,8 +155,9 @@ impl OpenInstructionArgs {
 ///   7. `[]` token_program
 ///   8. `[optional]` system_program (default to `11111111111111111111111111111111`)
 ///   9. `[]` rent
-///   10. `[]` event_authority
-///   11. `[]` self_program
+///   10. `[]` associated_token_program
+///   11. `[]` event_authority
+///   12. `[]` self_program
 #[derive(Clone, Debug, Default)]
 pub struct OpenBuilder {
     payer: Option<solana_address::Address>,
@@ -163,6 +170,7 @@ pub struct OpenBuilder {
     token_program: Option<solana_address::Address>,
     system_program: Option<solana_address::Address>,
     rent: Option<solana_address::Address>,
+    associated_token_program: Option<solana_address::Address>,
     event_authority: Option<solana_address::Address>,
     self_program: Option<solana_address::Address>,
     open_args: Option<OpenArgs>,
@@ -231,6 +239,14 @@ impl OpenBuilder {
         self
     }
     #[inline(always)]
+    pub fn associated_token_program(
+        &mut self,
+        associated_token_program: solana_address::Address,
+    ) -> &mut Self {
+        self.associated_token_program = Some(associated_token_program);
+        self
+    }
+    #[inline(always)]
     pub fn event_authority(&mut self, event_authority: solana_address::Address) -> &mut Self {
         self.event_authority = Some(event_authority);
         self
@@ -281,6 +297,9 @@ impl OpenBuilder {
                 .system_program
                 .unwrap_or(solana_address::address!("11111111111111111111111111111111")),
             rent: self.rent.expect("rent is not set"),
+            associated_token_program: self
+                .associated_token_program
+                .expect("associated_token_program is not set"),
             event_authority: self.event_authority.expect("event_authority is not set"),
             self_program: self.self_program.expect("self_program is not set"),
         };
@@ -314,6 +333,8 @@ pub struct OpenCpiAccounts<'a, 'b> {
 
     pub rent: &'b solana_account_info::AccountInfo<'a>,
 
+    pub associated_token_program: &'b solana_account_info::AccountInfo<'a>,
+
     pub event_authority: &'b solana_account_info::AccountInfo<'a>,
 
     pub self_program: &'b solana_account_info::AccountInfo<'a>,
@@ -344,6 +365,8 @@ pub struct OpenCpi<'a, 'b> {
 
     pub rent: &'b solana_account_info::AccountInfo<'a>,
 
+    pub associated_token_program: &'b solana_account_info::AccountInfo<'a>,
+
     pub event_authority: &'b solana_account_info::AccountInfo<'a>,
 
     pub self_program: &'b solana_account_info::AccountInfo<'a>,
@@ -369,6 +392,7 @@ impl<'a, 'b> OpenCpi<'a, 'b> {
             token_program: accounts.token_program,
             system_program: accounts.system_program,
             rent: accounts.rent,
+            associated_token_program: accounts.associated_token_program,
             event_authority: accounts.event_authority,
             self_program: accounts.self_program,
             __args: args,
@@ -397,7 +421,7 @@ impl<'a, 'b> OpenCpi<'a, 'b> {
         signers_seeds: &[&[&[u8]]],
         remaining_accounts: &[(&'b solana_account_info::AccountInfo<'a>, bool, bool)],
     ) -> solana_program_error::ProgramResult {
-        let mut accounts = Vec::with_capacity(12 + remaining_accounts.len());
+        let mut accounts = Vec::with_capacity(13 + remaining_accounts.len());
         accounts.push(solana_instruction::AccountMeta::new(*self.payer.key, true));
         accounts.push(solana_instruction::AccountMeta::new_readonly(
             *self.payee.key,
@@ -436,6 +460,10 @@ impl<'a, 'b> OpenCpi<'a, 'b> {
             false,
         ));
         accounts.push(solana_instruction::AccountMeta::new_readonly(
+            *self.associated_token_program.key,
+            false,
+        ));
+        accounts.push(solana_instruction::AccountMeta::new_readonly(
             *self.event_authority.key,
             false,
         ));
@@ -459,7 +487,7 @@ impl<'a, 'b> OpenCpi<'a, 'b> {
             accounts,
             data,
         };
-        let mut account_infos = Vec::with_capacity(13 + remaining_accounts.len());
+        let mut account_infos = Vec::with_capacity(14 + remaining_accounts.len());
         account_infos.push(self.__program.clone());
         account_infos.push(self.payer.clone());
         account_infos.push(self.payee.clone());
@@ -471,6 +499,7 @@ impl<'a, 'b> OpenCpi<'a, 'b> {
         account_infos.push(self.token_program.clone());
         account_infos.push(self.system_program.clone());
         account_infos.push(self.rent.clone());
+        account_infos.push(self.associated_token_program.clone());
         account_infos.push(self.event_authority.clone());
         account_infos.push(self.self_program.clone());
         remaining_accounts
@@ -499,8 +528,9 @@ impl<'a, 'b> OpenCpi<'a, 'b> {
 ///   7. `[]` token_program
 ///   8. `[]` system_program
 ///   9. `[]` rent
-///   10. `[]` event_authority
-///   11. `[]` self_program
+///   10. `[]` associated_token_program
+///   11. `[]` event_authority
+///   12. `[]` self_program
 #[derive(Clone, Debug)]
 pub struct OpenCpiBuilder<'a, 'b> {
     instruction: Box<OpenCpiBuilderInstruction<'a, 'b>>,
@@ -520,6 +550,7 @@ impl<'a, 'b> OpenCpiBuilder<'a, 'b> {
             token_program: None,
             system_program: None,
             rent: None,
+            associated_token_program: None,
             event_authority: None,
             self_program: None,
             open_args: None,
@@ -590,6 +621,14 @@ impl<'a, 'b> OpenCpiBuilder<'a, 'b> {
     #[inline(always)]
     pub fn rent(&mut self, rent: &'b solana_account_info::AccountInfo<'a>) -> &mut Self {
         self.instruction.rent = Some(rent);
+        self
+    }
+    #[inline(always)]
+    pub fn associated_token_program(
+        &mut self,
+        associated_token_program: &'b solana_account_info::AccountInfo<'a>,
+    ) -> &mut Self {
+        self.instruction.associated_token_program = Some(associated_token_program);
         self
     }
     #[inline(always)]
@@ -692,6 +731,11 @@ impl<'a, 'b> OpenCpiBuilder<'a, 'b> {
 
             rent: self.instruction.rent.expect("rent is not set"),
 
+            associated_token_program: self
+                .instruction
+                .associated_token_program
+                .expect("associated_token_program is not set"),
+
             event_authority: self
                 .instruction
                 .event_authority
@@ -723,6 +767,7 @@ struct OpenCpiBuilderInstruction<'a, 'b> {
     token_program: Option<&'b solana_account_info::AccountInfo<'a>>,
     system_program: Option<&'b solana_account_info::AccountInfo<'a>>,
     rent: Option<&'b solana_account_info::AccountInfo<'a>>,
+    associated_token_program: Option<&'b solana_account_info::AccountInfo<'a>>,
     event_authority: Option<&'b solana_account_info::AccountInfo<'a>>,
     self_program: Option<&'b solana_account_info::AccountInfo<'a>>,
     open_args: Option<OpenArgs>,

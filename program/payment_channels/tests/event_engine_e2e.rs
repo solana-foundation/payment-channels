@@ -14,21 +14,25 @@
 #![allow(deprecated)]
 
 use litesvm::LiteSVM;
+use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 use payment_channels::PaymentChannelsError;
 use payment_channels::event_engine::{EMIT_EVENT_IX_DISC, EVENT_AUTHORITY_SEED, EVENT_IX_TAG_LE};
 use payment_channels::events::Opened;
-use payment_channels_client::instructions::{Open, OpenInstructionArgs};
-use payment_channels_client::types::OpenArgs;
 use solana_instruction::error::InstructionError;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
-use solana_pubkey::Pubkey;
+use solana_pubkey::{Pubkey, pubkey};
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 
 mod common;
 use common::{PROGRAM_ID, expect_custom_err, load_program};
+
+const SPL_TOKEN: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const ATA_PROGRAM: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+const SYSTEM_PROGRAM: Pubkey = pubkey!("11111111111111111111111111111111");
+const SYSVAR_RENT: Pubkey = pubkey!("SysvarRent111111111111111111111111111111111");
 
 fn event_authority() -> (Pubkey, u8) {
     Pubkey::find_program_address(&[EVENT_AUTHORITY_SEED], &PROGRAM_ID)
@@ -38,68 +42,99 @@ fn fund(svm: &mut LiteSVM, pubkey: &Pubkey, lamports: u64) {
     svm.airdrop(pubkey, lamports).unwrap();
 }
 
-fn build_open_ix(payer: &Pubkey, channel: &Pubkey, args: OpenArgs) -> Instruction {
-    let (event_authority_pubkey, _bump) = event_authority();
-    Open {
-        payer: *payer,
-        payee: Pubkey::new_unique(),
-        mint: Pubkey::new_unique(),
-        authorized_signer: Pubkey::new_unique(),
-        channel: *channel,
-        payer_token_account: Pubkey::new_unique(),
-        channel_token_account: Pubkey::new_unique(),
-        token_program: Pubkey::new_unique(),
-        system_program: Pubkey::new_unique(),
-        rent: Pubkey::new_unique(),
-        event_authority: event_authority_pubkey,
-        self_program: PROGRAM_ID,
-    }
-    .instruction(OpenInstructionArgs { open_args: args })
-}
-
-fn send_open(
-    svm: &mut LiteSVM,
-    payer: &Keypair,
-    channel: &Pubkey,
-    args: OpenArgs,
-) -> Result<litesvm::types::TransactionMetadata, litesvm::types::FailedTransactionMetadata> {
-    let ix = build_open_ix(&payer.pubkey(), channel, args);
-    let tx = Transaction::new_signed_with_payer(
-        &[ix],
-        Some(&payer.pubkey()),
-        &[payer],
-        svm.latest_blockhash(),
-    );
-    svm.send_transaction(tx)
-}
-
 #[test]
 fn open_emits_opened_event_with_anchor_compatible_wire_format() {
+    use payment_channels::instructions::open::{DISCRIMINATOR, MAX_DISTRIBUTION_RECIPIENTS};
+
     let mut svm = load_program();
     let payer = Keypair::new();
     fund(&mut svm, &payer.pubkey(), 10_000_000_000);
-    let channel = Pubkey::new_unique();
 
-    let args = OpenArgs {
-        salt: 1,
-        deposit: 100_000_000,
-        grace_period: 3_600,
-        distribution_hash: [0x42; 32],
-    };
-    let meta = send_open(&mut svm, &payer, &channel, args).expect("tx ok");
+    let payee = Pubkey::new_unique();
+    let authorized_signer = Pubkey::new_unique();
+    let salt: u64 = 1;
+    let deposit: u64 = 100_000_000;
+    let grace_period: u32 = 3_600;
+
+    let mint = CreateMint::new(&mut svm, &payer)
+        .decimals(0)
+        .token_program_id(&SPL_TOKEN)
+        .send()
+        .unwrap();
+    let payer_ata = CreateAssociatedTokenAccount::new(&mut svm, &payer, &mint)
+        .token_program_id(&SPL_TOKEN)
+        .send()
+        .unwrap();
+    MintTo::new(&mut svm, &payer, &mint, &payer_ata, deposit)
+        .token_program_id(&SPL_TOKEN)
+        .send()
+        .unwrap();
+
+    let (channel, _) = Pubkey::find_program_address(
+        &[
+            b"channel",
+            payer.pubkey().as_ref(),
+            payee.as_ref(),
+            mint.as_ref(),
+            authorized_signer.as_ref(),
+            &salt.to_le_bytes(),
+        ],
+        &PROGRAM_ID,
+    );
+    let (channel_ata, _) = Pubkey::find_program_address(
+        &[channel.as_ref(), SPL_TOKEN.as_ref(), mint.as_ref()],
+        &ATA_PROGRAM,
+    );
+    let (event_auth, _) = event_authority();
+
+    let mut data = vec![DISCRIMINATOR];
+    data.extend_from_slice(&salt.to_le_bytes());
+    data.extend_from_slice(&deposit.to_le_bytes());
+    data.extend_from_slice(&grace_period.to_le_bytes());
+    data.push(1u8); // num_recipients
+    data.extend_from_slice(&[1u8; 32]); // recipient pubkey
+    data.extend_from_slice(&5000u16.to_le_bytes()); // bps
+    data.extend_from_slice(&[0u8; (MAX_DISTRIBUTION_RECIPIENTS - 1) * 34]);
+
+    let ix = Instruction::new_with_bytes(
+        PROGRAM_ID,
+        &data,
+        vec![
+            AccountMeta::new(payer.pubkey(), true),
+            AccountMeta::new_readonly(payee, false),
+            AccountMeta::new_readonly(mint, false),
+            AccountMeta::new_readonly(authorized_signer, false),
+            AccountMeta::new(channel, false),
+            AccountMeta::new(payer_ata, false),
+            AccountMeta::new(channel_ata, false),
+            AccountMeta::new_readonly(SPL_TOKEN, false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM, false),
+            AccountMeta::new_readonly(SYSVAR_RENT, false),
+            AccountMeta::new_readonly(ATA_PROGRAM, false),
+            AccountMeta::new_readonly(event_auth, false),
+            AccountMeta::new_readonly(PROGRAM_ID, false),
+        ],
+    );
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&payer.pubkey()),
+        &[&payer],
+        svm.latest_blockhash(),
+    );
+    let meta = svm.send_transaction(tx).expect("tx ok");
 
     // Exactly one outer instruction → exactly one inner-ix list.
     assert_eq!(meta.inner_instructions.len(), 1, "expected 1 outer ix");
     let inners = &meta.inner_instructions[0];
-    assert_eq!(
-        inners.len(),
-        1,
-        "expected exactly 1 inner ix (self-CPI emit)"
-    );
 
-    let inner = &inners[0];
-    // `program_id_index` in the compiled tx indexes the outer account list;
-    // the self-CPI into our own program resolves to PROGRAM_ID.
+    // Find the emit_event self-CPI: its data begins with the 8-byte Anchor
+    // event tag, distinguishing it from the other CPIs (CreateAccount,
+    // CreateAta, Transfer) also made by `open`.
+    let inner = inners
+        .iter()
+        .find(|ix| ix.instruction.data.starts_with(&EVENT_IX_TAG_LE))
+        .expect("expected emit_event inner instruction");
+
     // stack_height should be 2 (outer ix = 1, CPI pushes to 2).
     assert_eq!(
         inner.stack_height, 2,

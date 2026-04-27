@@ -15,7 +15,9 @@ use crate::constants::{
     ATA_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TREASURY_OWNER,
 };
 use crate::errors::PaymentChannelsError;
-use crate::instructions::open::{DistributionEntry, MAX_DISTRIBUTION_RECIPIENTS};
+use crate::instructions::helpers::{
+    BPS_DENOMINATOR, DistributionEntry, MAX_DISTRIBUTION_RECIPIENTS,
+};
 use crate::state::channel::{CHANNEL_SEED, Channel, ChannelStatus};
 use crate::state::{Transmutable, load};
 
@@ -44,10 +46,6 @@ const TOKEN_2022_TLV_HEADER_LEN: usize = 4;
 /// Offset of `state: u8` within the base token account layout.
 const TOKEN_ACCOUNT_STATE_OFFSET: usize = 108;
 const TOKEN_ACCOUNT_INITIALIZED: u8 = AccountState::Initialized as u8;
-
-/// Max bps granularity. Σbps must be strictly `<` this so the payer's implicit
-/// share `10_000 − Σbps` is always positive.
-const BPS_DENOMINATOR: u32 = 10_000;
 
 /// Token-2022 extension type ids accepted by this instruction. They are part
 /// of the Token-2022 TLV wire format and intentionally mirrored here to keep
