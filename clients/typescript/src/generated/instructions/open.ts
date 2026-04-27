@@ -62,6 +62,7 @@ export type OpenInstruction<
   TAccountSystemProgram extends string | AccountMeta<string> =
     "11111111111111111111111111111111",
   TAccountRent extends string | AccountMeta<string> = string,
+  TAccountAssociatedTokenProgram extends string | AccountMeta<string> = string,
   TAccountEventAuthority extends string | AccountMeta<string> = string,
   TAccountSelfProgram extends string | AccountMeta<string> =
     "GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc",
@@ -101,6 +102,9 @@ export type OpenInstruction<
       TAccountRent extends string
         ? ReadonlyAccount<TAccountRent>
         : TAccountRent,
+      TAccountAssociatedTokenProgram extends string
+        ? ReadonlyAccount<TAccountAssociatedTokenProgram>
+        : TAccountAssociatedTokenProgram,
       TAccountEventAuthority extends string
         ? ReadonlyAccount<TAccountEventAuthority>
         : TAccountEventAuthority,
@@ -153,6 +157,7 @@ export type OpenAsyncInput<
   TAccountTokenProgram extends string = string,
   TAccountSystemProgram extends string = string,
   TAccountRent extends string = string,
+  TAccountAssociatedTokenProgram extends string = string,
   TAccountEventAuthority extends string = string,
   TAccountSelfProgram extends string = string,
 > = {
@@ -166,6 +171,7 @@ export type OpenAsyncInput<
   tokenProgram: Address<TAccountTokenProgram>;
   systemProgram?: Address<TAccountSystemProgram>;
   rent: Address<TAccountRent>;
+  associatedTokenProgram: Address<TAccountAssociatedTokenProgram>;
   eventAuthority?: Address<TAccountEventAuthority>;
   selfProgram?: Address<TAccountSelfProgram>;
   openArgs: OpenInstructionDataArgs["openArgs"];
@@ -182,6 +188,7 @@ export async function getOpenInstructionAsync<
   TAccountTokenProgram extends string,
   TAccountSystemProgram extends string,
   TAccountRent extends string,
+  TAccountAssociatedTokenProgram extends string,
   TAccountEventAuthority extends string,
   TAccountSelfProgram extends string,
   TProgramAddress extends Address = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
@@ -197,6 +204,7 @@ export async function getOpenInstructionAsync<
     TAccountTokenProgram,
     TAccountSystemProgram,
     TAccountRent,
+    TAccountAssociatedTokenProgram,
     TAccountEventAuthority,
     TAccountSelfProgram
   >,
@@ -214,6 +222,7 @@ export async function getOpenInstructionAsync<
     TAccountTokenProgram,
     TAccountSystemProgram,
     TAccountRent,
+    TAccountAssociatedTokenProgram,
     TAccountEventAuthority,
     TAccountSelfProgram
   >
@@ -243,6 +252,10 @@ export async function getOpenInstructionAsync<
     tokenProgram: { value: input.tokenProgram ?? null, isWritable: false },
     systemProgram: { value: input.systemProgram ?? null, isWritable: false },
     rent: { value: input.rent ?? null, isWritable: false },
+    associatedTokenProgram: {
+      value: input.associatedTokenProgram ?? null,
+      isWritable: false,
+    },
     eventAuthority: { value: input.eventAuthority ?? null, isWritable: false },
     selfProgram: { value: input.selfProgram ?? null, isWritable: false },
   };
@@ -280,6 +293,7 @@ export async function getOpenInstructionAsync<
       getAccountMeta("tokenProgram", accounts.tokenProgram),
       getAccountMeta("systemProgram", accounts.systemProgram),
       getAccountMeta("rent", accounts.rent),
+      getAccountMeta("associatedTokenProgram", accounts.associatedTokenProgram),
       getAccountMeta("eventAuthority", accounts.eventAuthority),
       getAccountMeta("selfProgram", accounts.selfProgram),
     ],
@@ -299,6 +313,7 @@ export async function getOpenInstructionAsync<
     TAccountTokenProgram,
     TAccountSystemProgram,
     TAccountRent,
+    TAccountAssociatedTokenProgram,
     TAccountEventAuthority,
     TAccountSelfProgram
   >);
@@ -315,6 +330,7 @@ export type OpenInput<
   TAccountTokenProgram extends string = string,
   TAccountSystemProgram extends string = string,
   TAccountRent extends string = string,
+  TAccountAssociatedTokenProgram extends string = string,
   TAccountEventAuthority extends string = string,
   TAccountSelfProgram extends string = string,
 > = {
@@ -328,6 +344,7 @@ export type OpenInput<
   tokenProgram: Address<TAccountTokenProgram>;
   systemProgram?: Address<TAccountSystemProgram>;
   rent: Address<TAccountRent>;
+  associatedTokenProgram: Address<TAccountAssociatedTokenProgram>;
   eventAuthority: Address<TAccountEventAuthority>;
   selfProgram?: Address<TAccountSelfProgram>;
   openArgs: OpenInstructionDataArgs["openArgs"];
@@ -344,6 +361,7 @@ export function getOpenInstruction<
   TAccountTokenProgram extends string,
   TAccountSystemProgram extends string,
   TAccountRent extends string,
+  TAccountAssociatedTokenProgram extends string,
   TAccountEventAuthority extends string,
   TAccountSelfProgram extends string,
   TProgramAddress extends Address = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
@@ -359,6 +377,7 @@ export function getOpenInstruction<
     TAccountTokenProgram,
     TAccountSystemProgram,
     TAccountRent,
+    TAccountAssociatedTokenProgram,
     TAccountEventAuthority,
     TAccountSelfProgram
   >,
@@ -375,6 +394,7 @@ export function getOpenInstruction<
   TAccountTokenProgram,
   TAccountSystemProgram,
   TAccountRent,
+  TAccountAssociatedTokenProgram,
   TAccountEventAuthority,
   TAccountSelfProgram
 > {
@@ -403,6 +423,10 @@ export function getOpenInstruction<
     tokenProgram: { value: input.tokenProgram ?? null, isWritable: false },
     systemProgram: { value: input.systemProgram ?? null, isWritable: false },
     rent: { value: input.rent ?? null, isWritable: false },
+    associatedTokenProgram: {
+      value: input.associatedTokenProgram ?? null,
+      isWritable: false,
+    },
     eventAuthority: { value: input.eventAuthority ?? null, isWritable: false },
     selfProgram: { value: input.selfProgram ?? null, isWritable: false },
   };
@@ -437,6 +461,7 @@ export function getOpenInstruction<
       getAccountMeta("tokenProgram", accounts.tokenProgram),
       getAccountMeta("systemProgram", accounts.systemProgram),
       getAccountMeta("rent", accounts.rent),
+      getAccountMeta("associatedTokenProgram", accounts.associatedTokenProgram),
       getAccountMeta("eventAuthority", accounts.eventAuthority),
       getAccountMeta("selfProgram", accounts.selfProgram),
     ],
@@ -456,6 +481,7 @@ export function getOpenInstruction<
     TAccountTokenProgram,
     TAccountSystemProgram,
     TAccountRent,
+    TAccountAssociatedTokenProgram,
     TAccountEventAuthority,
     TAccountSelfProgram
   >);
@@ -477,8 +503,9 @@ export type ParsedOpenInstruction<
     tokenProgram: TAccountMetas[7];
     systemProgram: TAccountMetas[8];
     rent: TAccountMetas[9];
-    eventAuthority: TAccountMetas[10];
-    selfProgram: TAccountMetas[11];
+    associatedTokenProgram: TAccountMetas[10];
+    eventAuthority: TAccountMetas[11];
+    selfProgram: TAccountMetas[12];
   };
   data: OpenInstructionData;
 };
@@ -491,12 +518,12 @@ export function parseOpenInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedOpenInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 12) {
+  if (instruction.accounts.length < 13) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 12,
+        expectedAccountMetas: 13,
       },
     );
   }
@@ -519,6 +546,7 @@ export function parseOpenInstruction<
       tokenProgram: getNextAccount(),
       systemProgram: getNextAccount(),
       rent: getNextAccount(),
+      associatedTokenProgram: getNextAccount(),
       eventAuthority: getNextAccount(),
       selfProgram: getNextAccount(),
     },

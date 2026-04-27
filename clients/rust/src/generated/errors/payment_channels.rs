@@ -49,6 +49,24 @@ pub enum PaymentChannelsError {
     /// 12 - Voucher signer does not match channel authorized_signer
     #[error("Voucher signer does not match channel authorized_signer")]
     VoucherSignerMismatch = 0xC,
+    /// 13 - Distribution hash mismatch
+    #[error("Distribution hash mismatch")]
+    InvalidDistributionHash = 0xD,
+    /// 14 - Deposit must be non-zero
+    #[error("Deposit must be non-zero")]
+    DepositMustBeNonZero = 0xE,
+    /// 15 - Recipient count must be between 1 and 30
+    #[error("Recipient count must be between 1 and 30")]
+    InvalidRecipientCount = 0xF,
+    /// 16 - Channel account does not match derived PDA
+    #[error("Channel account does not match derived PDA")]
+    ChannelAddressMismatch = 0x10,
+    /// 17 - Escrow account does not match derived ATA
+    #[error("Escrow account does not match derived ATA")]
+    EscrowAddressMismatch = 0x11,
+    /// 18 - Payer and payee must be different accounts
+    #[error("Payer and payee must be different accounts")]
+    PayerPayeeMustDiffer = 0x12,
 }
 
 impl From<PaymentChannelsError> for solana_program_error::ProgramError {
