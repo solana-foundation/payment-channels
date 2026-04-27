@@ -6,14 +6,8 @@ use pinocchio::{Address, error::ProgramError};
 use crate::errors::PaymentChannelsError;
 use crate::state::Transmutable;
 
-macro_rules! max_distribution_recipients {
-    () => {
-        32
-    };
-}
-
 /// Maximum number of distribution recipients per channel.
-pub const MAX_DISTRIBUTION_RECIPIENTS: usize = max_distribution_recipients!();
+pub const MAX_DISTRIBUTION_RECIPIENTS: usize = 32;
 
 /// One entry in the distribution plan committed at `open`.
 #[repr(C)]
@@ -41,15 +35,21 @@ impl DistributionEntry {
 pub struct DistributionRecipients {
     /// Number of active entries (1–32).
     pub count: u8,
-    // The distribution recipient entries.
-    pub entries: [DistributionEntry; max_distribution_recipients!()],
+    // Codama requires a literal here; keep in sync with MAX_DISTRIBUTION_RECIPIENTS.
+    pub entries: [DistributionEntry; 32],
 }
+
+// Fails to compile if the literal above drifts from MAX_DISTRIBUTION_RECIPIENTS.
+const _: () = assert!(
+    MAX_DISTRIBUTION_RECIPIENTS == 32,
+    "update DistributionRecipients::entries literal to match MAX_DISTRIBUTION_RECIPIENTS",
+);
 
 impl DistributionRecipients {
     /// Validates `count` is in `1..=MAX_DISTRIBUTION_RECIPIENTS`.
     pub fn validate(&self) -> Result<usize, ProgramError> {
         let n = self.count as usize;
-        if n == 0 || n > max_distribution_recipients!() {
+        if n == 0 || n > MAX_DISTRIBUTION_RECIPIENTS {
             return Err(PaymentChannelsError::InvalidRecipientCount.into());
         }
         Ok(n)
@@ -103,7 +103,7 @@ mod tests {
         };
         DistributionRecipients {
             count,
-            entries: [entry; max_distribution_recipients!()],
+            entries: [entry; MAX_DISTRIBUTION_RECIPIENTS],
         }
     }
 
@@ -129,7 +129,7 @@ mod tests {
             entries: [DistributionEntry {
                 recipient: Address::default(),
                 amount: [0u8; 8],
-            }; max_distribution_recipients!()],
+            }; MAX_DISTRIBUTION_RECIPIENTS],
         };
         assert!(r.validate().is_err());
     }
@@ -158,7 +158,6 @@ mod tests {
     fn preimage_hash_differs_by_count() {
         let mut r1 = make_recipients(1);
         let mut r2 = make_recipients(2);
-        // Ensure the active entries differ so the preimages are distinct
         r1.entries[0].recipient = Address::default();
         r2.entries[0].recipient = Address::default();
         assert_ne!(r1.preimage_hash(), r2.preimage_hash());
