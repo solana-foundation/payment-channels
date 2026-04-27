@@ -1,3 +1,4 @@
+mod e2e;
 mod integration;
 
 use mollusk_svm::{Mollusk, result::ProgramResult};

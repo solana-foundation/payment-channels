@@ -21,8 +21,7 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 
-mod common;
-use common::{PROGRAM_ID, expect_custom_err, load_program};
+use crate::common::{PROGRAM_ID, expect_custom_err, load_program};
 
 const SPL_TOKEN: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const ATA_PROGRAM: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
@@ -34,14 +33,13 @@ fn event_authority() -> Pubkey {
 }
 
 /// Inject a 216-byte Channel at `channel` owned by `PROGRAM_ID`.
-/// Sets discriminator, version, status, deposit, and payer.
 fn seed_channel(svm: &mut LiteSVM, channel: &Pubkey, status: u8, deposit: u64, payer: &Pubkey) {
     let mut data = vec![0u8; 216];
     data[0] = 1; // AccountDiscriminator::Channel
     data[1] = 1; // CURRENT_CHANNEL_VERSION
     data[3] = status;
-    data[12..20].copy_from_slice(&deposit.to_le_bytes()); // deposit at offset 12
-    data[88..120].copy_from_slice(&payer.to_bytes()); // payer at offset 88
+    data[12..20].copy_from_slice(&deposit.to_le_bytes());
+    data[88..120].copy_from_slice(&payer.to_bytes());
     svm.set_account(
         *channel,
         Account {
@@ -55,19 +53,17 @@ fn seed_channel(svm: &mut LiteSVM, channel: &Pubkey, status: u8, deposit: u64, p
     .expect("set_account");
 }
 
-/// Read `channel.deposit` at offset 12.
 fn read_deposit(svm: &LiteSVM, channel: &Pubkey) -> u64 {
     let acct = svm.get_account(channel).expect("channel exists");
     u64::from_le_bytes(acct.data[12..20].try_into().unwrap())
 }
 
-/// Read SPL token account balance (bytes 64–71 of the token account).
 fn read_token_balance(svm: &LiteSVM, ata: &Pubkey) -> u64 {
     let acct = svm.get_account(ata).expect("token account exists");
     u64::from_le_bytes(acct.data[64..72].try_into().unwrap())
 }
 
-/// Open a channel via the `open` instruction; returns (channel PDA, channel ATA).
+#[allow(clippy::too_many_arguments)]
 fn open_channel(
     svm: &mut LiteSVM,
     payer: &Keypair,
@@ -98,10 +94,10 @@ fn open_channel(
     let mut data = vec![OPEN_DISCRIMINATOR];
     data.extend_from_slice(&salt.to_le_bytes());
     data.extend_from_slice(&deposit.to_le_bytes());
-    data.extend_from_slice(&3_600u32.to_le_bytes()); // grace_period
-    data.push(1u8); // num_recipients
-    data.extend_from_slice(&[1u8; 32]); // recipient pubkey
-    data.extend_from_slice(&deposit.to_le_bytes()); // amount
+    data.extend_from_slice(&3_600u32.to_le_bytes());
+    data.push(1u8);
+    data.extend_from_slice(&[1u8; 32]);
+    data.extend_from_slice(&deposit.to_le_bytes());
     data.extend_from_slice(&[0u8; (MAX_DISTRIBUTION_RECIPIENTS - 1) * 40]);
 
     let ix = Instruction::new_with_bytes(
@@ -191,7 +187,6 @@ fn top_up_increases_deposit() {
         &payer_ata,
     );
 
-    // After open: payer_ata holds top_up_amount, channel_ata holds deposit.
     assert_eq!(read_token_balance(&svm, &payer_ata), top_up_amount);
     assert_eq!(read_token_balance(&svm, &channel_ata), deposit);
     assert_eq!(read_deposit(&svm, &channel), deposit);
@@ -294,7 +289,6 @@ fn top_up_wrong_payer_rejects() {
     let channel = Pubkey::new_unique();
     seed_channel(&mut svm, &channel, 0, 1_000_000, &alice.pubkey());
 
-    // Bob tries to topUp Alice's channel.
     let ix = build_top_up_ix(
         &bob.pubkey(),
         &channel,
@@ -325,8 +319,6 @@ fn top_up_unsigned_payer_rejects() {
     let channel = Pubkey::new_unique();
     seed_channel(&mut svm, &channel, 0, 1_000_000, &channel_payer.pubkey());
 
-    // Build ix manually with payer NOT marked as signer — bypasses the runtime
-    // signer enforcement so the program's own `!accs.payer.is_signer()` fires.
     let mut data = vec![3u8]; // DISCRIMINATOR
     data.extend_from_slice(&50_000u64.to_le_bytes());
     let ix = Instruction {
