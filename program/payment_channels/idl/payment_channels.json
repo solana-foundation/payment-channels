@@ -530,7 +530,7 @@
       {
         "code": 15,
         "kind": "errorNode",
-        "message": "num_recipients outside [1, MAX_DISTRIBUTION_RECIPIENTS]",
+        "message": "num_recipients outside [0, MAX_DISTRIBUTION_RECIPIENTS]",
         "name": "invalidRecipientCount"
       },
       {
@@ -554,7 +554,7 @@
       {
         "code": 19,
         "kind": "errorNode",
-        "message": "Each shareBps must be non-zero and Σbps must be strictly less than 10_000",
+        "message": "Each shareBps must be non-zero and Σbps must be at most 10_000",
         "name": "invalidSplitConfig"
       },
       {
