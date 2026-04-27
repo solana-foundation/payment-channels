@@ -1,4 +1,4 @@
-use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer, error::ProgramError};
+use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 
 use crate::constants::{ATA_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID};
 use crate::errors::PaymentChannelsError;
@@ -46,15 +46,6 @@ mod extension_id {
 #[inline]
 pub fn overflow() -> ProgramError {
     PaymentChannelsError::ArithmeticOverflow.into()
-}
-
-/// Rejects any program id that is not SPL Token or Token-2022.
-#[inline]
-pub fn validate_token_program(token_program: &Address) -> ProgramResult {
-    if *token_program != SPL_TOKEN_PROGRAM_ID && *token_program != TOKEN_2022_PROGRAM_ID {
-        return Err(PaymentChannelsError::InvalidTokenProgram.into());
-    }
-    Ok(())
 }
 
 /// Derives the associated-token-account address for `(owner, mint, token_program)`
@@ -213,76 +204,6 @@ fn extension_allowed(extension_type: u16, is_mint: bool) -> bool {
 /// True iff every byte in `bytes` is zero.
 fn all_zero(bytes: &[u8]) -> bool {
     bytes.iter().all(|b| *b == 0)
-}
-
-/// Invokes `TransferChecked` on SPL Token or Token-2022 with a user-controlled
-/// `authority`.
-#[allow(clippy::too_many_arguments)]
-#[inline]
-pub fn transfer_checked(
-    token_program: &Address,
-    from: &AccountView,
-    mint: &AccountView,
-    to: &AccountView,
-    authority: &AccountView,
-    amount: u64,
-    decimals: u8,
-) -> ProgramResult {
-    pinocchio_token_2022::instructions::TransferChecked {
-        from,
-        mint,
-        to,
-        authority,
-        amount,
-        decimals,
-        token_program,
-    }
-    .invoke()
-}
-
-/// `TransferChecked` invoked under PDA `signer` — used when the program's
-/// channel PDA is the source authority.
-#[allow(clippy::too_many_arguments)]
-#[inline]
-pub fn transfer_checked_signed(
-    token_program: &Address,
-    from: &AccountView,
-    mint: &AccountView,
-    to: &AccountView,
-    authority: &AccountView,
-    amount: u64,
-    decimals: u8,
-    signer: &Signer,
-) -> ProgramResult {
-    pinocchio_token_2022::instructions::TransferChecked {
-        from,
-        mint,
-        to,
-        authority,
-        amount,
-        decimals,
-        token_program,
-    }
-    .invoke_signed(core::slice::from_ref(signer))
-}
-
-/// Invokes `CloseAccount` under PDA `signer`, sweeping rent lamports from
-/// `account` to `destination` and zeroing the token account.
-#[inline]
-pub fn close_token_account(
-    token_program: &Address,
-    account: &AccountView,
-    destination: &AccountView,
-    authority: &AccountView,
-    signer: &Signer,
-) -> ProgramResult {
-    pinocchio_token_2022::instructions::CloseAccount {
-        account,
-        destination,
-        authority,
-        token_program,
-    }
-    .invoke_signed(core::slice::from_ref(signer))
 }
 
 #[cfg(test)]

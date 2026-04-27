@@ -4,6 +4,7 @@ use core::mem::size_of;
 use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer, error::ProgramError};
 use pinocchio_associated_token_account::instructions::Create as CreateAta;
 use pinocchio_system::instructions::CreateAccount;
+use pinocchio_token_2022::instructions::TransferChecked;
 
 use crate::errors::PaymentChannelsError;
 use crate::state::Channel;
@@ -13,8 +14,7 @@ use crate::event_engine::emit_event;
 use crate::events::Opened;
 pub use crate::instructions::helpers::MAX_DISTRIBUTION_RECIPIENTS;
 use crate::instructions::helpers::{
-    DistributionRecipients, channel_signer_seeds, transfer_checked, validate_mint,
-    validate_token_account, validate_token_program,
+    DistributionRecipients, channel_signer_seeds, validate_mint, validate_token_account,
 };
 use crate::state::{Transmutable, load};
 
@@ -206,7 +206,6 @@ pub fn process(
     if accs.channel_token_account.address() != &expected_ata {
         return Err(PaymentChannelsError::EscrowAddressMismatch.into());
     }
-    validate_token_program(token_program)?;
     let decimals = validate_mint(accs.mint, token_program)?;
     validate_token_account(
         accs.payer_token_account,
@@ -251,15 +250,16 @@ pub fn process(
     .invoke()?;
 
     // Transfer the deposit from payer to escrow.
-    transfer_checked(
-        token_program,
-        accs.payer_token_account,
-        accs.mint,
-        accs.channel_token_account,
-        accs.payer,
-        deposit,
+    TransferChecked {
+        from: accs.payer_token_account,
+        mint: accs.mint,
+        to: accs.channel_token_account,
+        authority: accs.payer,
+        amount: deposit,
         decimals,
-    )?;
+        token_program,
+    }
+    .invoke()?;
 
     Channel::init_at(
         &mut accs.channel.try_borrow_mut()?,

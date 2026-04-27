@@ -7,12 +7,13 @@ use pinocchio::{
     error::ProgramError,
     sysvars::{Sysvar, clock::Clock},
 };
+use pinocchio_token_2022::instructions::{CloseAccount, TransferChecked};
 
 use crate::constants::TREASURY_OWNER;
 use crate::errors::PaymentChannelsError;
 use crate::instructions::helpers::{
-    BPS_DENOMINATOR, DistributionRecipients, close_token_account, derive_ata, overflow,
-    transfer_checked_signed, validate_mint, validate_token_account, validate_token_program,
+    BPS_DENOMINATOR, DistributionRecipients, derive_ata, overflow, validate_mint,
+    validate_token_account,
 };
 use crate::state::channel::{CHANNEL_SEED, Channel, ChannelStatus};
 use crate::state::{Transmutable, load};
@@ -123,7 +124,6 @@ pub fn process(
 
     // Token program + extension-aware Mint layout.
     let tp = *accs.token_program.address();
-    validate_token_program(&tp)?;
     let decimals = validate_mint(accs.mint, &tp)?;
 
     // Re-derive channel PDA
@@ -252,47 +252,47 @@ pub fn process(
         for (i, entry) in entries.iter().enumerate() {
             let amount_i = share(pool, entry.bps() as u32)?;
             if amount_i > 0 {
-                transfer_checked_signed(
-                    &tp,
-                    accs.channel_token_account,
-                    accs.mint,
-                    &accs.recipient_token_accounts[i],
-                    accs.channel,
-                    amount_i,
+                TransferChecked {
+                    from: accs.channel_token_account,
+                    mint: accs.mint,
+                    to: &accs.recipient_token_accounts[i],
+                    authority: accs.channel,
+                    amount: amount_i,
                     decimals,
-                    &signer,
-                )?;
+                    token_program: &tp,
+                }
+                .invoke_signed(core::slice::from_ref(&signer))?;
                 sum_paid = sum_paid.checked_add(amount_i).ok_or_else(overflow)?;
             }
         }
 
         let payer_share = share(pool, payer_bps)?;
         if payer_share > 0 {
-            transfer_checked_signed(
-                &tp,
-                accs.channel_token_account,
-                accs.mint,
-                accs.payer_token_account,
-                accs.channel,
-                payer_share,
+            TransferChecked {
+                from: accs.channel_token_account,
+                mint: accs.mint,
+                to: accs.payer_token_account,
+                authority: accs.channel,
+                amount: payer_share,
                 decimals,
-                &signer,
-            )?;
+                token_program: &tp,
+            }
+            .invoke_signed(core::slice::from_ref(&signer))?;
         }
 
         let transferred = sum_paid.checked_add(payer_share).ok_or_else(overflow)?;
         let residual = pool.checked_sub(transferred).ok_or_else(overflow)?;
         if residual > 0 {
-            transfer_checked_signed(
-                &tp,
-                accs.channel_token_account,
-                accs.mint,
-                accs.treasury_token_account,
-                accs.channel,
-                residual,
+            TransferChecked {
+                from: accs.channel_token_account,
+                mint: accs.mint,
+                to: accs.treasury_token_account,
+                authority: accs.channel,
+                amount: residual,
                 decimals,
-                &signer,
-            )?;
+                token_program: &tp,
+            }
+            .invoke_signed(core::slice::from_ref(&signer))?;
         }
     }
 
@@ -301,16 +301,16 @@ pub fn process(
         if payer_withdrawn_at == 0 {
             if deposit > settled {
                 let refund = deposit - settled;
-                transfer_checked_signed(
-                    &tp,
-                    accs.channel_token_account,
-                    accs.mint,
-                    accs.payer_token_account,
-                    accs.channel,
-                    refund,
+                TransferChecked {
+                    from: accs.channel_token_account,
+                    mint: accs.mint,
+                    to: accs.payer_token_account,
+                    authority: accs.channel,
+                    amount: refund,
                     decimals,
-                    &signer,
-                )?;
+                    token_program: &tp,
+                }
+                .invoke_signed(core::slice::from_ref(&signer))?;
             }
             let mut ch = Channel::from_account_mut(accs.channel)?;
             ch.set_payer_withdrawn_at(now);
@@ -318,13 +318,13 @@ pub fn process(
         }
 
         // Close the escrow SPL account; rent flows to payer SOL account.
-        close_token_account(
-            &tp,
-            accs.channel_token_account,
-            accs.payer,
-            accs.channel,
-            &signer,
-        )?;
+        CloseAccount {
+            account: accs.channel_token_account,
+            destination: accs.payer,
+            authority: accs.channel,
+            token_program: &tp,
+        }
+        .invoke_signed(core::slice::from_ref(&signer))?;
 
         // Tombstone the Channel PDA: move rent lamports to payer, then close.
         let rent = accs.channel.lamports();
