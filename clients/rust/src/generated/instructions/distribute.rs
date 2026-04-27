@@ -22,6 +22,8 @@ pub struct Distribute {
 
     pub payer_token_account: solana_address::Address,
 
+    pub payee_token_account: solana_address::Address,
+
     pub treasury_token_account: solana_address::Address,
 
     pub mint: solana_address::Address,
@@ -40,7 +42,7 @@ impl Distribute {
         args: DistributeInstructionArgs,
         remaining_accounts: &[solana_instruction::AccountMeta],
     ) -> solana_instruction::Instruction {
-        let mut accounts = Vec::with_capacity(7 + remaining_accounts.len());
+        let mut accounts = Vec::with_capacity(8 + remaining_accounts.len());
         accounts.push(solana_instruction::AccountMeta::new(self.channel, false));
         accounts.push(solana_instruction::AccountMeta::new(self.payer, false));
         accounts.push(solana_instruction::AccountMeta::new(
@@ -49,6 +51,10 @@ impl Distribute {
         ));
         accounts.push(solana_instruction::AccountMeta::new(
             self.payer_token_account,
+            false,
+        ));
+        accounts.push(solana_instruction::AccountMeta::new(
+            self.payee_token_account,
             false,
         ));
         accounts.push(solana_instruction::AccountMeta::new(
@@ -115,15 +121,17 @@ impl DistributeInstructionArgs {
 ///   1. `[writable]` payer
 ///   2. `[writable]` channel_token_account
 ///   3. `[writable]` payer_token_account
-///   4. `[writable]` treasury_token_account
-///   5. `[]` mint
-///   6. `[]` token_program
+///   4. `[writable]` payee_token_account
+///   5. `[writable]` treasury_token_account
+///   6. `[]` mint
+///   7. `[]` token_program
 #[derive(Clone, Debug, Default)]
 pub struct DistributeBuilder {
     channel: Option<solana_address::Address>,
     payer: Option<solana_address::Address>,
     channel_token_account: Option<solana_address::Address>,
     payer_token_account: Option<solana_address::Address>,
+    payee_token_account: Option<solana_address::Address>,
     treasury_token_account: Option<solana_address::Address>,
     mint: Option<solana_address::Address>,
     token_program: Option<solana_address::Address>,
@@ -159,6 +167,14 @@ impl DistributeBuilder {
         payer_token_account: solana_address::Address,
     ) -> &mut Self {
         self.payer_token_account = Some(payer_token_account);
+        self
+    }
+    #[inline(always)]
+    pub fn payee_token_account(
+        &mut self,
+        payee_token_account: solana_address::Address,
+    ) -> &mut Self {
+        self.payee_token_account = Some(payee_token_account);
         self
     }
     #[inline(always)]
@@ -210,6 +226,9 @@ impl DistributeBuilder {
             payer_token_account: self
                 .payer_token_account
                 .expect("payer_token_account is not set"),
+            payee_token_account: self
+                .payee_token_account
+                .expect("payee_token_account is not set"),
             treasury_token_account: self
                 .treasury_token_account
                 .expect("treasury_token_account is not set"),
@@ -237,6 +256,8 @@ pub struct DistributeCpiAccounts<'a, 'b> {
 
     pub payer_token_account: &'b solana_account_info::AccountInfo<'a>,
 
+    pub payee_token_account: &'b solana_account_info::AccountInfo<'a>,
+
     pub treasury_token_account: &'b solana_account_info::AccountInfo<'a>,
 
     pub mint: &'b solana_account_info::AccountInfo<'a>,
@@ -256,6 +277,8 @@ pub struct DistributeCpi<'a, 'b> {
     pub channel_token_account: &'b solana_account_info::AccountInfo<'a>,
 
     pub payer_token_account: &'b solana_account_info::AccountInfo<'a>,
+
+    pub payee_token_account: &'b solana_account_info::AccountInfo<'a>,
 
     pub treasury_token_account: &'b solana_account_info::AccountInfo<'a>,
 
@@ -278,6 +301,7 @@ impl<'a, 'b> DistributeCpi<'a, 'b> {
             payer: accounts.payer,
             channel_token_account: accounts.channel_token_account,
             payer_token_account: accounts.payer_token_account,
+            payee_token_account: accounts.payee_token_account,
             treasury_token_account: accounts.treasury_token_account,
             mint: accounts.mint,
             token_program: accounts.token_program,
@@ -307,7 +331,7 @@ impl<'a, 'b> DistributeCpi<'a, 'b> {
         signers_seeds: &[&[&[u8]]],
         remaining_accounts: &[(&'b solana_account_info::AccountInfo<'a>, bool, bool)],
     ) -> solana_program_error::ProgramResult {
-        let mut accounts = Vec::with_capacity(7 + remaining_accounts.len());
+        let mut accounts = Vec::with_capacity(8 + remaining_accounts.len());
         accounts.push(solana_instruction::AccountMeta::new(
             *self.channel.key,
             false,
@@ -319,6 +343,10 @@ impl<'a, 'b> DistributeCpi<'a, 'b> {
         ));
         accounts.push(solana_instruction::AccountMeta::new(
             *self.payer_token_account.key,
+            false,
+        ));
+        accounts.push(solana_instruction::AccountMeta::new(
+            *self.payee_token_account.key,
             false,
         ));
         accounts.push(solana_instruction::AccountMeta::new(
@@ -349,12 +377,13 @@ impl<'a, 'b> DistributeCpi<'a, 'b> {
             accounts,
             data,
         };
-        let mut account_infos = Vec::with_capacity(8 + remaining_accounts.len());
+        let mut account_infos = Vec::with_capacity(9 + remaining_accounts.len());
         account_infos.push(self.__program.clone());
         account_infos.push(self.channel.clone());
         account_infos.push(self.payer.clone());
         account_infos.push(self.channel_token_account.clone());
         account_infos.push(self.payer_token_account.clone());
+        account_infos.push(self.payee_token_account.clone());
         account_infos.push(self.treasury_token_account.clone());
         account_infos.push(self.mint.clone());
         account_infos.push(self.token_program.clone());
@@ -378,9 +407,10 @@ impl<'a, 'b> DistributeCpi<'a, 'b> {
 ///   1. `[writable]` payer
 ///   2. `[writable]` channel_token_account
 ///   3. `[writable]` payer_token_account
-///   4. `[writable]` treasury_token_account
-///   5. `[]` mint
-///   6. `[]` token_program
+///   4. `[writable]` payee_token_account
+///   5. `[writable]` treasury_token_account
+///   6. `[]` mint
+///   7. `[]` token_program
 #[derive(Clone, Debug)]
 pub struct DistributeCpiBuilder<'a, 'b> {
     instruction: Box<DistributeCpiBuilderInstruction<'a, 'b>>,
@@ -394,6 +424,7 @@ impl<'a, 'b> DistributeCpiBuilder<'a, 'b> {
             payer: None,
             channel_token_account: None,
             payer_token_account: None,
+            payee_token_account: None,
             treasury_token_account: None,
             mint: None,
             token_program: None,
@@ -426,6 +457,14 @@ impl<'a, 'b> DistributeCpiBuilder<'a, 'b> {
         payer_token_account: &'b solana_account_info::AccountInfo<'a>,
     ) -> &mut Self {
         self.instruction.payer_token_account = Some(payer_token_account);
+        self
+    }
+    #[inline(always)]
+    pub fn payee_token_account(
+        &mut self,
+        payee_token_account: &'b solana_account_info::AccountInfo<'a>,
+    ) -> &mut Self {
+        self.instruction.payee_token_account = Some(payee_token_account);
         self
     }
     #[inline(always)]
@@ -512,6 +551,11 @@ impl<'a, 'b> DistributeCpiBuilder<'a, 'b> {
                 .payer_token_account
                 .expect("payer_token_account is not set"),
 
+            payee_token_account: self
+                .instruction
+                .payee_token_account
+                .expect("payee_token_account is not set"),
+
             treasury_token_account: self
                 .instruction
                 .treasury_token_account
@@ -539,6 +583,7 @@ struct DistributeCpiBuilderInstruction<'a, 'b> {
     payer: Option<&'b solana_account_info::AccountInfo<'a>>,
     channel_token_account: Option<&'b solana_account_info::AccountInfo<'a>>,
     payer_token_account: Option<&'b solana_account_info::AccountInfo<'a>>,
+    payee_token_account: Option<&'b solana_account_info::AccountInfo<'a>>,
     treasury_token_account: Option<&'b solana_account_info::AccountInfo<'a>>,
     mint: Option<&'b solana_account_info::AccountInfo<'a>>,
     token_program: Option<&'b solana_account_info::AccountInfo<'a>>,

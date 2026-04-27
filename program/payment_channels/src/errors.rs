@@ -74,4 +74,6 @@ pub enum PaymentChannelsError {
     UnsupportedTokenExtensions = 29,
     #[error("No newly settled funds to distribute")]
     NothingToDistribute = 30,
+    #[error("Payee token account is not ATA(payee, mint, token_program)")]
+    InvalidPayeeTokenAccount = 31,
 }

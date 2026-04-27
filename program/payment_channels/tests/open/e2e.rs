@@ -106,3 +106,49 @@ fn open_sets_channel_fields() {
     );
     assert_eq!(&channel_data[184..216], mint.as_array(), "mint");
 }
+
+#[test]
+fn open_with_no_splits_succeeds() {
+    // count == 0 collapses to a vanilla two-party channel: pool flows entirely
+    // to the payee at `distribute`. The full `open` CPI chain must still run
+    // and the on-chain digest must equal blake3(&[0u8]) — the canonical preimage
+    // for a zero-recipient plan.
+    let mut svm = load_program();
+
+    let payee = Pubkey::new_unique();
+    let authorized_signer = Pubkey::new_unique();
+    let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
+    let (channel, channel_token_account) =
+        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
+
+    let ix = open_ix(
+        &payer.pubkey(),
+        &payee,
+        &mint,
+        &authorized_signer,
+        &channel,
+        &payer_token_account,
+        &channel_token_account,
+        SALT,
+        DEPOSIT,
+        GRACE_PERIOD,
+        0,
+    );
+    let msg = Message::new(&[ix], Some(&payer.pubkey()));
+    let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
+    svm.send_transaction(tx)
+        .expect("open with zero splits should succeed");
+
+    let channel_data = svm
+        .get_account(&channel)
+        .expect("channel account missing")
+        .data;
+
+    assert_eq!(channel_data.len(), Channel::LEN);
+    assert_eq!(channel_data[3], ChannelStatus::Open as u8);
+
+    // distribution_hash == blake3(&[0u8]) — locked at `open` from the
+    // canonical preimage `count(1)` with no entries.
+    let expected: [u8; 32] = blake3::hash(&[0u8]).into();
+    assert_eq!(&channel_data[56..88], &expected, "distribution_hash");
+}

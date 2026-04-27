@@ -51,6 +51,7 @@ export type DistributeInstruction<
   TAccountPayer extends string | AccountMeta<string> = string,
   TAccountChannelTokenAccount extends string | AccountMeta<string> = string,
   TAccountPayerTokenAccount extends string | AccountMeta<string> = string,
+  TAccountPayeeTokenAccount extends string | AccountMeta<string> = string,
   TAccountTreasuryTokenAccount extends string | AccountMeta<string> = string,
   TAccountMint extends string | AccountMeta<string> = string,
   TAccountTokenProgram extends string | AccountMeta<string> = string,
@@ -71,6 +72,9 @@ export type DistributeInstruction<
       TAccountPayerTokenAccount extends string
         ? WritableAccount<TAccountPayerTokenAccount>
         : TAccountPayerTokenAccount,
+      TAccountPayeeTokenAccount extends string
+        ? WritableAccount<TAccountPayeeTokenAccount>
+        : TAccountPayeeTokenAccount,
       TAccountTreasuryTokenAccount extends string
         ? WritableAccount<TAccountTreasuryTokenAccount>
         : TAccountTreasuryTokenAccount,
@@ -125,6 +129,7 @@ export type DistributeInput<
   TAccountPayer extends string = string,
   TAccountChannelTokenAccount extends string = string,
   TAccountPayerTokenAccount extends string = string,
+  TAccountPayeeTokenAccount extends string = string,
   TAccountTreasuryTokenAccount extends string = string,
   TAccountMint extends string = string,
   TAccountTokenProgram extends string = string,
@@ -133,6 +138,7 @@ export type DistributeInput<
   payer: Address<TAccountPayer>;
   channelTokenAccount: Address<TAccountChannelTokenAccount>;
   payerTokenAccount: Address<TAccountPayerTokenAccount>;
+  payeeTokenAccount: Address<TAccountPayeeTokenAccount>;
   treasuryTokenAccount: Address<TAccountTreasuryTokenAccount>;
   mint: Address<TAccountMint>;
   tokenProgram: Address<TAccountTokenProgram>;
@@ -144,6 +150,7 @@ export function getDistributeInstruction<
   TAccountPayer extends string,
   TAccountChannelTokenAccount extends string,
   TAccountPayerTokenAccount extends string,
+  TAccountPayeeTokenAccount extends string,
   TAccountTreasuryTokenAccount extends string,
   TAccountMint extends string,
   TAccountTokenProgram extends string,
@@ -154,6 +161,7 @@ export function getDistributeInstruction<
     TAccountPayer,
     TAccountChannelTokenAccount,
     TAccountPayerTokenAccount,
+    TAccountPayeeTokenAccount,
     TAccountTreasuryTokenAccount,
     TAccountMint,
     TAccountTokenProgram
@@ -165,6 +173,7 @@ export function getDistributeInstruction<
   TAccountPayer,
   TAccountChannelTokenAccount,
   TAccountPayerTokenAccount,
+  TAccountPayeeTokenAccount,
   TAccountTreasuryTokenAccount,
   TAccountMint,
   TAccountTokenProgram
@@ -183,6 +192,10 @@ export function getDistributeInstruction<
     },
     payerTokenAccount: {
       value: input.payerTokenAccount ?? null,
+      isWritable: true,
+    },
+    payeeTokenAccount: {
+      value: input.payeeTokenAccount ?? null,
       isWritable: true,
     },
     treasuryTokenAccount: {
@@ -207,6 +220,7 @@ export function getDistributeInstruction<
       getAccountMeta("payer", accounts.payer),
       getAccountMeta("channelTokenAccount", accounts.channelTokenAccount),
       getAccountMeta("payerTokenAccount", accounts.payerTokenAccount),
+      getAccountMeta("payeeTokenAccount", accounts.payeeTokenAccount),
       getAccountMeta("treasuryTokenAccount", accounts.treasuryTokenAccount),
       getAccountMeta("mint", accounts.mint),
       getAccountMeta("tokenProgram", accounts.tokenProgram),
@@ -221,6 +235,7 @@ export function getDistributeInstruction<
     TAccountPayer,
     TAccountChannelTokenAccount,
     TAccountPayerTokenAccount,
+    TAccountPayeeTokenAccount,
     TAccountTreasuryTokenAccount,
     TAccountMint,
     TAccountTokenProgram
@@ -237,9 +252,10 @@ export type ParsedDistributeInstruction<
     payer: TAccountMetas[1];
     channelTokenAccount: TAccountMetas[2];
     payerTokenAccount: TAccountMetas[3];
-    treasuryTokenAccount: TAccountMetas[4];
-    mint: TAccountMetas[5];
-    tokenProgram: TAccountMetas[6];
+    payeeTokenAccount: TAccountMetas[4];
+    treasuryTokenAccount: TAccountMetas[5];
+    mint: TAccountMetas[6];
+    tokenProgram: TAccountMetas[7];
   };
   data: DistributeInstructionData;
 };
@@ -252,12 +268,12 @@ export function parseDistributeInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedDistributeInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 7) {
+  if (instruction.accounts.length < 8) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 7,
+        expectedAccountMetas: 8,
       },
     );
   }
@@ -274,6 +290,7 @@ export function parseDistributeInstruction<
       payer: getNextAccount(),
       channelTokenAccount: getNextAccount(),
       payerTokenAccount: getNextAccount(),
+      payeeTokenAccount: getNextAccount(),
       treasuryTokenAccount: getNextAccount(),
       mint: getNextAccount(),
       tokenProgram: getNextAccount(),

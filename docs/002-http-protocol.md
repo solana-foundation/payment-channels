@@ -40,7 +40,7 @@ Actors: **C** = client (payer). **S** = server (merchant).
   - `finalize`: Permissionless. Post-grace. Transitions `CLOSING -> FINALIZED`.
   - `distribute`: Permissionless in `OPEN` and `FINALIZED`. Caller supplies splits preimage; program verifies hash against `Channel.distribution_hash`. From `OPEN`, advances `paid_out` by paying `settled - paid_out` to recipients (channel stays OPEN). From `FINALIZED`, also refunds `deposit - settled` to the payer (if `payerWithdrawnAt == 0`) and tombstones the PDA.
 - **Escape-route self-sufficiency:** Clients persist the 402 challenge and `channelId` to independently invoke escape routes.
-- **Distribution commitment:** The PDA stores a 32-byte sha256 digest of the splits preimage. Splits are passed to `open` and hashed on-chain, making them publicly recoverable from instruction data. `distribute` requires the caller to supply the preimage for hash verification.
+- **Distribution commitment:** The PDA stores a 32-byte Blake3 digest of the splits preimage. Splits are passed to `open` and hashed on-chain, making them publicly recoverable from instruction data. `distribute` requires the caller to supply the preimage for hash verification.
 - **Vouchers are purely off-chain:** No on-chain transactions during metered requests.
 
 ### Server-Side Validation
@@ -75,7 +75,8 @@ To avoid paying Solana network fees for invalid transactions and to ensure proto
     // Solana-session extensions (not in MPP core; documented in Extensions section):
     "distributionSplits": [
       { "recipient": "<pubkey base58>", "shareBps": <integer 1–10000> }
-      // 1..=MAX_SPLITS entries; every shareBps > 0; Σ shareBps == 10000.
+      // 0..=MAX_SPLITS entries; every shareBps > 0; Σ shareBps ≤ 10000.
+      // The remainder `10000 − Σ shareBps` is the payee's implicit share.
       // Merchant's proposed splits; forwarded by the client as inputs to
       // `open` (program canonicalizes + hashes on-chain).
     ],
@@ -351,4 +352,4 @@ Payment-Receipt: eyJtZXRob2QiOiJzb2xhbmEiLCJpbnRlbnQiOiJzZXNzaW9uIi...
 }
 ```
 
-On close-receipt responses (`POST /channel/close`), add `"txHash": "<base58 solana sig>"` identifying the `settleAndFinalize` tx the server submitted (optionally bundled with `distribute`), and (if the bundled `distribute` ran) `"refunded": "<u64 decimal>"` for the `deposit - settled` leg paid back to the payer.
+On close-receipt responses (`POST /channel/close`), add `"txHash": "<base58 solana sig>"` identifying the `settleAndFinalize` tx the server submitted (optionally bundled with `distribute`), and (if the bundled `distribute` ran) `"refunded": "<u64 decimal>"` for the `deposit - settled` branch paid back to the payer.

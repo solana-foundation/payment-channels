@@ -622,6 +622,12 @@
         "kind": "errorNode",
         "message": "No newly settled funds to distribute",
         "name": "nothingToDistribute"
+      },
+      {
+        "code": 31,
+        "kind": "errorNode",
+        "message": "Payee token account is not ATA(payee, mint, token_program)",
+        "name": "invalidPayeeTokenAccount"
       }
     ],
     "events": [],
@@ -1023,6 +1029,12 @@
             "isWritable": true,
             "kind": "instructionAccountNode",
             "name": "payerTokenAccount"
+          },
+          {
+            "isSigner": false,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "payeeTokenAccount"
           },
           {
             "isSigner": false,

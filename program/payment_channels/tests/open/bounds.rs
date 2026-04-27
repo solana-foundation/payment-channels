@@ -25,16 +25,6 @@ fn zero_deposit_rejected() {
 }
 
 #[test]
-fn zero_recipients_rejected() {
-    assert_eq!(
-        run_open(open_ix_data(SALT, DEPOSIT, GRACE, 0)),
-        ProgramResult::Failure(ProgramError::Custom(
-            PaymentChannelsError::InvalidRecipientCount as u32
-        )),
-    );
-}
-
-#[test]
 fn too_many_recipients_rejected() {
     assert_eq!(
         run_open(open_ix_data(

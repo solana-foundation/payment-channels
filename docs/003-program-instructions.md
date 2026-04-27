@@ -86,17 +86,27 @@ Quick reference for every instruction exposed by the payment-channels program: d
 
 ## `distribute` (7)
 
+Permissionless crank. Verifies the committed splits preimage (Blake3) against `Channel.distribution_hash`, then drains `pool = settled − paid_out` to the merchant side: each recipient gets `floor(pool * shareBps[i] / 10000)`, the **payee** gets the implicit remainder `floor(pool * (10000 − Σ shareBps) / 10000)`, and the rounding residual goes to the treasury ATA. From `FINALIZED`, also refunds the payer the unspent `deposit − settled` headroom (gated by `payer_withdrawn_at == 0`) and tombstones the escrow ATA + the Channel PDA.
+
 **Args**
 
 | Name | Type | Description |
 |---|---|---|
-| | | |
+| `recipients` | `DistributionRecipients` | Splits preimage (`count(1) || [recipient(32) || shareBps(u16 LE)] × count`). Rehashed on-chain; Blake3 digest must equal `Channel.distribution_hash`. |
 
 **Accounts**
 
 | # | Name | Signer | Writable | Description |
 |---|---|---|---|---|
-| | | | | |
+| 0 | `channel` | — | yes | Channel PDA. Self-signs CPI transfers; tombstoned on `FINALIZED`. |
+| 1 | `payer` | — | yes | Payer SOL account. Writable so escrow / PDA rent can flow back on tombstone. |
+| 2 | `channel_token_account` | — | yes | Escrow ATA owned by `channel`. Source for all transfers; closed on tombstone. |
+| 3 | `payer_token_account` | — | yes | `ATA(payer, mint, token_program)`. Used **only** by the FINALIZED refund branch. |
+| 4 | `payee_token_account` | — | yes | `ATA(payee, mint, token_program)`. Receives `floor(pool * (10000 − Σ shareBps) / 10000)` whenever `pool > 0`. The transfer is a no-op when `Σ shareBps == 10000`; the account is still validated. |
+| 5 | `treasury_token_account` | — | yes | `ATA(TREASURY_OWNER, mint, token_program)`. Receives flooring residual. |
+| 6 | `mint` | — | — | Token mint bound at `open`. |
+| 7 | `token_program` | — | — | SPL Token or Token-2022, must equal the program that owns the mint and ATAs. |
+| 8…N | `recipient_token_accounts[i]` | — | yes | `ATA(recipients.entries[i].recipient, mint, token_program)` in the same order as the active preimage entries. |
 
 ## `withdrawPayer` (8)
 

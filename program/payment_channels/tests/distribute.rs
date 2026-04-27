@@ -125,13 +125,14 @@ fn read_paid_out(svm: &LiteSVM, channel: &Pubkey) -> u64 {
     u64::from_le_bytes(buf)
 }
 
-/// Full distribute ix build with the 7-slot fixed head + dynamic recipient tail.
+/// Full distribute ix build with the 8-slot fixed head + dynamic recipient tail.
 #[allow(clippy::too_many_arguments)]
 fn build_distribute_ix(
     channel: &Pubkey,
     payer: &Pubkey,
     channel_ata: &Pubkey,
     payer_ata: &Pubkey,
+    payee_ata: &Pubkey,
     treasury_ata: &Pubkey,
     mint: &Pubkey,
     token_program: &Pubkey,
@@ -148,6 +149,7 @@ fn build_distribute_ix(
         payer: *payer,
         channel_token_account: *channel_ata,
         payer_token_account: *payer_ata,
+        payee_token_account: *payee_ata,
         treasury_token_account: *treasury_ata,
         mint: *mint,
         token_program: *token_program,
@@ -171,6 +173,7 @@ struct Scenario {
     channel: Pubkey,
     channel_ata: Pubkey,
     payer_ata: Pubkey,
+    payee_ata: Pubkey,
     treasury_ata: Pubkey,
     token_program: Pubkey,
     recipient_atas: Vec<Pubkey>,
@@ -220,6 +223,17 @@ impl Scenario {
         );
         let channel = opened.channel;
         let channel_ata = opened.channel_ata;
+
+        // Payee ATA must be created here, after `open_channel` mints the
+        // payee Pubkey internally — `distribute` is permissionless and only
+        // *validates* this account, so any prior caller (typically the payee)
+        // is responsible for creating it.
+        svm.airdrop(&opened.payee, 1_000_000).ok();
+        let payee_ata = CreateAssociatedTokenAccount::new(&mut svm, &fee_payer, &mint)
+            .owner(&opened.payee)
+            .token_program_id(&token_program)
+            .send()
+            .expect("payee ATA");
 
         if settled > 0 {
             settle_to(
@@ -274,6 +288,7 @@ impl Scenario {
             channel,
             channel_ata,
             payer_ata,
+            payee_ata,
             treasury_ata,
             token_program,
             recipient_atas,
@@ -292,6 +307,7 @@ impl Scenario {
             &self.payer,
             &self.channel_ata,
             &self.payer_ata,
+            &self.payee_ata,
             &self.treasury_ata,
             &self.mint,
             &self.token_program,
@@ -345,10 +361,13 @@ fn happy_path_open_splits() {
     let pool_amount = settled - paid_out;
     s.send(s.distribute_ix()).expect("distribute ok");
 
+    // 40 / 30 / 10 % to recipients; remaining 20 % is the payee implicit
+    // remainder. OPEN distribute does NOT refund the payer.
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 40_000);
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 30_000);
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[2]), 10_000);
-    assert_eq!(token_balance(&s.svm, &s.payer_ata), 20_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 20_000);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
     assert_eq!(read_paid_out(&s.svm, &s.channel), paid_out + pool_amount);
 }
@@ -377,9 +396,12 @@ fn happy_path_open_splits_spl_token() {
 
     s.send(s.distribute_ix()).expect("spl distribute ok");
 
+    // 25 / 25 % to recipients; payee picks up the 50 % implicit remainder.
+    // OPEN distribute does NOT refund the payer.
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 25_000);
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 25_000);
-    assert_eq!(token_balance(&s.svm, &s.payer_ata), 50_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 50_000);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
     assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
 }
 
@@ -390,7 +412,8 @@ fn happy_path_finalized_tombstone() {
         bps: 5000,
     }];
     // Finalized, deposit=200k, settled=150k, paid_out=0.
-    // Pool = 150k. Payer ATA receives (50% * 150k)=75k + (deposit-settled)=50k = 125k.
+    // Pool=150k splits: 50 % recipient (75k), 50 % payee implicit remainder
+    // (75k). Payer ATA receives only the FINALIZED refund, deposit−settled = 50k.
     let (deposit, settled, paid_out) = pool(200_000, 0, 150_000);
     let mut s = Scenario::build(splits.clone(), deposit, settled, paid_out, STATUS_FINALIZED);
 
@@ -401,7 +424,8 @@ fn happy_path_finalized_tombstone() {
     s.send(s.distribute_ix()).expect("distribute ok");
 
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
-    assert_eq!(token_balance(&s.svm, &s.payer_ata), 75_000 + 50_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), 50_000);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
 
     // Tombstone: channel PDA rent + channel_token_account rent flow to payer.
@@ -437,7 +461,8 @@ fn happy_path_finalized_tombstone_spl_token() {
     s.send(s.distribute_ix()).expect("spl finalized ok");
 
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
-    assert_eq!(token_balance(&s.svm, &s.payer_ata), 125_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), 50_000);
     assert_eq!(
         s.svm
             .get_account(&s.channel)
@@ -462,7 +487,10 @@ fn finalized_zero_pool_still_refunds_and_tombstones() {
 
     s.send(s.distribute_ix()).expect("finalized zero pool ok");
 
+    // pool == 0 → no recipient or payee transfer; only the FINALIZED payer
+    // refund branch fires.
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
     assert_eq!(
         s.svm
@@ -484,16 +512,17 @@ fn happy_path_finalized_already_withdrawn() {
 
     // `withdraw_payer` is stubbed, so simulate it: payer pulled
     // (deposit − settled) out of escrow earlier and `payer_withdrawn_at` is
-    // set, so distribute must skip the refund leg.
+    // set, so distribute must skip the refund branch.
     channel_state::set_payer_withdrawn_at(&mut s.svm, &s.channel, 1_700_000_000);
     set_token_balance(&mut s.svm, &s.channel_ata, settled - paid_out);
 
     s.send(s.distribute_ix()).expect("distribute ok");
 
-    // Recipient gets 50% of the 150k pool. Payer-refund leg did NOT run, so
-    // the payer ATA only sees its 50% implicit share.
+    // Recipient gets 50 % of the 150k pool; payee picks up the 50 % implicit
+    // remainder. Payer-refund branch did NOT run, so the payer ATA stays at 0.
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
-    assert_eq!(token_balance(&s.svm, &s.payer_ata), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
 }
 
 #[test]
@@ -537,8 +566,10 @@ fn token_2022_allowed_mint_and_immutable_owner_account_extensions_succeed() {
 
     s.send(s.distribute_ix()).expect("allowed extensions ok");
 
+    // 50 % recipient, 50 % payee; payer untouched on OPEN.
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 50_000);
-    assert_eq!(token_balance(&s.svm, &s.payer_ata), 50_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 50_000);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
     assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
 }
 
@@ -587,28 +618,20 @@ fn unsupported_token_2022_account_extensions_reject_without_state_changes() {
 }
 
 #[test]
-fn num_recipients_zero() {
-    // validate() runs before the hash check, so a count=0 recipients struct
-    // exercises the n==0 reject path without needing a hash match.
-    let splits = vec![Split {
-        owner: Pubkey::new_unique(),
-        bps: 1000,
-    }];
-    let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
-    let mut bad = s.recipients();
-    bad.count = 0;
-    let ix = build_distribute_ix(
-        &s.channel,
-        &s.payer,
-        &s.channel_ata,
-        &s.payer_ata,
-        &s.treasury_ata,
-        &s.mint,
-        &s.token_program,
-        &[],
-        bad,
-    );
-    expect_custom_err(s.send(ix), PaymentChannelsError::InvalidRecipientCount);
+fn num_recipients_zero_pays_full_pool_to_payee() {
+    // count == 0 is the vanilla two-party shape: pool drains entirely to the
+    // payee, no recipient ATAs in the tail. Open the channel with `splits = []`
+    // so the on-chain hash matches the zero-recipient preimage.
+    let (deposit, settled, paid_out) = pool(200_000, 0, 100_000);
+    let mut s = Scenario::build(vec![], deposit, settled, paid_out, STATUS_OPEN);
+
+    let pool_amount = settled - paid_out;
+    s.send(s.distribute_ix()).expect("distribute ok");
+
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), pool_amount);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
+    assert_eq!(read_paid_out(&s.svm, &s.channel), pool_amount);
 }
 
 #[test]
@@ -630,6 +653,7 @@ fn wrong_recipient_ata() {
         &s.payer,
         &s.channel_ata,
         &s.payer_ata,
+        &s.payee_ata,
         &s.treasury_ata,
         &s.mint,
         &s.token_program,
@@ -658,6 +682,7 @@ fn wrong_treasury_ata() {
         &s.payer,
         &s.channel_ata,
         &s.payer_ata,
+        &s.payee_ata,
         &rogue_ata,
         &s.mint,
         &s.token_program,
@@ -680,6 +705,7 @@ fn wrong_token_program() {
         &s.payer,
         &s.channel_ata,
         &s.payer_ata,
+        &s.payee_ata,
         &s.treasury_ata,
         &s.mint,
         &system_id,
@@ -732,6 +758,7 @@ fn num_recipients_exceeds_max() {
         &s.payer,
         &s.channel_ata,
         &s.payer_ata,
+        &s.payee_ata,
         &s.treasury_ata,
         &s.mint,
         &s.token_program,
@@ -739,6 +766,64 @@ fn num_recipients_exceeds_max() {
         bad,
     );
     expect_custom_err(s.send(ix), PaymentChannelsError::InvalidRecipientCount);
+}
+
+#[test]
+fn bps_sum_equals_10000_no_payee_share() {
+    // Σ shareBps == 10_000 — payee carve-out is zero, recipients fully drain
+    // the pool. Payee ATA is still validated but receives nothing.
+    let splits = vec![
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 6000,
+        },
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 4000,
+        },
+    ];
+    let (deposit, settled, paid_out) = pool(200_000, 0, 100_000);
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+
+    s.send(s.distribute_ix()).expect("distribute ok");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 60_000);
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 40_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
+    assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
+}
+
+#[test]
+fn wrong_payee_ata() {
+    // ATA owned by an unrelated wallet — `derive_ata(&ch.payee, ...)` mismatch
+    // must fire before any transfer.
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 1000,
+    }];
+    let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
+    let rogue_owner = Pubkey::new_unique();
+    s.svm.airdrop(&rogue_owner, 1_000_000).ok();
+    let rogue_ata = CreateAssociatedTokenAccount::new(&mut s.svm, &s.fee_payer, &s.mint)
+        .token_program_id(&s.token_program)
+        .owner(&rogue_owner)
+        .send()
+        .unwrap();
+    let ix = build_distribute_ix(
+        &s.channel,
+        &s.payer,
+        &s.channel_ata,
+        &s.payer_ata,
+        &rogue_ata,
+        &s.treasury_ata,
+        &s.mint,
+        &s.token_program,
+        &s.recipient_atas,
+        s.recipients(),
+    );
+    expect_custom_err(s.send(ix), PaymentChannelsError::InvalidPayeeTokenAccount);
 }
 
 #[test]

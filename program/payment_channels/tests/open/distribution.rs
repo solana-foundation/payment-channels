@@ -94,10 +94,39 @@ fn bps_zero_rejected() {
 }
 
 #[test]
-fn bps_sum_equals_10000_rejected() {
+fn bps_sum_equals_10000_passes_arg_validation() {
+    // Σ shareBps == 10_000 is legal under the payee-implicit-remainder model;
+    // remainder is 0 and the payee receives no carve-out from `pool`.
     let mut data = open_ix_data(SALT, DEPOSIT, GRACE, 2);
     set_bps(&mut data, 0, 5000);
     set_bps(&mut data, 1, 5000);
+
+    assert_eq!(
+        run_open(data),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::ChannelAddressMismatch as u32
+        )),
+    );
+}
+
+#[test]
+fn zero_recipients_passes_arg_validation() {
+    // count == 0 is legal: the channel becomes a vanilla two-party channel
+    // where the payee receives 100 % of `pool` at `distribute`.
+    assert_eq!(
+        run_open(open_ix_data(SALT, DEPOSIT, GRACE, 0)),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::ChannelAddressMismatch as u32
+        )),
+    );
+}
+
+#[test]
+fn bps_sum_above_10000_rejected() {
+    // Σ shareBps == 10_001 is past the new upper bound and must reject.
+    let mut data = open_ix_data(SALT, DEPOSIT, GRACE, 2);
+    set_bps(&mut data, 0, 5000);
+    set_bps(&mut data, 1, 5001);
 
     assert_eq!(
         run_open(data),

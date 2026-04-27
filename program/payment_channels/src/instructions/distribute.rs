@@ -41,17 +41,25 @@ unsafe impl Transmutable for DistributeArgs {
     const LEN: usize = size_of::<Self>();
 }
 
-/// Fixed 7-slot head + dynamic recipient tail. Recipient ATAs sit in
+/// Fixed 8-slot head + dynamic recipient tail. Recipient ATAs sit in
 /// `recipient_token_accounts` in the same order as the active entries in
 /// `DistributeArgs::recipients`; clients append them as remaining accounts.
 pub struct DistributeAccounts<'a> {
     pub channel: &'a mut AccountView,
     pub payer: &'a mut AccountView,
-    /// Escrow; source for all splits and the payer refund.
+    /// Escrow; source for all splits, the payee implicit remainder, and the
+    /// FINALIZED payer refund.
     pub channel_token_account: &'a mut AccountView,
-    /// Payer refund destination; populated only from `FINALIZED` with
-    /// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `== 0`.
+    /// Payer refund destination. Used **only** by the FINALIZED branch when
+    /// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `== 0` and
+    /// `deposit > settled`; the implicit remainder of `pool` no longer
+    /// touches this account.
     pub payer_token_account: &'a mut AccountView,
+    /// Implicit-remainder destination: receives
+    /// `floor(pool * (10_000 − Σ bps) / 10_000)` on every `distribute` where
+    /// `pool > 0`. Always validated even when `Σ bps == 10_000` (transfer
+    /// is then a no-op).
+    pub payee_token_account: &'a mut AccountView,
     pub treasury_token_account: &'a mut AccountView,
     pub mint: &'a mut AccountView,
     pub token_program: &'a mut AccountView,
@@ -67,6 +75,7 @@ impl<'a> TryFrom<&'a mut [AccountView]> for DistributeAccounts<'a> {
             payer,
             channel_token_account,
             payer_token_account,
+            payee_token_account,
             treasury_token_account,
             mint,
             token_program,
@@ -80,6 +89,7 @@ impl<'a> TryFrom<&'a mut [AccountView]> for DistributeAccounts<'a> {
             payer,
             channel_token_account,
             payer_token_account,
+            payee_token_account,
             treasury_token_account,
             mint,
             token_program,
@@ -90,9 +100,11 @@ impl<'a> TryFrom<&'a mut [AccountView]> for DistributeAccounts<'a> {
 
 /// Permissionless crank: verifies the committed preimage and pays
 /// [`settled`](Channel::settled) `−` [`paid_out`](Channel::paid_out) across
-/// recipients + payer's implicit share; residual goes to treasury. On
-/// `FINALIZED`, also refunds the payer (if not already withdrawn) and
-/// tombstones both the escrow ATA and the Channel PDA.
+/// recipients + payee's implicit remainder share; residual goes to treasury.
+/// On `FINALIZED`, also refunds the payer the unspent
+/// [`deposit`](Channel::deposit) `−` [`settled`](Channel::settled) headroom
+/// (if not already withdrawn) and tombstones both the escrow ATA and the
+/// Channel PDA.
 pub fn process(
     _program_id: &Address,
     accounts: &mut [AccountView],
@@ -140,6 +152,9 @@ pub fn process(
     if *accs.payer_token_account.address() != derive_ata(&ch.payer, &ch.mint, &tp) {
         return Err(PaymentChannelsError::InvalidPayerTokenAccount.into());
     }
+    if *accs.payee_token_account.address() != derive_ata(&ch.payee, &ch.mint, &tp) {
+        return Err(PaymentChannelsError::InvalidPayeeTokenAccount.into());
+    }
     if *accs.treasury_token_account.address() != derive_ata(&TREASURY_OWNER, &ch.mint, &tp) {
         return Err(PaymentChannelsError::TreasuryAddressMismatch.into());
     }
@@ -156,6 +171,13 @@ pub fn process(
         &ch.payer,
         &tp,
         PaymentChannelsError::InvalidPayerTokenAccount,
+    )?;
+    validate_token_account(
+        accs.payee_token_account,
+        &ch.mint,
+        &ch.payee,
+        &tp,
+        PaymentChannelsError::InvalidPayeeTokenAccount,
     )?;
     validate_token_account(
         accs.treasury_token_account,
@@ -181,7 +203,7 @@ pub fn process(
     let entries = &args.recipients.entries[..n];
 
     // ATA match + bps sum. Split config validity is enforced at `open`; here
-    // the sum is rebuilt only to calculate the payer's implicit remainder.
+    // the sum is rebuilt only to calculate the payee's implicit remainder.
     let mut bps_sum: u32 = 0;
     for (i, entry) in entries.iter().enumerate() {
         let expected = derive_ata(&entry.recipient, &ch.mint, &tp);
@@ -199,7 +221,9 @@ pub fn process(
             .checked_add(entry.bps() as u32)
             .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
     }
-    let payer_bps = BPS_DENOMINATOR.checked_sub(bps_sum).ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+    let payee_bps = BPS_DENOMINATOR
+        .checked_sub(bps_sum)
+        .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
 
     // Pool = settled − paid_out.
     let pool = ch
@@ -225,9 +249,12 @@ pub fn process(
     let payer_withdrawn_at = ch.payer_withdrawn_at();
 
     // Update paid_out while `ch` is still borrowed; doing it here leaves the
-    // FINALIZED leg to run purely on the cloned snapshots without re-borrows.
+    // FINALIZED branch to run purely on the cloned snapshots without re-borrows.
     if pool > 0 {
-        let new_paid_out = ch.paid_out().checked_add(pool).ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+        let new_paid_out = ch
+            .paid_out()
+            .checked_add(pool)
+            .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
         ch.set_paid_out(new_paid_out);
     }
 
@@ -245,7 +272,7 @@ pub fn process(
     ];
     let signer = Signer::from(&signer_seeds);
 
-    // Transfer splits + payer implicit share + treasury residual.
+    // Transfer splits + payee implicit share + treasury residual.
     let mut sum_paid: u64 = 0;
     if pool > 0 {
         for (i, entry) in entries.iter().enumerate() {
@@ -261,26 +288,32 @@ pub fn process(
                     token_program: &tp,
                 }
                 .invoke_signed(core::slice::from_ref(&signer))?;
-                sum_paid = sum_paid.checked_add(amount_i).ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+                sum_paid = sum_paid
+                    .checked_add(amount_i)
+                    .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
             }
         }
 
-        let payer_share = share(pool, payer_bps)?;
-        if payer_share > 0 {
+        let payee_share = share(pool, payee_bps)?;
+        if payee_share > 0 {
             TransferChecked {
                 from: accs.channel_token_account,
                 mint: accs.mint,
-                to: accs.payer_token_account,
+                to: accs.payee_token_account,
                 authority: accs.channel,
-                amount: payer_share,
+                amount: payee_share,
                 decimals,
                 token_program: &tp,
             }
             .invoke_signed(core::slice::from_ref(&signer))?;
         }
 
-        let transferred = sum_paid.checked_add(payer_share).ok_or(PaymentChannelsError::ArithmeticOverflow)?;
-        let residual = pool.checked_sub(transferred).ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+        let transferred = sum_paid
+            .checked_add(payee_share)
+            .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+        let residual = pool
+            .checked_sub(transferred)
+            .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
         if residual > 0 {
             TransferChecked {
                 from: accs.channel_token_account,
@@ -296,7 +329,7 @@ pub fn process(
     }
 
     if status == ChannelStatus::Finalized {
-        // Payer refund leg — one-shot, gated by payer_withdrawn_at.
+        // Payer refund branch — one-shot, gated by payer_withdrawn_at.
         if payer_withdrawn_at == 0 {
             if deposit > settled {
                 let refund = deposit - settled;

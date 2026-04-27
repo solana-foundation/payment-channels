@@ -8,9 +8,9 @@ This ADR specifies the channel lifecycle, instruction set, and on-chain PDA layo
 
 ## Decision
 
-The program implements unidirectional payment channels. Channels are PDAs holding escrowed tokens. Payer-signed off-chain vouchers carry a cumulative amount committed to a `settled` watermark. The split config (a list of `(recipient, shareBps)` with `0 < sum(shareBps) < 10000`) is passed to `open`. The program stores the 32-byte Blake3 digest in `Channel.distribution_hash`. Splits are recoverable from the `open` instruction data. Token movement occurs at closure via two paths:
+The program implements unidirectional payment channels. Channels are PDAs holding escrowed tokens. Payer-signed off-chain vouchers carry a cumulative amount committed to a `settled` watermark. The split config (a list of `(recipient, shareBps)` with `0 ≤ sum(shareBps) ≤ 10000`) is passed to `open`. The program stores the 32-byte Blake3 digest in `Channel.distribution_hash`. Splits are recoverable from the `open` instruction data. Token movement occurs at closure via two paths:
 
-- **Happy path (`settleAndFinalize` + `distribute`)**: Merchant commits the final voucher (transitions to `FINALIZED`) and runs `distribute` with the splits preimage. The program verifies the Blake3 hash, pays `settled - paid_out` proportionally across recipients, pays the payer's implicit remainder share, sends rounding residual dust to the treasury ATA, refunds `deposit - settled` to the payer, and tombstones the PDA. These instructions SHOULD be bundled.
+- **Happy path (`settleAndFinalize` + `distribute`)**: Merchant commits the final voucher (transitions to `FINALIZED`) and runs `distribute` with the splits preimage. The program verifies the Blake3 hash, pays `settled - paid_out` proportionally across recipients, pays the payee's implicit remainder share, sends rounding residual dust to the treasury ATA, refunds `deposit - settled` to the payer, and tombstones the PDA. These instructions SHOULD be bundled.
 - **Unhappy path (post-grace permissionless crank)**: If the merchant fails to submit a voucher after `requestClose` starts the grace period, anyone can call `finalize` post-grace to transition to `FINALIZED`. Anyone can then call `distribute` using the publicly recoverable splits preimage. The payer can also pull their refund early during `FINALIZED` via `withdraw_payer`.
 
 Instructions determined by on-chain state are permissionless cranks. Authority is encoded in the channel state, not the signer.
@@ -60,7 +60,7 @@ pub struct Channel {
     pub grace_period:       u32,      // [ 52..56 )  seconds; set at `open`
     pub distribution_hash:  [u8; 32], // [ 56..88 )  Blake3 digest of the canonical splits preimage, computed on-chain at `open`
     pub payer:              Address,  // [ 88..120)  refund destination + payer-authority signer
-    pub payee:              Address,  // [120..152)  PDA seed binding only (not otherwise consumed)
+    pub payee:              Address,  // [120..152)  PDA seed binding + implicit-remainder destination on `distribute`
     pub authorized_signer:  Address,  // [152..184)  voucher signer; equals `payer` when no delegate bound
     pub mint:               Address,  // [184..216)
 }
@@ -137,7 +137,7 @@ Total 48 bytes, stored align-1 (`[u8; 8]` arrays for the two ints). Field order 
 
 | Instruction | From → To | Guard |
 |---|---|---|
-| `open` | `NONEXISTENT → OPEN` | PDA does not exist; `1 ≤ num_splits ≤ MAX_DISTRIBUTION_RECIPIENTS`; `shareBps[i] > 0 ∀ i ∈ [0, num_splits)`; `0 < Σ shareBps[0..num_splits] < 10000` |
+| `open` | `NONEXISTENT → OPEN` | PDA does not exist; `0 ≤ num_splits ≤ MAX_DISTRIBUTION_RECIPIENTS`; `shareBps[i] > 0 ∀ i ∈ [0, num_splits)`; `0 ≤ Σ shareBps[0..num_splits] ≤ 10000` |
 | `settle` | `OPEN → OPEN` | `settled < voucher.cumulative ≤ deposit` & voucher fresh† |
 | `topUp` | `OPEN → OPEN` | `closureStartedAt == 0` |
 | `settleAndFinalize` | `OPEN → FINALIZED` | merchant signer; voucher optional (if present: `settled ≤ voucher.cumulative ≤ deposit` & voucher fresh†) |
@@ -164,11 +164,11 @@ Byte layout hashed at `open` and re-hashed at `distribute`:
 num_splits (u8) || [ recipient (32 bytes) || shareBps (u16 LE) ] × num_splits
 ```
 
-- Only active entries are hashed (variable length, no zero-padding).
-- `shareBps` is a `u16` in basis points (0..10000). Every active entry MUST have `shareBps > 0`; `open` rejects zero-share entries.
-- `0 < Σ shareBps[0..num_splits] < 10000` is checked at `open`; `distribute` verifies only that the submitted preimage matches the immutable hash commitment, then uses the committed bps values for payout math.
+- Only active entries are hashed (variable length, no zero-padding); `num_splits == 0` is legal and collapses to a vanilla two-party channel where the payee receives 100% of the pool.
+- `shareBps` is a `u16` in basis points (1..=10000). Every active entry MUST have `shareBps > 0`; `open` rejects zero-share entries. A single entry of `10000` is legal (recipient takes 100% of pool, payee carve-out is zero).
+- `0 ≤ Σ shareBps[0..num_splits] ≤ 10000` is checked at `open`; `distribute` verifies only that the submitted preimage matches the immutable hash commitment, then uses the committed bps values for payout math.
 - Recipient `i` receives `floor((settled - paid_out) * shareBps[i] / 10000)`.
-- The payer receives the implicit remainder share `floor((settled - paid_out) * (10000 - Σ shareBps) / 10000)`.
+- The payee receives the implicit remainder share `floor((settled - paid_out) * (10000 - Σ shareBps) / 10000)`.
 - Any residual dust from flooring is sent to the treasury ATA.
 - Default `MAX_DISTRIBUTION_RECIPIENTS = 32`. Program-level constant; tunable per deployment.
 

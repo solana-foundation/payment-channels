@@ -103,6 +103,9 @@ pub enum PaymentChannelsError {
     /// 30 - No newly settled funds to distribute
     #[error("No newly settled funds to distribute")]
     NothingToDistribute = 0x1E,
+    /// 31 - Payee token account is not ATA(payee, mint, token_program)
+    #[error("Payee token account is not ATA(payee, mint, token_program)")]
+    InvalidPayeeTokenAccount = 0x1F,
 }
 
 impl From<PaymentChannelsError> for solana_program_error::ProgramError {

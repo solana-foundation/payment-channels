@@ -9,8 +9,10 @@ use crate::state::Transmutable;
 /// Maximum number of distribution recipients per channel.
 pub const MAX_DISTRIBUTION_RECIPIENTS: usize = 32;
 
-/// Basis-point denominator. The active recipient sum must be strictly below
-/// this value so the payer keeps an implicit positive share.
+/// Basis-point denominator. `Σ shareBps` may equal this value (recipients
+/// fully drain the pool, payee carve-out is zero) or fall below it (the
+/// remainder `BPS_DENOMINATOR − Σ` becomes the payee's implicit share at
+/// `distribute`).
 pub const BPS_DENOMINATOR: u32 = 10_000;
 
 /// One entry in the distribution plan committed at `open`.
@@ -50,12 +52,14 @@ const _: () = assert!(
 );
 
 impl DistributionRecipients {
-    /// Validates `count` is in `1..=MAX_DISTRIBUTION_RECIPIENTS`, every
-    /// active bps entry is non-zero, and the active bps sum is strictly less
-    /// than 10_000.
+    /// Validates `count` is in `0..=MAX_DISTRIBUTION_RECIPIENTS`, every
+    /// active bps entry is non-zero, and the active bps sum is at most
+    /// 10_000. `count == 0` collapses to a vanilla two-party channel where
+    /// the payee receives 100 % of `pool` at `distribute`. `Σ bps == 10_000`
+    /// drives the payee's implicit-remainder share to zero.
     pub fn validate(&self) -> Result<usize, ProgramError> {
         let n = self.count as usize;
-        if n == 0 || n > MAX_DISTRIBUTION_RECIPIENTS {
+        if n > MAX_DISTRIBUTION_RECIPIENTS {
             return Err(PaymentChannelsError::InvalidRecipientCount.into());
         }
         let mut bps_sum = 0u32;
@@ -68,7 +72,7 @@ impl DistributionRecipients {
                 .checked_add(bps as u32)
                 .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
         }
-        if bps_sum >= BPS_DENOMINATOR {
+        if bps_sum > BPS_DENOMINATOR {
             return Err(PaymentChannelsError::InvalidSplitConfig.into());
         }
         Ok(n)
@@ -113,8 +117,8 @@ mod tests {
     }
 
     #[test]
-    fn validate_zero_count_rejected() {
-        assert!(make_recipients(0).validate().is_err());
+    fn validate_zero_count_accepted() {
+        assert_eq!(make_recipients(0).validate().unwrap(), 0);
     }
 
     #[test]
@@ -125,6 +129,28 @@ mod tests {
                 .unwrap(),
             MAX_DISTRIBUTION_RECIPIENTS,
         );
+    }
+
+    #[test]
+    fn validate_full_bps_sum_accepted() {
+        let mut entries = [DistributionEntry {
+            recipient: Address::default(),
+            bps: 0u16.to_le_bytes(),
+        }; MAX_DISTRIBUTION_RECIPIENTS];
+        entries[0].bps = (BPS_DENOMINATOR as u16).to_le_bytes();
+        let r = DistributionRecipients { count: 1, entries };
+        assert_eq!(r.validate().unwrap(), 1);
+    }
+
+    #[test]
+    fn validate_over_10000_bps_rejected() {
+        let mut entries = [DistributionEntry {
+            recipient: Address::default(),
+            bps: 0u16.to_le_bytes(),
+        }; MAX_DISTRIBUTION_RECIPIENTS];
+        entries[0].bps = (BPS_DENOMINATOR as u16 + 1).to_le_bytes();
+        let r = DistributionRecipients { count: 1, entries };
+        assert!(r.validate().is_err());
     }
 
     #[test]
