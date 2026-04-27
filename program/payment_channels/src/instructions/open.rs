@@ -14,8 +14,7 @@ use crate::event_engine::emit_event;
 use crate::events::Opened;
 pub use crate::instructions::helpers::MAX_DISTRIBUTION_RECIPIENTS;
 use crate::instructions::helpers::{
-    DistributionRecipients, channel_signer_seeds, derive_ata, validate_mint,
-    validate_token_account,
+    DistributionRecipients, channel_signer_seeds, derive_ata, validate_mint, validate_token_account,
 };
 use crate::state::{Transmutable, load};
 

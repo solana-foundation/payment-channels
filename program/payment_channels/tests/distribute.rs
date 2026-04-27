@@ -175,14 +175,7 @@ struct Scenario {
 impl Scenario {
     /// Token-2022 default.
     fn build(splits: Vec<Split>, deposit: u64, settled: u64, paid_out: u64, status: u8) -> Self {
-        Self::build_with_token_program(
-            splits,
-            deposit,
-            settled,
-            paid_out,
-            status,
-            TOKEN_2022,
-        )
+        Self::build_with_token_program(splits, deposit, settled, paid_out, status, TOKEN_2022)
     }
 
     fn build_with_token_program(
