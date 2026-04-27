@@ -86,7 +86,7 @@ Quick reference for every instruction exposed by the payment-channels program: d
 
 ## `distribute` (7)
 
-Permissionless crank. Verifies the committed splits preimage (Blake3) against `Channel.distribution_hash`, then drains `pool = settled − paid_out` to the merchant side: each recipient gets `floor(pool * shareBps[i] / 10000)`, the **payee** gets the implicit remainder `floor(pool * (10000 − Σ shareBps) / 10000)`, and the rounding residual goes to the treasury ATA. From `FINALIZED`, also refunds the payer the unspent `deposit − settled` headroom (gated by `payer_withdrawn_at == 0`) and tombstones the escrow ATA + the Channel PDA.
+Permissionless crank. Verifies the committed splits preimage (Blake3) against `Channel.distribution_hash`, then pays `pool = settled − paid_out` to the merchant side: each recipient gets `floor(pool * shareBps[i] / 10000)` and the **payee** gets the implicit remainder `floor(pool * (10000 − Σ shareBps) / 10000)`. From `OPEN`, flooring residual remains in the channel ATA. From `FINALIZED`, the residual is swept to the treasury ATA, the payer receives the unspent `deposit − settled` headroom (gated by `payer_withdrawn_at == 0`), and the escrow ATA + Channel PDA are tombstoned.
 
 **Args**
 
@@ -103,7 +103,7 @@ Permissionless crank. Verifies the committed splits preimage (Blake3) against `C
 | 2 | `channel_token_account` | — | yes | Escrow ATA owned by `channel`. Source for all transfers; closed on tombstone. |
 | 3 | `payer_token_account` | — | yes | `ATA(payer, mint, token_program)`. Used **only** by the FINALIZED refund branch. |
 | 4 | `payee_token_account` | — | yes | `ATA(payee, mint, token_program)`. Receives `floor(pool * (10000 − Σ shareBps) / 10000)` whenever `pool > 0`. The transfer is a no-op when `Σ shareBps == 10000`; the account is still validated. |
-| 5 | `treasury_token_account` | — | yes | `ATA(TREASURY_OWNER, mint, token_program)`. Receives flooring residual. |
+| 5 | `treasury_token_account` | — | yes | `ATA(TREASURY_OWNER, mint, token_program)`. Receives flooring residual only when `distribute` runs from `FINALIZED`. |
 | 6 | `mint` | — | — | Token mint bound at `open`. |
 | 7 | `token_program` | — | — | SPL Token or Token-2022, must equal the program that owns the mint and ATAs. |
 | 8…N | `recipient_token_accounts[i]` | — | yes | `ATA(recipients.entries[i].recipient, mint, token_program)` in the same order as the active preimage entries. |

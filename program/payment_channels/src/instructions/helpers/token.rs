@@ -1,4 +1,5 @@
-use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
+use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer, error::ProgramError};
+use pinocchio_token_2022::instructions::TransferChecked;
 
 use crate::constants::{ATA_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID};
 use crate::errors::PaymentChannelsError;
@@ -50,6 +51,45 @@ pub fn derive_ata(owner: &Address, mint: &Address, token_program: &Address) -> A
         &ATA_PROGRAM_ID,
     )
     .0
+}
+
+/// Validates only the associated-token-account address for a role.
+pub fn validate_ata_address(
+    account: &AccountView,
+    expected_owner: &Address,
+    expected_mint: &Address,
+    token_program: &Address,
+    account_error: PaymentChannelsError,
+) -> ProgramResult {
+    if *account.address() != derive_ata(expected_owner, expected_mint, token_program) {
+        return Err(account_error.into());
+    }
+    Ok(())
+}
+
+/// Validates that `account` is the expected ATA for `expected_owner` and then
+/// validates the underlying token-account layout and state.
+pub fn validate_ata_token_account(
+    account: &AccountView,
+    expected_owner: &Address,
+    expected_mint: &Address,
+    token_program: &Address,
+    account_error: PaymentChannelsError,
+) -> ProgramResult {
+    validate_ata_address(
+        account,
+        expected_owner,
+        expected_mint,
+        token_program,
+        account_error,
+    )?;
+    validate_token_account(
+        account,
+        expected_mint,
+        expected_owner,
+        token_program,
+        account_error,
+    )
 }
 
 /// Validates a mint account against `token_program` and returns its decimals.
@@ -141,6 +181,27 @@ pub fn validate_token_account(
     Ok(())
 }
 
+/// Returns the raw token amount from an already-validated token account.
+pub fn token_account_amount(
+    account: &AccountView,
+    token_program: &Address,
+    account_error: PaymentChannelsError,
+) -> Result<u64, ProgramError> {
+    if *token_program == SPL_TOKEN_PROGRAM_ID {
+        Ok(pinocchio_token::state::Account::from_account_view(account)
+            .map_err(|_| account_error)?
+            .amount())
+    } else if *token_program == TOKEN_2022_PROGRAM_ID {
+        Ok(
+            pinocchio_token_2022::state::Account::from_account_view(account)
+                .map_err(|_| account_error)?
+                .amount(),
+        )
+    } else {
+        Err(PaymentChannelsError::InvalidTokenProgram.into())
+    }
+}
+
 /// Walks the Token-2022 TLV trailer and rejects any extension type not
 /// whitelisted for the given account kind. Stops at the first uninitialized
 /// or all-zero region, which marks unused TLV space.
@@ -173,6 +234,34 @@ fn scan_tlv_extensions(mut data: &[u8], is_mint: bool) -> ProgramResult {
     }
 
     Ok(())
+}
+
+/// Invokes a signed `TransferChecked` CPI from a channel-owned token account,
+/// skipping the CPI entirely when `amount == 0`.
+pub fn transfer_checked_signed_if_nonzero(
+    from: &AccountView,
+    mint: &AccountView,
+    to: &AccountView,
+    authority: &AccountView,
+    amount: u64,
+    decimals: u8,
+    token_program: &Address,
+    signers: &[Signer<'_, '_>],
+) -> ProgramResult {
+    if amount == 0 {
+        return Ok(());
+    }
+
+    TransferChecked {
+        from,
+        mint,
+        to,
+        authority,
+        amount,
+        decimals,
+        token_program,
+    }
+    .invoke_signed(signers)
 }
 
 /// Whitelist of Token-2022 extension type ids that are safe for this program:

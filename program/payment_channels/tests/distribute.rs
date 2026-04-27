@@ -358,6 +358,31 @@ fn happy_path_open_splits() {
 }
 
 #[test]
+fn open_flooring_residual_stays_in_channel_ata() {
+    let splits = vec![
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 3333,
+        },
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 3333,
+        },
+    ];
+    let (deposit, settled, paid_out) = pool(200, 0, 100);
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+
+    s.send(s.distribute_ix()).expect("distribute ok");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 33);
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 33);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 33);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.channel_ata), 101);
+    assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
+}
+
+#[test]
 fn happy_path_open_splits_spl_token() {
     let splits = vec![
         Split {
@@ -477,6 +502,44 @@ fn finalized_zero_pool_still_refunds_and_tombstones() {
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
+    assert_eq!(
+        s.svm
+            .get_account(&s.channel)
+            .map(|a| a.lamports)
+            .unwrap_or(0),
+        0
+    );
+}
+
+#[test]
+fn finalized_sweeps_accumulated_flooring_residual_to_treasury() {
+    let splits = vec![
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 3333,
+        },
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 3333,
+        },
+    ];
+    let (deposit, settled, paid_out) = pool(250, 100, 150);
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_FINALIZED);
+
+    // Simulate a prior OPEN distribution of 100: 33 + 33 + 33 moved out and
+    // 1 unit of flooring residual stayed in escrow.
+    set_token_balance(&mut s.svm, &s.channel_ata, deposit - paid_out + 1);
+
+    s.send(s.distribute_ix()).expect("distribute ok");
+
+    // Final pool is 50: 16 + 16 + 16 moves out, 2 more units of residual stay
+    // in escrow, then FINALIZED sweeps both old and new residual dust.
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 16);
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 16);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 16);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 3);
     assert_eq!(
         s.svm
             .get_account(&s.channel)
@@ -501,6 +564,10 @@ fn happy_path_finalized_already_withdrawn() {
     channel_state::set_payer_withdrawn_at(&mut s.svm, &s.channel, 1_700_000_000);
     set_token_balance(&mut s.svm, &s.channel_ata, settled - paid_out);
 
+    let payer_balance_before = s.svm.get_account(&s.payer).unwrap().lamports;
+    let channel_lamports_before = s.svm.get_account(&s.channel).unwrap().lamports;
+    let channel_ata_lamports_before = s.svm.get_account(&s.channel_ata).unwrap().lamports;
+
     s.send(s.distribute_ix()).expect("distribute ok");
 
     // Recipient gets 50 % of the 150k pool; payee picks up the 50 % implicit
@@ -508,6 +575,17 @@ fn happy_path_finalized_already_withdrawn() {
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
+    let payer_after = s.svm.get_account(&s.payer).unwrap().lamports;
+    let channel_lamports_after = s
+        .svm
+        .get_account(&s.channel)
+        .map(|a| a.lamports)
+        .unwrap_or(0);
+    assert_eq!(channel_lamports_after, 0);
+    assert_eq!(
+        payer_after - payer_balance_before,
+        channel_lamports_before + channel_ata_lamports_before
+    );
 }
 
 #[test]
@@ -754,6 +832,28 @@ fn num_recipients_exceeds_max() {
 }
 
 #[test]
+fn recipient_tail_length_mismatch_rejects() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 1000,
+    }];
+    let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
+    let ix = build_distribute_ix(
+        &s.channel,
+        &s.payer,
+        &s.channel_ata,
+        &s.payer_ata,
+        &s.payee_ata,
+        &s.treasury_ata,
+        &s.mint,
+        &s.token_program,
+        &[],
+        s.recipients(),
+    );
+    expect_custom_err(s.send(ix), PaymentChannelsError::InvalidRecipientCount);
+}
+
+#[test]
 fn bps_sum_equals_10000_no_payee_share() {
     // Σ shareBps == 10_000 — payee carve-out is zero, recipients fully drain
     // the pool. Payee ATA is still validated but receives nothing.
@@ -778,6 +878,35 @@ fn bps_sum_equals_10000_no_payee_share() {
     assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
     assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
+}
+
+#[test]
+fn bps_sum_equals_10000_still_validates_payee_ata() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 10_000,
+    }];
+    let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
+    let rogue_owner = Pubkey::new_unique();
+    s.svm.airdrop(&rogue_owner, 1_000_000).ok();
+    let rogue_ata = CreateAssociatedTokenAccount::new(&mut s.svm, &s.fee_payer, &s.mint)
+        .token_program_id(&s.token_program)
+        .owner(&rogue_owner)
+        .send()
+        .unwrap();
+    let ix = build_distribute_ix(
+        &s.channel,
+        &s.payer,
+        &s.channel_ata,
+        &s.payer_ata,
+        &rogue_ata,
+        &s.treasury_ata,
+        &s.mint,
+        &s.token_program,
+        &s.recipient_atas,
+        s.recipients(),
+    );
+    expect_custom_err(s.send(ix), PaymentChannelsError::InvalidPayeeTokenAccount);
 }
 
 #[test]

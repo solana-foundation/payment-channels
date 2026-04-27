@@ -39,10 +39,20 @@ impl DistributionEntry {
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct DistributionRecipients {
-    /// Number of active entries (1–32).
+    /// Number of active entries (0–[`MAX_DISTRIBUTION_RECIPIENTS`]).
     pub count: u8,
     // Codama requires a literal here; keep in sync with MAX_DISTRIBUTION_RECIPIENTS.
     pub entries: [DistributionEntry; 32],
+}
+
+/// Validated active view over a packed distribution preimage.
+pub struct ValidatedDistribution<'a> {
+    /// Active entries selected by `DistributionRecipients::count`.
+    pub entries: &'a [DistributionEntry],
+    /// Sum of all active recipient basis points.
+    pub bps_sum: u32,
+    /// Basis points left for the channel payee's implicit remainder share.
+    pub payee_bps: u32,
 }
 
 // Fails to compile if the literal above drifts from MAX_DISTRIBUTION_RECIPIENTS.
@@ -57,13 +67,14 @@ impl DistributionRecipients {
     /// 10_000. `count == 0` collapses to a vanilla two-party channel where
     /// the payee receives 100 % of `pool` at `distribute`. `Σ bps == 10_000`
     /// drives the payee's implicit-remainder share to zero.
-    pub fn validate(&self) -> Result<usize, ProgramError> {
+    pub fn validate_view(&self) -> Result<ValidatedDistribution<'_>, ProgramError> {
         let n = self.count as usize;
         if n > MAX_DISTRIBUTION_RECIPIENTS {
             return Err(PaymentChannelsError::InvalidRecipientCount.into());
         }
         let mut bps_sum = 0u32;
-        for entry in self.entries[..n].iter() {
+        let entries = &self.entries[..n];
+        for entry in entries.iter() {
             let bps = entry.bps();
             if bps == 0 {
                 return Err(PaymentChannelsError::InvalidSplitConfig.into());
@@ -75,7 +86,17 @@ impl DistributionRecipients {
         if bps_sum > BPS_DENOMINATOR {
             return Err(PaymentChannelsError::InvalidSplitConfig.into());
         }
-        Ok(n)
+        Ok(ValidatedDistribution {
+            entries,
+            bps_sum,
+            payee_bps: BPS_DENOMINATOR - bps_sum,
+        })
+    }
+
+    /// Backwards-compatible validation helper for callers that only need the
+    /// active recipient count.
+    pub fn validate(&self) -> Result<usize, ProgramError> {
+        Ok(self.validate_view()?.entries.len())
     }
 
     /// Raw bytes of `count(1) || entries[0..count](count×34)` — the blake3
@@ -86,6 +107,7 @@ impl DistributionRecipients {
         &self.as_bytes()[..1 + n * DistributionEntry::LEN]
     }
 
+    /// Blake3 hash of the active preimage committed into the channel at `open`.
     pub fn preimage_hash(&self) -> [u8; 32] {
         super::blake3(self.preimage())
     }
@@ -100,6 +122,15 @@ unsafe impl Transmutable for DistributionEntry {
 }
 
 const _: () = assert!(size_of::<DistributionEntry>() == 34);
+
+/// `floor(pool * bps / 10_000)` in u128 to avoid overflow.
+#[inline]
+pub fn floor_bps_share(pool: u64, bps: u32) -> Result<u64, ProgramError> {
+    let prod = (pool as u128)
+        .checked_mul(bps as u128)
+        .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+    Ok((prod / (BPS_DENOMINATOR as u128)) as u64)
+}
 
 #[cfg(test)]
 mod tests {
@@ -119,6 +150,22 @@ mod tests {
     #[test]
     fn validate_zero_count_accepted() {
         assert_eq!(make_recipients(0).validate().unwrap(), 0);
+    }
+
+    #[test]
+    fn validate_view_returns_active_entries_and_payee_bps() {
+        let mut entries = [DistributionEntry {
+            recipient: Address::default(),
+            bps: 0u16.to_le_bytes(),
+        }; MAX_DISTRIBUTION_RECIPIENTS];
+        entries[0].bps = 2500u16.to_le_bytes();
+        entries[1].bps = 3000u16.to_le_bytes();
+        let r = DistributionRecipients { count: 2, entries };
+        let view = r.validate_view().unwrap();
+
+        assert_eq!(view.entries.len(), 2);
+        assert_eq!(view.bps_sum, 5500);
+        assert_eq!(view.payee_bps, 4500);
     }
 
     #[test]
@@ -192,5 +239,11 @@ mod tests {
         r1.entries[0].recipient = Address::default();
         r2.entries[0].recipient = Address::default();
         assert_ne!(r1.preimage_hash(), r2.preimage_hash());
+    }
+
+    #[test]
+    fn floor_bps_share_rounds_down() {
+        assert_eq!(floor_bps_share(10, 3333).unwrap(), 3);
+        assert_eq!(floor_bps_share(10, 3334).unwrap(), 3);
     }
 }

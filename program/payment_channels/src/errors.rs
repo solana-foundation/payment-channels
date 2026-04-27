@@ -42,7 +42,7 @@ pub enum PaymentChannelsError {
     InvalidDistributionHash = 13,
     #[error("Deposit must be non-zero")]
     DepositMustBeNonZero = 14,
-    #[error("num_recipients outside [1, MAX_DISTRIBUTION_RECIPIENTS]")]
+    #[error("num_recipients outside [0, MAX_DISTRIBUTION_RECIPIENTS]")]
     InvalidRecipientCount = 15,
     #[error("Channel account does not match derived PDA")]
     ChannelAddressMismatch = 16,
@@ -50,7 +50,7 @@ pub enum PaymentChannelsError {
     EscrowAddressMismatch = 17,
     #[error("Payer and payee must be different accounts")]
     PayerPayeeMustDiffer = 18,
-    #[error("Each shareBps must be non-zero and Σbps must be strictly less than 10_000")]
+    #[error("Each shareBps must be non-zero and Σbps must be at most 10_000")]
     InvalidSplitConfig = 19,
     #[error("Recipient token account is not the expected ATA")]
     InvalidRecipientAccount = 20,

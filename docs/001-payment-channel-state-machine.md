@@ -10,7 +10,7 @@ This ADR specifies the channel lifecycle, instruction set, and on-chain PDA layo
 
 The program implements unidirectional payment channels. Channels are PDAs holding escrowed tokens. Payer-signed off-chain vouchers carry a cumulative amount committed to a `settled` watermark. The split config (a list of `(recipient, shareBps)` with `0 ≤ sum(shareBps) ≤ 10000`) is passed to `open`. The program stores the 32-byte Blake3 digest in `Channel.distribution_hash`. Splits are recoverable from the `open` instruction data. Token movement occurs at closure via two paths:
 
-- **Happy path (`settleAndFinalize` + `distribute`)**: Merchant commits the final voucher (transitions to `FINALIZED`) and runs `distribute` with the splits preimage. The program verifies the Blake3 hash, pays `settled - paid_out` proportionally across recipients, pays the payee's implicit remainder share, sends rounding residual dust to the treasury ATA, refunds `deposit - settled` to the payer, and tombstones the PDA. These instructions SHOULD be bundled.
+- **Happy path (`settleAndFinalize` + `distribute`)**: Merchant commits the final voucher (transitions to `FINALIZED`) and runs `distribute` with the splits preimage. The program verifies the Blake3 hash, pays `settled - paid_out` proportionally across recipients, pays the payee's implicit remainder share, sweeps residual dust to the treasury ATA, refunds `deposit - settled` to the payer, and tombstones the PDA. These instructions SHOULD be bundled.
 - **Unhappy path (post-grace permissionless crank)**: If the merchant fails to submit a voucher after `requestClose` starts the grace period, anyone can call `finalize` post-grace to transition to `FINALIZED`. Anyone can then call `distribute` using the publicly recoverable splits preimage. The payer can also pull their refund early during `FINALIZED` via `withdraw_payer`.
 
 Instructions determined by on-chain state are permissionless cranks. Authority is encoded in the channel state, not the signer.
@@ -169,7 +169,7 @@ num_splits (u8) || [ recipient (32 bytes) || shareBps (u16 LE) ] × num_splits
 - `0 ≤ Σ shareBps[0..num_splits] ≤ 10000` is checked at `open`; `distribute` verifies only that the submitted preimage matches the immutable hash commitment, then uses the committed bps values for payout math.
 - Recipient `i` receives `floor((settled - paid_out) * shareBps[i] / 10000)`.
 - The payee receives the implicit remainder share `floor((settled - paid_out) * (10000 - Σ shareBps) / 10000)`.
-- Any residual dust from flooring is sent to the treasury ATA.
+- During `OPEN`, residual dust from flooring remains in the channel ATA. During `FINALIZED`, residual dust is swept to the treasury ATA before the escrow ATA is closed.
 - Default `MAX_DISTRIBUTION_RECIPIENTS = 32`. Program-level constant; tunable per deployment.
 
 ## Token Program Support

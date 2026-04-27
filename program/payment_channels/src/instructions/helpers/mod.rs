@@ -8,11 +8,15 @@ pub mod voucher;
 
 pub use distribution::{
     BPS_DENOMINATOR, DistributionEntry, DistributionRecipients, MAX_DISTRIBUTION_RECIPIENTS,
+    ValidatedDistribution, floor_bps_share,
 };
 pub use hash::blake3;
-pub use token::{derive_ata, validate_mint, validate_token_account};
+pub use token::{
+    derive_ata, token_account_amount, transfer_checked_signed_if_nonzero, validate_ata_address,
+    validate_ata_token_account, validate_mint, validate_token_account,
+};
 
-use crate::state::CHANNEL_SEED;
+use crate::state::channel::CHANNEL_SEED;
 use pinocchio::cpi::Seed;
 
 /// Constructs the PDA signer seeds for a channel account.
