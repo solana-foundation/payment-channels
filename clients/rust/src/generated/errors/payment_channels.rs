@@ -112,6 +112,9 @@ pub enum PaymentChannelsError {
     /// 33 - Recipient ATA tail length does not match the committed plan's entry count
     #[error("Recipient ATA tail length does not match the committed plan's entry count")]
     RecipientAccountCountMismatch = 0x21,
+    /// 34 - Caller is not the channel payer
+    #[error("Caller is not the channel payer")]
+    UnauthorizedPayer = 0x22,
 }
 
 impl From<PaymentChannelsError> for solana_program_error::ProgramError {

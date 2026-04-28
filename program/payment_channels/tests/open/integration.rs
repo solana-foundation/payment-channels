@@ -1,13 +1,7 @@
-//! Distribution-plan validation tests for the `open` instruction.
-//!
-//! Verifies that well-formed plans (any count in 1..=MAX) advance past plan
-//! parsing and reach the channel-address check (`InvalidAccountData`).
-//! Out-of-range counts are covered in `bounds.rs`.
-
+use litesvm::LiteSVM;
 use mollusk_svm::result::ProgramResult;
 use payment_channels::PaymentChannelsError;
 use payment_channels::instructions::open::MAX_DISTRIBUTION_RECIPIENTS;
-use solana_instruction::{AccountMeta, Instruction};
 use solana_message::Message;
 use solana_program_error::ProgramError;
 use solana_pubkey::Pubkey;
@@ -15,9 +9,8 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 
 use super::{
-    ATA_PROGRAM, EVENT_AUTHORITY, SPL_TOKEN, SYSTEM_PROGRAM, SYSVAR_RENT, TOKEN_2022, derive_pdas,
-    derive_pdas_with_token_program, open_ix_data, open_ix_with_token_program, run_open,
-    setup_funded_svm, setup_funded_svm_with_token_program,
+    OpenRun, derive_pdas, derive_pdas_with_token_program, open_ix, open_ix_with_token_program,
+    setup_funded_svm, setup_funded_svm_with_token_program, TOKEN_2022,
 };
 use crate::common::token_2022::{
     EXT_CPI_GUARD, EXT_GROUP_MEMBER_POINTER, EXT_GROUP_POINTER, EXT_IMMUTABLE_OWNER,
@@ -26,39 +19,55 @@ use crate::common::token_2022::{
     POINTER_EXTENSION_LEN, TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN,
     add_account_extension, add_mint_extension,
 };
-use crate::common::{PROGRAM_ID, expect_custom_err, load_program};
+use crate::common::{ProgramLoader, SPL_TOKEN, expect_custom_err};
 
 const SALT: u64 = 1;
 const DEPOSIT: u64 = 1_000_000;
-const GRACE: u32 = 3600;
-const FIRST_RECIPIENT_OFFSET: usize = 1 + 8 + 8 + 4 + 1;
-const FIRST_BPS_OFFSET: usize = FIRST_RECIPIENT_OFFSET + 32;
-const ENTRY_LEN: usize = 34;
+const GRACE: u32 = 3_600;
 
-fn open_ix_data_with_first_recipient(recipient: &Pubkey) -> Vec<u8> {
-    let mut data = open_ix_data(SALT, DEPOSIT, GRACE, 1);
-    data[FIRST_RECIPIENT_OFFSET..FIRST_RECIPIENT_OFFSET + 32].copy_from_slice(recipient.as_ref());
-    data
-}
-
-fn set_bps(data: &mut [u8], index: usize, bps: u16) {
-    let offset = FIRST_BPS_OFFSET + index * ENTRY_LEN;
-    data[offset..offset + 2].copy_from_slice(&bps.to_le_bytes());
-}
-
-fn token_balance(svm: &litesvm::LiteSVM, token_account: &Pubkey) -> u64 {
-    let acct = svm
-        .get_account(token_account)
-        .expect("token account exists");
+fn token_balance(svm: &LiteSVM, ata: &Pubkey) -> u64 {
+    let acct = svm.get_account(ata).expect("token account exists");
     let mut buf = [0u8; 8];
     buf.copy_from_slice(&acct.data[64..72]);
     u64::from_le_bytes(buf)
 }
 
 #[test]
+fn zero_deposit_rejected() {
+    assert_eq!(
+        OpenRun::new(SALT, 0, GRACE, 1).run(),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::DepositMustBeNonZero as u32
+        )),
+    );
+}
+
+#[test]
+fn zero_recipients_passes_arg_validation() {
+    // count == 0 is legal: the channel becomes a vanilla two-party channel
+    // where the payee receives 100% of `pool` at `distribute`.
+    assert_eq!(
+        OpenRun::new(SALT, DEPOSIT, GRACE, 0).run(),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::ChannelAddressMismatch as u32
+        )),
+    );
+}
+
+#[test]
+fn too_many_recipients_rejected() {
+    assert_eq!(
+        OpenRun::new(SALT, DEPOSIT, GRACE, MAX_DISTRIBUTION_RECIPIENTS as u8 + 1).run(),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::InvalidRecipientCount as u32
+        )),
+    );
+}
+
+#[test]
 fn single_recipient_passes_arg_validation() {
     assert_eq!(
-        run_open(open_ix_data(SALT, DEPOSIT, GRACE, 1)),
+        OpenRun::new(SALT, DEPOSIT, GRACE, 1).run(),
         ProgramResult::Failure(ProgramError::Custom(
             PaymentChannelsError::ChannelAddressMismatch as u32
         )),
@@ -68,12 +77,7 @@ fn single_recipient_passes_arg_validation() {
 #[test]
 fn max_recipients_passes_arg_validation() {
     assert_eq!(
-        run_open(open_ix_data(
-            SALT,
-            DEPOSIT,
-            GRACE,
-            MAX_DISTRIBUTION_RECIPIENTS as u8
-        )),
+        OpenRun::new(SALT, DEPOSIT, GRACE, MAX_DISTRIBUTION_RECIPIENTS as u8).run(),
         ProgramResult::Failure(ProgramError::Custom(
             PaymentChannelsError::ChannelAddressMismatch as u32
         )),
@@ -81,12 +85,89 @@ fn max_recipients_passes_arg_validation() {
 }
 
 #[test]
-fn bps_zero_rejected() {
-    let mut data = open_ix_data(SALT, DEPOSIT, GRACE, 1);
-    set_bps(&mut data, 0, 0);
-
+fn unsigned_payer_rejected() {
     assert_eq!(
-        run_open(data),
+        OpenRun {
+            payer_is_signer: false,
+            ..OpenRun::new(SALT, DEPOSIT, GRACE, 1)
+        }
+        .run(),
+        ProgramResult::Failure(ProgramError::MissingRequiredSignature),
+    );
+}
+
+#[test]
+fn payer_equals_payee_rejected() {
+    let same = Pubkey::new_unique();
+    assert_eq!(
+        OpenRun {
+            payer: same,
+            payee: same,
+            ..OpenRun::new(SALT, DEPOSIT, GRACE, 1)
+        }
+        .run(),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::PayerPayeeMustDiffer as u32
+        )),
+    );
+}
+
+#[test]
+fn wrong_channel_pda_rejected() {
+    let payer = Pubkey::new_unique();
+    let payee = Pubkey::new_unique();
+    let mint = Pubkey::new_unique();
+    let authorized_signer = Pubkey::new_unique();
+    let wrong_channel = Pubkey::new_unique();
+    assert_eq!(
+        OpenRun {
+            payer,
+            payee,
+            mint,
+            authorized_signer,
+            channel: wrong_channel,
+            ..OpenRun::new(SALT, DEPOSIT, GRACE, 1)
+        }
+        .run(),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::ChannelAddressMismatch as u32
+        )),
+    );
+}
+
+#[test]
+fn wrong_escrow_ata_rejected() {
+    let payer = Pubkey::new_unique();
+    let payee = Pubkey::new_unique();
+    let mint = Pubkey::new_unique();
+    let authorized_signer = Pubkey::new_unique();
+    let (channel, _) = derive_pdas(&payer, &payee, &mint, &authorized_signer, SALT);
+    let wrong_ata = Pubkey::new_unique();
+    assert_eq!(
+        OpenRun {
+            payer,
+            payee,
+            mint,
+            authorized_signer,
+            channel,
+            channel_ata: wrong_ata,
+            ..OpenRun::new(SALT, DEPOSIT, GRACE, 1)
+        }
+        .run(),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::EscrowAddressMismatch as u32
+        )),
+    );
+}
+
+#[test]
+fn bps_zero_rejected() {
+    assert_eq!(
+        OpenRun {
+            recipients: Some(vec![(Pubkey::new_unique(), 0)]),
+            ..OpenRun::new(SALT, DEPOSIT, GRACE, 1)
+        }
+        .run(),
         ProgramResult::Failure(ProgramError::Custom(
             PaymentChannelsError::InvalidSplitConfig as u32
         )),
@@ -97,57 +178,32 @@ fn bps_zero_rejected() {
 fn bps_sum_equals_10000_passes_arg_validation() {
     // Σ shareBps == 10_000 is legal under the payee-implicit-remainder model;
     // remainder is 0 and the payee receives no carve-out from `pool`.
-    let mut data = open_ix_data(SALT, DEPOSIT, GRACE, 2);
-    set_bps(&mut data, 0, 5000);
-    set_bps(&mut data, 1, 5000);
-
     assert_eq!(
-        run_open(data),
+        OpenRun {
+            recipients: Some(vec![
+                (Pubkey::new_unique(), 5000),
+                (Pubkey::new_unique(), 5000),
+            ]),
+            ..OpenRun::new(SALT, DEPOSIT, GRACE, 2)
+        }
+        .run(),
         ProgramResult::Failure(ProgramError::Custom(
             PaymentChannelsError::ChannelAddressMismatch as u32
-        )),
-    );
-}
-
-#[test]
-fn zero_recipients_passes_arg_validation() {
-    // count == 0 is legal: the channel becomes a vanilla two-party channel
-    // where the payee receives 100 % of `pool` at `distribute`.
-    assert_eq!(
-        run_open(open_ix_data(SALT, DEPOSIT, GRACE, 0)),
-        ProgramResult::Failure(ProgramError::Custom(
-            PaymentChannelsError::ChannelAddressMismatch as u32
-        )),
-    );
-}
-
-#[test]
-fn duplicate_recipient_rejected() {
-    // Two entries with the same recipient address must reject at `open`.
-    // Hoisted there so `distribute`'s preimage-hash check transitively
-    // proves uniqueness without re-scanning.
-    let mut data = open_ix_data(SALT, DEPOSIT, GRACE, 2);
-    let second_recipient_offset = FIRST_RECIPIENT_OFFSET + ENTRY_LEN;
-    let first_recipient = data[FIRST_RECIPIENT_OFFSET..FIRST_RECIPIENT_OFFSET + 32].to_vec();
-    data[second_recipient_offset..second_recipient_offset + 32].copy_from_slice(&first_recipient);
-
-    assert_eq!(
-        run_open(data),
-        ProgramResult::Failure(ProgramError::Custom(
-            PaymentChannelsError::DuplicateRecipient as u32
         )),
     );
 }
 
 #[test]
 fn bps_sum_above_10000_rejected() {
-    // Σ shareBps == 10_001 is past the new upper bound and must reject.
-    let mut data = open_ix_data(SALT, DEPOSIT, GRACE, 2);
-    set_bps(&mut data, 0, 5000);
-    set_bps(&mut data, 1, 5001);
-
     assert_eq!(
-        run_open(data),
+        OpenRun {
+            recipients: Some(vec![
+                (Pubkey::new_unique(), 5000),
+                (Pubkey::new_unique(), 5001),
+            ]),
+            ..OpenRun::new(SALT, DEPOSIT, GRACE, 2)
+        }
+        .run(),
         ProgramResult::Failure(ProgramError::Custom(
             PaymentChannelsError::InvalidSplitConfig as u32
         )),
@@ -155,47 +211,92 @@ fn bps_sum_above_10000_rejected() {
 }
 
 #[test]
+fn duplicate_recipient_rejected() {
+    // Hoisted to `open` so distribute's preimage-hash check transitively
+    // proves uniqueness without re-scanning the recipient list.
+    let dup = Pubkey::new_unique();
+    assert_eq!(
+        OpenRun {
+            recipients: Some(vec![(dup, 4000), (dup, 4000)]),
+            ..OpenRun::new(SALT, DEPOSIT, GRACE, 2)
+        }
+        .run(),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::DuplicateRecipient as u32
+        )),
+    );
+}
+
+#[test]
 fn channel_pda_recipient_rejected() {
-    let mut svm = load_program();
+    // Listing the channel PDA itself as a recipient is rejected at `open`
+    // — the preimage-hash check at `distribute` would otherwise let dust
+    // accumulate to a non-distributable address.
+    let payer = Pubkey::new_unique();
+    let payee = Pubkey::new_unique();
+    let mint = Pubkey::new_unique();
+    let authorized_signer = Pubkey::new_unique();
+    let (channel, channel_ata) = derive_pdas(&payer, &payee, &mint, &authorized_signer, SALT);
+    assert_eq!(
+        OpenRun {
+            payer,
+            payee,
+            mint,
+            authorized_signer,
+            channel,
+            channel_ata,
+            recipients: Some(vec![(channel, 5000)]),
+            ..OpenRun::new(SALT, DEPOSIT, GRACE, 1)
+        }
+        .run(),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::InvalidSplitConfig as u32
+        )),
+    );
+}
+
+#[test]
+fn non_ata_payer_token_account_rejected() {
+    use litesvm_token::CreateAccount;
+
+    let mut svm = LiteSVM::load_program();
 
     let payee = Pubkey::new_unique();
     let authorized_signer = Pubkey::new_unique();
-    let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
+    let (payer, mint, _payer_ata) = setup_funded_svm(&mut svm, DEPOSIT);
     let (channel, channel_token_account) =
         derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
-    let ix_data = open_ix_data_with_first_recipient(&channel);
 
-    let ix = Instruction::new_with_bytes(
-        PROGRAM_ID,
-        &ix_data,
-        vec![
-            AccountMeta::new(payer.pubkey(), true),
-            AccountMeta::new_readonly(payee, false),
-            AccountMeta::new_readonly(mint, false),
-            AccountMeta::new_readonly(authorized_signer, false),
-            AccountMeta::new(channel, false),
-            AccountMeta::new(payer_token_account, false),
-            AccountMeta::new(channel_token_account, false),
-            AccountMeta::new_readonly(SPL_TOKEN, false),
-            AccountMeta::new_readonly(SYSTEM_PROGRAM, false),
-            AccountMeta::new_readonly(SYSVAR_RENT, false),
-            AccountMeta::new_readonly(ATA_PROGRAM, false),
-            AccountMeta::new_readonly(EVENT_AUTHORITY, false),
-            AccountMeta::new_readonly(PROGRAM_ID, false),
-        ],
+    let non_ata = CreateAccount::new(&mut svm, &payer, &mint)
+        .owner(&payer.pubkey())
+        .token_program_id(&SPL_TOKEN)
+        .send()
+        .unwrap();
+
+    let ix = open_ix(
+        &payer.pubkey(),
+        &payee,
+        &mint,
+        &authorized_signer,
+        &channel,
+        &non_ata,
+        &channel_token_account,
+        SALT,
+        DEPOSIT,
+        GRACE,
+        1,
     );
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
     let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
-
     expect_custom_err(
         svm.send_transaction(tx),
-        PaymentChannelsError::InvalidSplitConfig,
+        PaymentChannelsError::InvalidPayerTokenAccount,
     );
 }
 
 #[test]
 fn token_2022_allowed_mint_and_immutable_owner_payer_account_extensions_succeed() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
 
     let payee = Pubkey::new_unique();
     let authorized_signer = Pubkey::new_unique();
@@ -252,7 +353,7 @@ fn unsupported_token_2022_mint_extensions_reject_before_channel_creation() {
         (EXT_TRANSFER_HOOK, 64),
         (EXT_MINT_CLOSE_AUTHORITY, 32),
     ] {
-        let mut svm = load_program();
+        let mut svm = LiteSVM::load_program();
 
         let payee = Pubkey::new_unique();
         let authorized_signer = Pubkey::new_unique();
@@ -296,7 +397,7 @@ fn unsupported_token_2022_mint_extensions_reject_before_channel_creation() {
 #[test]
 fn unsupported_token_2022_payer_account_extensions_reject_before_channel_creation() {
     for extension_type in [EXT_MEMO_TRANSFER, EXT_CPI_GUARD] {
-        let mut svm = load_program();
+        let mut svm = LiteSVM::load_program();
 
         let payee = Pubkey::new_unique();
         let authorized_signer = Pubkey::new_unique();

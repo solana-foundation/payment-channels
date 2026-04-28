@@ -2,34 +2,62 @@
 
 #![allow(dead_code)]
 
-pub mod channel_state;
-pub mod open;
-pub mod settle;
 pub mod token_2022;
 
 use litesvm::LiteSVM;
+use mollusk_svm::Mollusk;
 use payment_channels::PaymentChannelsError;
+use payment_channels::state::Channel;
+use payment_channels::state::channel::ChannelStatus;
 use solana_instruction::error::InstructionError;
-use solana_pubkey::Pubkey;
+use solana_pubkey::{Pubkey, pubkey};
 use solana_transaction_error::TransactionError;
 
-/// Payment channels program program ID pubkey
+/// Payment channels program ID.
 pub const PROGRAM_ID: Pubkey = Pubkey::new_from_array(*payment_channels::ID.as_array());
 
-/// Boot a fresh litesvm instance with the compiled program loaded at
-/// [`PROGRAM_ID`]. `PAYMENT_CHANNELS_SO` overrides the default build
-/// output path for CI and custom artifact layouts.
-pub fn load_program() -> LiteSVM {
-    let mut svm = LiteSVM::new();
-    let path = std::env::var("PAYMENT_CHANNELS_SO")
-        .unwrap_or_else(|_| "../../target/deploy/payment_channels.so".into());
-    svm.add_program_from_file(PROGRAM_ID, &path)
-        .unwrap_or_else(|e| panic!("failed to load {path}: {e:?}"));
-    svm
+pub const SPL_TOKEN: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+pub const ATA_PROGRAM: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+pub const SYSTEM_PROGRAM: Pubkey = pubkey!("11111111111111111111111111111111");
+pub const SYSVAR_RENT: Pubkey = pubkey!("SysvarRent111111111111111111111111111111111");
+
+fn program_binary_path() -> String {
+    std::env::var("PAYMENT_CHANNELS_SO")
+        .unwrap_or_else(|_| "../../target/deploy/payment_channels.so".into())
 }
 
-/// Assert a litesvm transaction result failed with `InstructionError::Custom`
-/// carrying the numeric code of `expected`.
+/// Program loader trait for LiteSVM and Mollusk runtimes.
+pub trait ProgramLoader: Sized {
+    fn load_program_at(path: &str) -> Self;
+
+    fn load_program() -> Self {
+        Self::load_program_at(&program_binary_path())
+    }
+}
+
+impl ProgramLoader for LiteSVM {
+    fn load_program_at(path: &str) -> Self {
+        let mut svm = LiteSVM::new();
+        svm.add_program_from_file(PROGRAM_ID, path)
+            .unwrap_or_else(|e| panic!("failed to load {path}: {e:?}"));
+        svm
+    }
+}
+
+impl ProgramLoader for Mollusk {
+    fn load_program_at(path: &str) -> Self {
+        let elf = mollusk_svm::file::read_file(path);
+        let mut m = Mollusk::default();
+        m.add_program_with_loader_and_elf(
+            &PROGRAM_ID,
+            &mollusk_svm::program::loader_keys::LOADER_V3,
+            &elf,
+        );
+        m
+    }
+}
+
+/// Assert a LiteSVM transaction result failed with the expected custom error.
 pub fn expect_custom_err(
     res: Result<litesvm::types::TransactionMetadata, litesvm::types::FailedTransactionMetadata>,
     expected: PaymentChannelsError,
@@ -40,5 +68,55 @@ pub fn expect_custom_err(
             assert_eq!(code, expected as u32, "wrong custom error code");
         }
         other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+/// Builds a [`Channel`] account blob for use in Mollusk integration tests.
+pub struct ChannelBuilder {
+    status: ChannelStatus,
+    deposit: u64,
+    payer: Pubkey,
+    mint: Pubkey,
+}
+
+impl ChannelBuilder {
+    pub fn new() -> Self {
+        Self {
+            status: ChannelStatus::Open,
+            deposit: 0,
+            payer: Pubkey::default(),
+            mint: Pubkey::default(),
+        }
+    }
+
+    pub fn status(mut self, status: ChannelStatus) -> Self {
+        self.status = status;
+        self
+    }
+
+    pub fn deposit(mut self, deposit: u64) -> Self {
+        self.deposit = deposit;
+        self
+    }
+
+    pub fn payer(mut self, payer: Pubkey) -> Self {
+        self.payer = payer;
+        self
+    }
+
+    pub fn mint(mut self, mint: Pubkey) -> Self {
+        self.mint = mint;
+        self
+    }
+
+    pub fn build(self) -> Vec<u8> {
+        let mut data = vec![0u8; Channel::LEN];
+        data[0] = 1; // AccountDiscriminator::Channel
+        data[1] = 1; // CURRENT_CHANNEL_VERSION
+        data[3] = self.status as u8;
+        data[12..20].copy_from_slice(&self.deposit.to_le_bytes());
+        data[88..120].copy_from_slice(&self.payer.to_bytes());
+        data[184..216].copy_from_slice(&self.mint.to_bytes());
+        data
     }
 }

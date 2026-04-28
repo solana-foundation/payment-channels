@@ -75,9 +75,10 @@ pub struct Channel {
     /// and sign as the channel PDA without off-chain data.
     #[cfg_attr(feature = "idl", codama(type = number(u64)))]
     salt: [u8; 8],
-    /// Initial escrow; immutable ceiling on [`Self::settled`]. Grows only
-    /// via `topUp` while [`Self::status`] == [`ChannelStatus::Open`] and
-    /// [`Self::closure_started_at`] == 0.
+    /// Initial escrow; immutable ceiling on [`Self::settled`]. Raised only
+    /// by `topUp` while [`Self::status`] == [`ChannelStatus::Open`];
+    /// `requestClose` locks it by atomically moving the channel to
+    /// [`ChannelStatus::Closing`].
     #[cfg_attr(feature = "idl", codama(type = number(u64)))]
     deposit: [u8; 8],
     /// Cumulative authorized watermark. Advanced monotonically by signed

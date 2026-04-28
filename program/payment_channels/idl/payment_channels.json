@@ -640,6 +640,12 @@
         "kind": "errorNode",
         "message": "Recipient ATA tail length does not match the committed plan's entry count",
         "name": "recipientAccountCountMismatch"
+      },
+      {
+        "code": 34,
+        "kind": "errorNode",
+        "message": "Caller is not the channel payer",
+        "name": "unauthorizedPayer"
       }
     ],
     "events": [],

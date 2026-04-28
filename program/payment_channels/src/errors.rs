@@ -80,4 +80,6 @@ pub enum PaymentChannelsError {
     DuplicateRecipient = 32,
     #[error("Recipient ATA tail length does not match the committed plan's entry count")]
     RecipientAccountCountMismatch = 33,
+    #[error("Caller is not the channel payer")]
+    UnauthorizedPayer = 34,
 }

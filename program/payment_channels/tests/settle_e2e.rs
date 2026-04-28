@@ -5,9 +5,10 @@
 use std::str::FromStr;
 
 use litesvm::LiteSVM;
-use payment_channels::PaymentChannelsError;
 use payment_channels::ed25519;
-use payment_channels_client::types::VoucherArgs;
+use payment_channels::{PaymentChannelsError, VOUCHER_PAYLOAD_SIZE};
+use payment_channels_client::instructions::{Settle, SettleInstructionArgs};
+use payment_channels_client::types::{SettleArgs, VoucherArgs};
 use solana_account::Account;
 use solana_clock::Clock;
 use solana_instruction::Instruction;
@@ -17,8 +18,15 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 
 mod common;
-use common::settle::{build_ed25519_ix, build_settle_ix, voucher_payload};
-use common::{PROGRAM_ID, expect_custom_err, load_program};
+use common::{PROGRAM_ID, ProgramLoader, expect_custom_err};
+
+fn instructions_sysvar_id() -> Pubkey {
+    Pubkey::from_str("Sysvar1nstructions1111111111111111111111111").unwrap()
+}
+
+fn ed25519_program_id() -> Pubkey {
+    Pubkey::new_from_array(*ed25519::PROGRAM_ID.as_array())
+}
 
 /// Seed a `Channel` PDA (208-byte `#[repr(C, packed)]` layout) owned by the
 /// program. Only the fields `settle` reads are non-zero.
@@ -52,6 +60,64 @@ fn seed_channel(
     .expect("set_account");
 }
 
+/// Borsh-serialize the client `VoucherArgs`. The on-chain struct's field
+/// order (`channel_id || cumulative_amount || expires_at`) matches the
+/// ed25519-signed payload byte-for-byte, so the client's Borsh output IS
+/// the message the precompile must verify.
+fn voucher_payload(voucher: &VoucherArgs) -> [u8; VOUCHER_PAYLOAD_SIZE] {
+    borsh::to_vec(voucher)
+        .expect("voucher borsh encoding")
+        .try_into()
+        .expect("voucher payload matches VOUCHER_PAYLOAD_SIZE")
+}
+
+/// Canonical single-signature inline Ed25519 precompile ix:
+/// `[num_sigs=1, pad=0, offsets×1, pubkey, signature, message]`; all three
+/// `*_instruction_index` fields pinned to `u16::MAX` so the precompile reads
+/// from this ix's own data.
+fn build_ed25519_ix(
+    pubkey: &[u8; ed25519::PUBKEY_SERIALIZED_SIZE],
+    signature: &[u8; ed25519::SIGNATURE_SERIALIZED_SIZE],
+    message: &[u8; VOUCHER_PAYLOAD_SIZE],
+) -> Instruction {
+    let mut data = Vec::with_capacity(ed25519::MESSAGE_OFFSET + VOUCHER_PAYLOAD_SIZE);
+    data.push(1u8); // num_signatures
+    data.push(0u8); // padding
+
+    let pubkey_offset = ed25519::PUBKEY_OFFSET as u16;
+    let signature_offset = ed25519::SIGNATURE_OFFSET as u16;
+    let message_offset = ed25519::MESSAGE_OFFSET as u16;
+    let message_size = VOUCHER_PAYLOAD_SIZE as u16;
+
+    data.extend_from_slice(&signature_offset.to_le_bytes());
+    data.extend_from_slice(&u16::MAX.to_le_bytes()); // signature_instruction_index
+    data.extend_from_slice(&pubkey_offset.to_le_bytes());
+    data.extend_from_slice(&u16::MAX.to_le_bytes()); // public_key_instruction_index
+    data.extend_from_slice(&message_offset.to_le_bytes());
+    data.extend_from_slice(&message_size.to_le_bytes());
+    data.extend_from_slice(&u16::MAX.to_le_bytes()); // message_instruction_index
+
+    data.extend_from_slice(pubkey);
+    data.extend_from_slice(signature);
+    data.extend_from_slice(message);
+
+    Instruction {
+        program_id: ed25519_program_id(),
+        accounts: Vec::new(),
+        data,
+    }
+}
+
+fn build_settle_ix(channel: &Pubkey, voucher: VoucherArgs) -> Instruction {
+    Settle {
+        channel: *channel,
+        instructions_sysvar: instructions_sysvar_id(),
+    }
+    .instruction(SettleInstructionArgs {
+        settle_args: SettleArgs { voucher },
+    })
+}
+
 fn read_settled(svm: &LiteSVM, channel: &Pubkey) -> u64 {
     let acct = svm.get_account(channel).expect("channel exists");
     let mut buf = [0u8; 8];
@@ -79,7 +145,7 @@ fn build_compute_budget_limit_ix(limit: u32) -> Instruction {
 
 #[test]
 fn settle_advances_watermark_on_valid_voucher() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -113,7 +179,7 @@ fn settle_advances_watermark_on_valid_voucher() {
 
 #[test]
 fn settle_batches_two_paired_ix_advance_watermark() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -161,7 +227,7 @@ fn settle_batches_two_paired_ix_advance_watermark() {
 
 #[test]
 fn settle_without_preceding_ed25519_ix_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -192,7 +258,7 @@ fn settle_without_preceding_ed25519_ix_rejects() {
 
 #[test]
 fn settle_on_non_open_status_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -228,7 +294,7 @@ fn settle_on_non_open_status_rejects() {
 
 #[test]
 fn settle_after_expiry_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -270,7 +336,7 @@ fn settle_after_expiry_rejects() {
 
 #[test]
 fn settle_voucher_channel_mismatch_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -305,7 +371,7 @@ fn settle_voucher_channel_mismatch_rejects() {
 
 #[test]
 fn settle_voucher_over_deposit_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -339,7 +405,7 @@ fn settle_voucher_over_deposit_rejects() {
 
 #[test]
 fn settle_voucher_not_monotonic_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -373,7 +439,7 @@ fn settle_voucher_not_monotonic_rejects() {
 
 #[test]
 fn settle_voucher_message_mismatch_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -414,7 +480,7 @@ fn settle_voucher_message_mismatch_rejects() {
 
 #[test]
 fn settle_voucher_signer_mismatch_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -449,7 +515,7 @@ fn settle_voucher_signer_mismatch_rejects() {
 
 #[test]
 fn settle_malformed_ed25519_ix_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -487,7 +553,7 @@ fn settle_malformed_ed25519_ix_rejects() {
 
 #[test]
 fn settle_preceding_compute_budget_ix_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -529,7 +595,7 @@ fn settle_with_invalid_signature_rejects_before_settle_runs() {
     // program's `parse` guard.
     use solana_transaction_error::TransactionError;
 
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
