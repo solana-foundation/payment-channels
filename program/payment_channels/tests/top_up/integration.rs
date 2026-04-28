@@ -117,14 +117,16 @@ fn wrong_mint_rejects() {
 }
 
 #[test]
-fn wrong_escrow_rejects() {
+fn unknown_token_program_rejects() {
+    // `validate_mint` runs after the mint-equality check and rejects any
+    // `token_program` other than SPL Token or Token-2022.
     let payer = Pubkey::new_unique();
     let mint = Pubkey::new_unique();
-    let wrong_ata = Pubkey::new_unique();
+    let unknown_token_program = Pubkey::new_unique();
     assert_eq!(
         TopUpRun {
             mint,
-            channel_ata: wrong_ata,
+            token_program: unknown_token_program,
             ..TopUpRun::new(
                 payer,
                 ChannelBuilder::new()
@@ -138,7 +140,7 @@ fn wrong_escrow_rejects() {
         }
         .run(),
         ProgramResult::Failure(ProgramError::Custom(
-            PaymentChannelsError::EscrowAddressMismatch as u32
+            PaymentChannelsError::InvalidTokenProgram as u32
         )),
     );
 }

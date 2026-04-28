@@ -2,9 +2,10 @@
 use codama::CodamaType;
 use core::mem::size_of;
 use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
-use pinocchio_token::instructions::Transfer as TransferTokens;
+use pinocchio_token_2022::instructions::TransferChecked;
 
 use crate::errors::PaymentChannelsError;
+use crate::instructions::helpers::{derive_ata, validate_mint};
 use crate::state::channel::ChannelStatus;
 use crate::state::{Channel, Transmutable, load};
 
@@ -101,8 +102,9 @@ pub fn process(
 
     // Capture before the mutable borrow of channel below.
     let channel_address = *accs.channel.address();
+    let token_program = accs.token_program.address();
 
-    {
+    let decimals = {
         let mut ch = Channel::from_account_mut(accs.channel)?;
 
         if ch.status != ChannelStatus::Open as u8 {
@@ -117,18 +119,12 @@ pub fn process(
             return Err(PaymentChannelsError::MintAccountMismatch.into());
         }
 
+        let decimals = validate_mint(accs.mint, token_program)?;
+
         // Re-derive the canonical escrow ATA using the mint recorded at open.
         // Without this a caller could pass any token account, increment
         // ch.deposit, and leave the actual escrow underfunded.
-        let channel_mint = ch.mint;
-        let (expected_ata, _) = Address::find_program_address(
-            &[
-                channel_address.as_ref(),
-                accs.token_program.address().as_ref(),
-                channel_mint.as_ref(),
-            ],
-            &pinocchio_associated_token_account::ID,
-        );
+        let expected_ata = derive_ata(&channel_address, &ch.mint, token_program);
         if accs.channel_token_account.address() != &expected_ata {
             return Err(PaymentChannelsError::EscrowAddressMismatch.into());
         }
@@ -138,14 +134,19 @@ pub fn process(
             .checked_add(amount)
             .ok_or(ProgramError::ArithmeticOverflow)?;
         ch.set_deposit(new_deposit);
-    }
 
-    TransferTokens::new(
-        accs.payer_token_account,
-        accs.channel_token_account,
-        accs.payer,
+        decimals
+    };
+
+    TransferChecked {
+        from: accs.payer_token_account,
+        mint: accs.mint,
+        to: accs.channel_token_account,
+        authority: accs.payer,
         amount,
-    )
+        decimals,
+        token_program,
+    }
     .invoke()?;
 
     Ok(())

@@ -16,11 +16,10 @@ use payment_channels_client::types::{DistributeArgs, DistributionEntry, Distribu
 use solana_account::Account;
 use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
-use solana_pubkey::{Pubkey, pubkey};
+use solana_pubkey::Pubkey;
 
-use crate::common::{PROGRAM_ID, ProgramLoader};
+use crate::common::{PROGRAM_ID, ProgramLoader, TOKEN_2022};
 
-pub(super) const TOKEN_2022: Pubkey = pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 pub(super) const STATUS_OPEN: u8 = 0;
 pub(super) const STATUS_FINALIZED: u8 = 1;
 pub(super) const STATUS_CLOSING: u8 = 2;

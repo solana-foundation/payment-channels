@@ -25,6 +25,8 @@ pub(super) struct TopUpRun {
     pub mint: Pubkey,
     /// Channel token account pubkey passed as account 3. Defaults to a random pubkey.
     pub channel_ata: Pubkey,
+    /// Token program pubkey passed as account 5. Defaults to a random pubkey.
+    pub token_program: Pubkey,
     pub amount: u64,
 }
 
@@ -36,6 +38,7 @@ impl TopUpRun {
             channel_blob,
             mint: Pubkey::new_unique(),
             channel_ata: Pubkey::new_unique(),
+            token_program: Pubkey::new_unique(),
             amount,
         }
     }
@@ -61,7 +64,7 @@ impl TopUpRun {
                 AccountMeta::new(Pubkey::new_unique(), false), // payer_token_account
                 AccountMeta::new(self.channel_ata, false),
                 AccountMeta::new_readonly(self.mint, false),
-                AccountMeta::new_readonly(Pubkey::new_unique(), false), // token_program
+                AccountMeta::new_readonly(self.token_program, false),
             ],
         );
 

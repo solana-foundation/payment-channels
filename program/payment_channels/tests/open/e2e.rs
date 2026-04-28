@@ -13,8 +13,11 @@ use solana_transaction::Transaction;
 
 use litesvm::LiteSVM;
 
-use super::{derive_pdas, open_ix, setup_funded_svm};
-use crate::common::ProgramLoader;
+use super::{
+    derive_pdas, derive_pdas_with_token_program, open_ix, open_ix_with_token_program,
+    setup_funded_svm, setup_funded_svm_with_token_program,
+};
+use crate::common::{ProgramLoader, TOKEN_2022};
 
 const SALT: u64 = 42;
 const DEPOSIT: u64 = 5_000_000;
@@ -151,6 +154,120 @@ fn open_with_no_splits_succeeds() {
 
     // distribution_hash == blake3(&[0u8]) — locked at `open` from the
     // canonical preimage `count(1)` with no entries.
+    let expected: [u8; 32] = blake3::hash(&[0u8]).into();
+    assert_eq!(&channel_data[56..88], &expected, "distribution_hash");
+}
+
+#[test]
+fn open_sets_channel_fields_token_2022() {
+    let mut svm = LiteSVM::load_program();
+
+    let payee = Pubkey::new_unique();
+    let authorized_signer = Pubkey::new_unique();
+    let (payer, mint, payer_token_account) =
+        setup_funded_svm_with_token_program(&mut svm, DEPOSIT, &TOKEN_2022);
+    let (channel, channel_token_account) = derive_pdas_with_token_program(
+        &payer.pubkey(),
+        &payee,
+        &mint,
+        &authorized_signer,
+        SALT,
+        &TOKEN_2022,
+    );
+
+    let ix = open_ix_with_token_program(
+        &payer.pubkey(),
+        &payee,
+        &mint,
+        &authorized_signer,
+        &channel,
+        &payer_token_account,
+        &channel_token_account,
+        &TOKEN_2022,
+        SALT,
+        DEPOSIT,
+        GRACE_PERIOD,
+        1,
+    );
+    let msg = Message::new(&[ix], Some(&payer.pubkey()));
+    let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
+    svm.send_transaction(tx).expect("open should succeed");
+
+    let channel_data = svm
+        .get_account(&channel)
+        .expect("channel account missing")
+        .data;
+
+    assert_eq!(channel_data.len(), Channel::LEN, "channel data length");
+    assert_eq!(channel_data[0], AccountDiscriminator::Channel as u8);
+    assert_eq!(channel_data[1], CURRENT_CHANNEL_VERSION);
+    assert_eq!(channel_data[3], ChannelStatus::Open as u8);
+    assert_eq!(read_u64(&channel_data, 4), SALT, "salt");
+    assert_eq!(read_u64(&channel_data, 12), DEPOSIT, "deposit");
+    assert_eq!(read_u64(&channel_data, 20), 0, "settled");
+    assert_eq!(read_u64(&channel_data, 28), 0, "paid_out");
+    assert_eq!(read_i64(&channel_data, 36), 0, "closure_started_at");
+    assert_eq!(read_i64(&channel_data, 44), 0, "payer_withdrawn_at");
+    assert_eq!(read_u32(&channel_data, 52), GRACE_PERIOD);
+    assert_ne!(
+        &channel_data[56..88],
+        &[0u8; 32],
+        "distribution_hash must be set"
+    );
+    assert_eq!(&channel_data[88..120], payer.pubkey().as_array(), "payer");
+    assert_eq!(&channel_data[120..152], payee.as_array(), "payee");
+    assert_eq!(
+        &channel_data[152..184],
+        authorized_signer.as_array(),
+        "authorized_signer"
+    );
+    assert_eq!(&channel_data[184..216], mint.as_array(), "mint");
+}
+
+#[test]
+fn open_with_no_splits_succeeds_token_2022() {
+    let mut svm = LiteSVM::load_program();
+
+    let payee = Pubkey::new_unique();
+    let authorized_signer = Pubkey::new_unique();
+    let (payer, mint, payer_token_account) =
+        setup_funded_svm_with_token_program(&mut svm, DEPOSIT, &TOKEN_2022);
+    let (channel, channel_token_account) = derive_pdas_with_token_program(
+        &payer.pubkey(),
+        &payee,
+        &mint,
+        &authorized_signer,
+        SALT,
+        &TOKEN_2022,
+    );
+
+    let ix = open_ix_with_token_program(
+        &payer.pubkey(),
+        &payee,
+        &mint,
+        &authorized_signer,
+        &channel,
+        &payer_token_account,
+        &channel_token_account,
+        &TOKEN_2022,
+        SALT,
+        DEPOSIT,
+        GRACE_PERIOD,
+        0,
+    );
+    let msg = Message::new(&[ix], Some(&payer.pubkey()));
+    let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
+    svm.send_transaction(tx)
+        .expect("open with zero splits should succeed");
+
+    let channel_data = svm
+        .get_account(&channel)
+        .expect("channel account missing")
+        .data;
+
+    assert_eq!(channel_data.len(), Channel::LEN);
+    assert_eq!(channel_data[3], ChannelStatus::Open as u8);
+
     let expected: [u8; 32] = blake3::hash(&[0u8]).into();
     assert_eq!(&channel_data[56..88], &expected, "distribution_hash");
 }

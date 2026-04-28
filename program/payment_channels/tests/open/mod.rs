@@ -14,14 +14,11 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 
 use crate::common::{
-    ATA_PROGRAM, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM, SYSVAR_RENT,
+    ATA_PROGRAM, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM, SYSVAR_RENT, TOKEN_2022,
 };
 
 pub(super) const EVENT_AUTHORITY: Pubkey =
     Pubkey::new_from_array(*event_authority_pda::ID.as_array());
-
-pub(super) const TOKEN_2022: Pubkey =
-    Pubkey::from_str_const("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
 /// Wire-format width per `DistributionEntry`: 32 bytes pubkey + u16 bps.
 const ENTRY_LEN: usize = 32 + 2;
@@ -147,7 +144,7 @@ pub(super) fn setup_funded_svm(svm: &mut LiteSVM, deposit: u64) -> (Keypair, Pub
 
 /// Airdrop, create mint, mint `deposit` tokens to payer's ATA under
 /// `token_program`. Returns `(payer_keypair, mint, payer_token_account)`.
-pub(super) fn setup_funded_svm_with_token_program(
+pub(crate) fn setup_funded_svm_with_token_program(
     svm: &mut LiteSVM,
     deposit: u64,
     token_program: &Pubkey,
