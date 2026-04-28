@@ -170,11 +170,7 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
     /// withdrawn) and tombstones the escrow ATA + the Channel PDA.
     ///
     /// Recipient token accounts are appended as remaining accounts in the
-    /// same order as the `DistributionEntry`s in the preimage. Codama does
-    /// not express variable-length account tails, so the generated client
-    /// builder emits only the 8-slot head; use the `distribute-helper`
-    /// wrapper in `clients/typescript` (or the Rust counterpart) to append
-    /// recipient ATAs.
+    /// same order as the`DistributionEntry`s in the preimage.
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "channel", writable)),

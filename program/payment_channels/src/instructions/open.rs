@@ -14,7 +14,8 @@ use crate::event_engine::emit_event;
 use crate::events::Opened;
 pub use crate::instructions::helpers::MAX_DISTRIBUTION_RECIPIENTS;
 use crate::instructions::helpers::{
-    DistributionRecipients, channel_signer_seeds, derive_ata, validate_mint, validate_token_account,
+    DistributionRecipients, channel_signer_seeds, derive_ata, validate_ata_token_account,
+    validate_mint,
 };
 use crate::state::{Transmutable, load};
 
@@ -201,10 +202,10 @@ pub fn process(
         return Err(PaymentChannelsError::EscrowAddressMismatch.into());
     }
     let decimals = validate_mint(accs.mint, token_program)?;
-    validate_token_account(
+    validate_ata_token_account(
         accs.payer_token_account,
-        accs.mint.address(),
         accs.payer.address(),
+        accs.mint.address(),
         token_program,
         PaymentChannelsError::InvalidPayerTokenAccount,
     )?;

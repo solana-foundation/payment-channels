@@ -13,7 +13,9 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-use super::{derive_pdas, load_mollusk, open_ix, open_ix_data, run_open, setup_funded_svm};
+use super::{
+    SPL_TOKEN, derive_pdas, load_mollusk, open_ix, open_ix_data, run_open, setup_funded_svm,
+};
 use crate::common::{PROGRAM_ID, expect_custom_err, load_program};
 
 const SALT: u64 = 1;
@@ -181,5 +183,49 @@ fn wrong_escrow_ata_rejected() {
     expect_custom_err(
         svm.send_transaction(tx),
         PaymentChannelsError::EscrowAddressMismatch,
+    );
+}
+
+/// Funding from a non-canonical token account (initialized, payer-owned, but
+/// not the ATA) is rejected. Mirrors the ATA-only invariant enforced for every
+/// other token-account role across the program — the refund path in
+/// `distribute` requires the payer's canonical ATA, so accepting a non-ATA at
+/// `open` would create a recoverable but avoidable trap.
+#[test]
+fn non_ata_payer_token_account_rejected() {
+    use litesvm_token::CreateAccount;
+
+    let mut svm = load_program();
+
+    let payee = Pubkey::new_unique();
+    let authorized_signer = Pubkey::new_unique();
+    let (payer, mint, _payer_ata) = setup_funded_svm(&mut svm, DEPOSIT);
+    let (channel, channel_token_account) =
+        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
+
+    let non_ata = CreateAccount::new(&mut svm, &payer, &mint)
+        .owner(&payer.pubkey())
+        .token_program_id(&SPL_TOKEN)
+        .send()
+        .unwrap();
+
+    let ix = open_ix(
+        &payer.pubkey(),
+        &payee,
+        &mint,
+        &authorized_signer,
+        &channel,
+        &non_ata,
+        &channel_token_account,
+        SALT,
+        DEPOSIT,
+        GRACE,
+        1,
+    );
+    let msg = Message::new(&[ix], Some(&payer.pubkey()));
+    let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::InvalidPayerTokenAccount,
     );
 }
