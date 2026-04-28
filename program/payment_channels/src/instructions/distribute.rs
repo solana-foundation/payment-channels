@@ -183,19 +183,18 @@ pub fn process(
         PaymentChannelsError::TreasuryAddressMismatch,
     )?;
 
-    // Validate the revealed distribution preimage and then prove each
-    // remaining account is the corresponding recipient ATA.
-    // Count validation must happen before hashing; `preimage_hash()` slices
-    // based on `count`.
-    let distribution = args.recipients.validate_view()?;
-    if accs.recipient_token_accounts.len() != distribution.entries.len() {
-        return Err(PaymentChannelsError::InvalidRecipientCount.into());
-    }
-
-    // Blake3 rehash.
+    // Hash equality is the sole plan-level gate: a matching digest proves
+    // the revealed plan is byte-identical to the one open committed, which
+    // open already validated. Anything below this point trusts the plan.
     let digest = args.recipients.preimage_hash();
     if digest != ch.distribution_hash {
         return Err(PaymentChannelsError::InvalidDistributionHash.into());
+    }
+
+    let distribution = args.recipients.view();
+
+    if accs.recipient_token_accounts.len() != distribution.entries.len() {
+        return Err(PaymentChannelsError::RecipientAccountCountMismatch.into());
     }
 
     for (entry, recipient_token_account) in distribution

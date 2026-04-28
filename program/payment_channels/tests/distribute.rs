@@ -807,8 +807,9 @@ fn status_closing_rejects() {
 
 #[test]
 fn num_recipients_exceeds_max() {
-    // 33 > MAX_DISTRIBUTION_RECIPIENTS = 32 → validate() trips the count guard
-    // without needing 33 ATAs or a hash match.
+    // 33 > MAX_DISTRIBUTION_RECIPIENTS = 32. Distribute trusts the preimage
+    // hash; a forged count produces a clamped-but-distinct preimage whose
+    // digest cannot match the one open committed → InvalidDistributionHash.
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 1000,
@@ -828,7 +829,7 @@ fn num_recipients_exceeds_max() {
         &s.recipient_atas,
         bad,
     );
-    expect_custom_err(s.send(ix), PaymentChannelsError::InvalidRecipientCount);
+    expect_custom_err(s.send(ix), PaymentChannelsError::InvalidDistributionHash);
 }
 
 #[test]
@@ -850,7 +851,10 @@ fn recipient_tail_length_mismatch_rejects() {
         &[],
         s.recipients(),
     );
-    expect_custom_err(s.send(ix), PaymentChannelsError::InvalidRecipientCount);
+    expect_custom_err(
+        s.send(ix),
+        PaymentChannelsError::RecipientAccountCountMismatch,
+    );
 }
 
 #[test]
