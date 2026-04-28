@@ -27,6 +27,14 @@ pub struct DistributionEntry {
 
 impl DistributionEntry {
     #[inline(always)]
+    pub fn new(recipient: Address, bps: u16) -> Self {
+        Self {
+            recipient,
+            bps: bps.to_le_bytes(),
+        }
+    }
+
+    #[inline(always)]
     pub fn bps(&self) -> u16 {
         u16::from_le_bytes(self.bps)
     }

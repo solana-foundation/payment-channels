@@ -302,3 +302,61 @@ fn assert_unique_recipients(recipients: &DistributionRecipients) -> Result<(), P
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::instructions::helpers::DistributionEntry;
+
+    fn recipients_from(active: &[Address]) -> DistributionRecipients {
+        let placeholder = DistributionEntry::new(Address::default(), 100);
+        let mut entries = [placeholder; MAX_DISTRIBUTION_RECIPIENTS];
+        for (i, addr) in active.iter().enumerate() {
+            entries[i] = DistributionEntry::new(*addr, 100);
+        }
+        DistributionRecipients {
+            count: active.len() as u8,
+            entries,
+        }
+    }
+
+    #[test]
+    fn assert_unique_recipients_accepts_distinct() {
+        let r = recipients_from(&[
+            Address::new_from_array([1u8; 32]),
+            Address::new_from_array([2u8; 32]),
+            Address::new_from_array([3u8; 32]),
+        ]);
+        assert_eq!(assert_unique_recipients(&r), Ok(()));
+    }
+
+    #[test]
+    fn assert_unique_recipients_rejects_duplicate() {
+        let r = recipients_from(&[
+            Address::new_from_array([1u8; 32]),
+            Address::new_from_array([2u8; 32]),
+            Address::new_from_array([1u8; 32]),
+        ]);
+        assert_eq!(
+            assert_unique_recipients(&r),
+            Err(ProgramError::from(PaymentChannelsError::DuplicateRecipient)),
+        );
+    }
+
+    #[test]
+    fn assert_unique_recipients_ignores_inactive_tail() {
+        // Entries past `count` repeat a placeholder address; that must not
+        // count as a duplicate because the scan slices on `count`.
+        let r = recipients_from(&[
+            Address::new_from_array([1u8; 32]),
+            Address::new_from_array([2u8; 32]),
+        ]);
+        assert_eq!(assert_unique_recipients(&r), Ok(()));
+    }
+
+    #[test]
+    fn assert_unique_recipients_accepts_zero_count() {
+        let r = recipients_from(&[]);
+        assert_eq!(assert_unique_recipients(&r), Ok(()));
+    }
+}
