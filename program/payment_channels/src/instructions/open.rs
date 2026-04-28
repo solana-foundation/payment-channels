@@ -167,7 +167,7 @@ pub fn process(
     }
 
     let validated = args.recipients.validate_view()?;
-    args.recipients.assert_unique_recipients()?;
+    assert_unique_recipients(&args.recipients)?;
 
     let deposit = args.deposit();
     if deposit == 0 {
@@ -281,5 +281,24 @@ pub fn process(
         bytes.as_slice(),
     )?;
 
+    Ok(())
+}
+
+/// O(n²) duplicate-recipient scan over the active entries. Lives here
+/// because `distribute` re-establishes the same plan via the blake3
+/// preimage check, so the dedup invariant only needs to be enforced once
+/// — at `open`. Floored per-entry shares are biased against aggregated
+/// splits, which is why duplicates are rejected outright instead of
+/// summed downstream.
+fn assert_unique_recipients(recipients: &DistributionRecipients) -> Result<(), ProgramError> {
+    let n = recipients.count as usize;
+    let entries = &recipients.entries[..n];
+    for (i, a) in entries.iter().enumerate() {
+        for b in &entries[i + 1..] {
+            if a.recipient == b.recipient {
+                return Err(PaymentChannelsError::DuplicateRecipient.into());
+            }
+        }
+    }
     Ok(())
 }
