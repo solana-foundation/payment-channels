@@ -56,7 +56,9 @@ pub struct ValidatedDistribution<'a> {
 // Fails to compile if the literal above drifts from MAX_DISTRIBUTION_RECIPIENTS.
 const _: () = assert!(
     MAX_DISTRIBUTION_RECIPIENTS == 32,
-    "update DistributionRecipients::entries literal to match MAX_DISTRIBUTION_RECIPIENTS",
+    "if MAX_DISTRIBUTION_RECIPIENTS changes, also update: \
+     (1) DistributionRecipients::entries length literal here, \
+     (2) PaymentChannelsError::InvalidRecipientCount #[error(...)] message in errors.rs",
 );
 
 impl DistributionRecipients {

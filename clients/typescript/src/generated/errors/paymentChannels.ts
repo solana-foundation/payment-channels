@@ -99,7 +99,7 @@ if (process.env["NODE_ENV"] !== "production") {
     [PAYMENT_CHANNELS_ERROR__INVALID_PAYEE_TOKEN_ACCOUNT]: `Payee token account is not ATA(payee, mint, token_program)`,
     [PAYMENT_CHANNELS_ERROR__INVALID_PAYER_TOKEN_ACCOUNT]: `Payer token account is not ATA(payer, mint, token_program)`,
     [PAYMENT_CHANNELS_ERROR__INVALID_RECIPIENT_ACCOUNT]: `Recipient token account is not the expected ATA`,
-    [PAYMENT_CHANNELS_ERROR__INVALID_RECIPIENT_COUNT]: `num_recipients outside [0, MAX_DISTRIBUTION_RECIPIENTS]`,
+    [PAYMENT_CHANNELS_ERROR__INVALID_RECIPIENT_COUNT]: `num_recipients outside [0, 32]`,
     [PAYMENT_CHANNELS_ERROR__INVALID_SPLIT_CONFIG]: `Each shareBps must be non-zero and Σbps must be at most 10_000`,
     [PAYMENT_CHANNELS_ERROR__INVALID_TOKEN_PROGRAM]: `Token program must be SPL Token or Token-2022`,
     [PAYMENT_CHANNELS_ERROR__MALFORMED_ED25519_INSTRUCTION]: `Malformed Ed25519 precompile instruction`,

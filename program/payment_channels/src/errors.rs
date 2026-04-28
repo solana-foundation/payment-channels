@@ -42,7 +42,7 @@ pub enum PaymentChannelsError {
     InvalidDistributionHash = 13,
     #[error("Deposit must be non-zero")]
     DepositMustBeNonZero = 14,
-    #[error("num_recipients outside [0, MAX_DISTRIBUTION_RECIPIENTS]")]
+    #[error("num_recipients outside [0, 32]")]
     InvalidRecipientCount = 15,
     #[error("Channel account does not match derived PDA")]
     ChannelAddressMismatch = 16,

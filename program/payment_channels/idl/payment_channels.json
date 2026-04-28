@@ -530,7 +530,7 @@
       {
         "code": 15,
         "kind": "errorNode",
-        "message": "num_recipients outside [0, MAX_DISTRIBUTION_RECIPIENTS]",
+        "message": "num_recipients outside [0, 32]",
         "name": "invalidRecipientCount"
       },
       {

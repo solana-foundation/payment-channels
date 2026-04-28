@@ -55,8 +55,8 @@ pub enum PaymentChannelsError {
     /// 14 - Deposit must be non-zero
     #[error("Deposit must be non-zero")]
     DepositMustBeNonZero = 0xE,
-    /// 15 - num_recipients outside [0, MAX_DISTRIBUTION_RECIPIENTS]
-    #[error("num_recipients outside [0, MAX_DISTRIBUTION_RECIPIENTS]")]
+    /// 15 - num_recipients outside [0, 32]
+    #[error("num_recipients outside [0, 32]")]
     InvalidRecipientCount = 0xF,
     /// 16 - Channel account does not match derived PDA
     #[error("Channel account does not match derived PDA")]
