@@ -167,7 +167,6 @@ pub fn process(
     }
 
     let validated = args.recipients.validate_view()?;
-    assert_unique_recipients(&args.recipients)?;
 
     let deposit = args.deposit();
     if deposit == 0 {
@@ -282,81 +281,4 @@ pub fn process(
     )?;
 
     Ok(())
-}
-
-/// O(n²) duplicate-recipient scan over the active entries. Lives here
-/// because `distribute` re-establishes the same plan via the blake3
-/// preimage check, so the dedup invariant only needs to be enforced once
-/// — at `open`. Floored per-entry shares are biased against aggregated
-/// splits, which is why duplicates are rejected outright instead of
-/// summed downstream.
-fn assert_unique_recipients(recipients: &DistributionRecipients) -> Result<(), ProgramError> {
-    let n = recipients.count as usize;
-    let entries = &recipients.entries[..n];
-    for (i, a) in entries.iter().enumerate() {
-        for b in &entries[i + 1..] {
-            if a.recipient == b.recipient {
-                return Err(PaymentChannelsError::DuplicateRecipient.into());
-            }
-        }
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::instructions::helpers::DistributionEntry;
-
-    fn recipients_from(active: &[Address]) -> DistributionRecipients {
-        let placeholder = DistributionEntry::new(Address::default(), 100);
-        let mut entries = [placeholder; MAX_DISTRIBUTION_RECIPIENTS];
-        for (i, addr) in active.iter().enumerate() {
-            entries[i] = DistributionEntry::new(*addr, 100);
-        }
-        DistributionRecipients {
-            count: active.len() as u8,
-            entries,
-        }
-    }
-
-    #[test]
-    fn assert_unique_recipients_accepts_distinct() {
-        let r = recipients_from(&[
-            Address::new_from_array([1u8; 32]),
-            Address::new_from_array([2u8; 32]),
-            Address::new_from_array([3u8; 32]),
-        ]);
-        assert_eq!(assert_unique_recipients(&r), Ok(()));
-    }
-
-    #[test]
-    fn assert_unique_recipients_rejects_duplicate() {
-        let r = recipients_from(&[
-            Address::new_from_array([1u8; 32]),
-            Address::new_from_array([2u8; 32]),
-            Address::new_from_array([1u8; 32]),
-        ]);
-        assert_eq!(
-            assert_unique_recipients(&r),
-            Err(ProgramError::from(PaymentChannelsError::DuplicateRecipient)),
-        );
-    }
-
-    #[test]
-    fn assert_unique_recipients_ignores_inactive_tail() {
-        // Entries past `count` repeat a placeholder address; that must not
-        // count as a duplicate because the scan slices on `count`.
-        let r = recipients_from(&[
-            Address::new_from_array([1u8; 32]),
-            Address::new_from_array([2u8; 32]),
-        ]);
-        assert_eq!(assert_unique_recipients(&r), Ok(()));
-    }
-
-    #[test]
-    fn assert_unique_recipients_accepts_zero_count() {
-        let r = recipients_from(&[]);
-        assert_eq!(assert_unique_recipients(&r), Ok(()));
-    }
 }
