@@ -2,9 +2,9 @@ mod e2e;
 mod integration;
 
 use mollusk_svm::{Mollusk, result::ProgramResult};
-use payment_channels::instructions::top_up::DISCRIMINATOR;
-use payment_channels::state::Channel;
+use payment_channels::instructions::top_up::{DISCRIMINATOR, TopUpArgs};
 use payment_channels::state::channel::ChannelStatus;
+use payment_channels::state::{Channel, Transmutable};
 use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
@@ -12,15 +12,6 @@ use solana_pubkey::Pubkey;
 use crate::common::PROGRAM_ID;
 
 pub(super) const DEPOSIT: u64 = 1_000_000;
-
-/// Build raw `topUp` instruction data.
-///
-/// Wire layout: `discriminator(1) | amount(8)`.
-pub(super) fn top_up_ix_data(amount: u64) -> Vec<u8> {
-    let mut data = vec![DISCRIMINATOR];
-    data.extend_from_slice(&amount.to_le_bytes());
-    data
-}
 
 /// Builds a [`Channel`] blob for use in unit/integration tests.
 pub(super) struct ChannelBuilder {
@@ -86,77 +77,84 @@ pub(super) fn load_mollusk() -> Mollusk {
     m
 }
 
-/// Run `topUp` through Mollusk with full control over the mint and
-/// channel_token_account pubkeys. Fails before any token CPI.
-pub(super) fn run_top_up_custom(
-    payer: &Pubkey,
-    is_signer: bool,
-    channel_blob: Vec<u8>,
-    mint: &Pubkey,
-    channel_token_account: &Pubkey,
-    amount: u64,
-) -> ProgramResult {
-    let mollusk = load_mollusk();
-    let channel_pubkey = Pubkey::new_unique();
-
-    let ix = Instruction::new_with_bytes(
-        PROGRAM_ID,
-        &top_up_ix_data(amount),
-        vec![
-            AccountMeta::new(*payer, is_signer),
-            AccountMeta::new(channel_pubkey, false),
-            AccountMeta::new(Pubkey::new_unique(), false), // payer_token_account
-            AccountMeta::new(*channel_token_account, false),
-            AccountMeta::new_readonly(*mint, false),
-            AccountMeta::new_readonly(Pubkey::new_unique(), false), // token_program
-        ],
-    );
-
-    let channel_account = Account {
-        lamports: 10_000_000,
-        data: channel_blob,
-        owner: PROGRAM_ID,
-        executable: false,
-        rent_epoch: 0,
-    };
-    let dummy = Account {
-        lamports: 1_000_000,
-        ..Default::default()
-    };
-
-    let accounts: Vec<(Pubkey, Account)> = ix
-        .accounts
-        .iter()
-        .map(|m| {
-            let acc = if m.pubkey == channel_pubkey {
-                channel_account.clone()
-            } else {
-                dummy.clone()
-            };
-            (m.pubkey, acc)
-        })
-        .collect();
-
-    mollusk.process_instruction(&ix, &accounts).program_result
+/// Execution descriptor for a single `topUp` Mollusk run.
+///
+/// Construct with [`TopUpRun::new`] for the required fields; override any
+/// public field via struct update syntax before calling [`TopUpRun::run`].
+pub(super) struct TopUpRun {
+    pub payer: Pubkey,
+    /// Whether `payer` is marked as a signer in the account metas.
+    pub is_signer: bool,
+    pub channel_blob: Vec<u8>,
+    /// Mint pubkey passed as account 4. Defaults to a random pubkey.
+    pub mint: Pubkey,
+    /// Channel token account pubkey passed as account 3. Defaults to a random pubkey.
+    pub channel_ata: Pubkey,
+    pub amount: u64,
 }
 
-/// Run `topUp` through Mollusk with a seeded channel at account index 1.
-///
-/// Fails at the signer check if `is_signer` is false, at arg validation if
-/// `amount` is 0, or at channel validation if status/payer checks fire.
-/// Never reaches the token CPI.
-pub(super) fn run_top_up(
-    payer: &Pubkey,
-    is_signer: bool,
-    channel_blob: Vec<u8>,
-    amount: u64,
-) -> ProgramResult {
-    run_top_up_custom(
-        payer,
-        is_signer,
-        channel_blob,
-        &Pubkey::new_unique(),
-        &Pubkey::new_unique(),
-        amount,
-    )
+impl TopUpRun {
+    pub fn new(payer: Pubkey, channel_blob: Vec<u8>, amount: u64) -> Self {
+        Self {
+            payer,
+            is_signer: true,
+            channel_blob,
+            mint: Pubkey::new_unique(),
+            channel_ata: Pubkey::new_unique(),
+            amount,
+        }
+    }
+
+    pub fn run(self) -> ProgramResult {
+        let mollusk = load_mollusk();
+        let channel_pubkey = Pubkey::new_unique();
+
+        let mut ix_data = vec![DISCRIMINATOR];
+        ix_data.extend_from_slice(
+            TopUpArgs {
+                amount: self.amount.to_le_bytes(),
+            }
+            .as_bytes(),
+        );
+
+        let ix = Instruction::new_with_bytes(
+            PROGRAM_ID,
+            &ix_data,
+            vec![
+                AccountMeta::new(self.payer, self.is_signer),
+                AccountMeta::new(channel_pubkey, false),
+                AccountMeta::new(Pubkey::new_unique(), false), // payer_token_account
+                AccountMeta::new(self.channel_ata, false),
+                AccountMeta::new_readonly(self.mint, false),
+                AccountMeta::new_readonly(Pubkey::new_unique(), false), // token_program
+            ],
+        );
+
+        let channel_account = Account {
+            lamports: 10_000_000,
+            data: self.channel_blob,
+            owner: PROGRAM_ID,
+            executable: false,
+            rent_epoch: 0,
+        };
+        let dummy = Account {
+            lamports: 1_000_000,
+            ..Default::default()
+        };
+
+        let accounts: Vec<(Pubkey, Account)> = ix
+            .accounts
+            .iter()
+            .map(|m| {
+                let acc = if m.pubkey == channel_pubkey {
+                    channel_account.clone()
+                } else {
+                    dummy.clone()
+                };
+                (m.pubkey, acc)
+            })
+            .collect();
+
+        mollusk.process_instruction(&ix, &accounts).program_result
+    }
 }

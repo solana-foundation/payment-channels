@@ -22,7 +22,7 @@ pub const DISCRIMINATOR: u8 = 3;
 pub struct TopUpArgs {
     /// Base-unit amount to pull from the payer's token account into escrow.
     #[cfg_attr(feature = "idl", codama(type = number(u64)))]
-    amount: [u8; 8],
+    pub amount: [u8; 8],
 }
 
 impl TopUpArgs {
