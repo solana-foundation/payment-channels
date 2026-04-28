@@ -52,4 +52,6 @@ pub enum PaymentChannelsError {
     PayerPayeeMustDiffer = 18,
     #[error("Caller is not the channel payer")]
     UnauthorizedPayer = 19,
+    #[error("Mint account does not match channel's recorded mint")]
+    MintAddressMismatch = 20,
 }

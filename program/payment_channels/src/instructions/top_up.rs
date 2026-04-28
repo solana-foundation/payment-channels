@@ -99,6 +99,9 @@ pub fn process(
         return Err(PaymentChannelsError::DepositMustBeNonZero.into());
     }
 
+    // Capture before the mutable borrow of channel below.
+    let channel_address = *accs.channel.address();
+
     {
         let mut ch = Channel::from_account_mut(accs.channel)?;
 
@@ -108,6 +111,26 @@ pub fn process(
 
         if accs.payer.address() != &ch.payer {
             return Err(PaymentChannelsError::UnauthorizedPayer.into());
+        }
+
+        if accs.mint.address() != &ch.mint {
+            return Err(PaymentChannelsError::MintAddressMismatch.into());
+        }
+
+        // Re-derive the canonical escrow ATA using the mint recorded at open.
+        // Without this a caller could pass any token account, increment
+        // ch.deposit, and leave the actual escrow underfunded.
+        let channel_mint = ch.mint;
+        let (expected_ata, _) = Address::find_program_address(
+            &[
+                channel_address.as_ref(),
+                accs.token_program.address().as_ref(),
+                channel_mint.as_ref(),
+            ],
+            &pinocchio_associated_token_account::ID,
+        );
+        if accs.channel_token_account.address() != &expected_ata {
+            return Err(PaymentChannelsError::EscrowAddressMismatch.into());
         }
 
         let new_deposit = ch

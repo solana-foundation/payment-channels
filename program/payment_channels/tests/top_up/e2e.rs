@@ -91,7 +91,7 @@ fn open_channel(
     );
     let event_auth = event_authority();
 
-    let mut data = vec![OPEN_DISCRIMINATOR];
+    let mut data: Vec<u8> = vec![OPEN_DISCRIMINATOR];
     data.extend_from_slice(&salt.to_le_bytes());
     data.extend_from_slice(&deposit.to_le_bytes());
     data.extend_from_slice(&3_600u32.to_le_bytes());
@@ -306,6 +306,124 @@ fn top_up_wrong_payer_rejects() {
     expect_custom_err(
         svm.send_transaction(tx),
         PaymentChannelsError::UnauthorizedPayer,
+    );
+}
+
+#[test]
+fn top_up_wrong_mint_rejects() {
+    let mut svm = load_program();
+    let payer = Keypair::new();
+    svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+    let payee = Pubkey::new_unique();
+    let authorized_signer = Pubkey::new_unique();
+    let deposit: u64 = 100_000_000;
+    let top_up_amount: u64 = 50_000_000;
+
+    let mint = CreateMint::new(&mut svm, &payer)
+        .decimals(0)
+        .token_program_id(&SPL_TOKEN)
+        .send()
+        .unwrap();
+    let payer_ata = CreateAssociatedTokenAccount::new(&mut svm, &payer, &mint)
+        .token_program_id(&SPL_TOKEN)
+        .send()
+        .unwrap();
+    MintTo::new(&mut svm, &payer, &mint, &payer_ata, deposit + top_up_amount)
+        .token_program_id(&SPL_TOKEN)
+        .send()
+        .unwrap();
+
+    let (channel, channel_ata) = open_channel(
+        &mut svm,
+        &payer,
+        &payee,
+        &authorized_signer,
+        1,
+        deposit,
+        &mint,
+        &payer_ata,
+    );
+
+    // The mint check fires before any CPI, so any address that differs from
+    // the channel's recorded mint triggers the error.
+    let wrong_mint = Pubkey::new_unique();
+
+    let ix = build_top_up_ix(
+        &payer.pubkey(),
+        &channel,
+        &payer_ata,
+        &channel_ata,
+        &wrong_mint,
+        top_up_amount,
+    );
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&payer.pubkey()),
+        &[&payer],
+        svm.latest_blockhash(),
+    );
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::MintAddressMismatch,
+    );
+}
+
+#[test]
+fn top_up_wrong_escrow_rejects() {
+    let mut svm = load_program();
+    let payer = Keypair::new();
+    svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+    let payee = Pubkey::new_unique();
+    let authorized_signer = Pubkey::new_unique();
+    let deposit: u64 = 100_000_000;
+    let top_up_amount: u64 = 50_000_000;
+
+    let mint = CreateMint::new(&mut svm, &payer)
+        .decimals(0)
+        .token_program_id(&SPL_TOKEN)
+        .send()
+        .unwrap();
+    let payer_ata = CreateAssociatedTokenAccount::new(&mut svm, &payer, &mint)
+        .token_program_id(&SPL_TOKEN)
+        .send()
+        .unwrap();
+    MintTo::new(&mut svm, &payer, &mint, &payer_ata, deposit + top_up_amount)
+        .token_program_id(&SPL_TOKEN)
+        .send()
+        .unwrap();
+
+    let (channel, _channel_ata) = open_channel(
+        &mut svm,
+        &payer,
+        &payee,
+        &authorized_signer,
+        1,
+        deposit,
+        &mint,
+        &payer_ata,
+    );
+
+    // Pass payer_ata in place of the channel escrow — same mint so the ATA
+    // derivation check fires before the token CPI can catch it.
+    let ix = build_top_up_ix(
+        &payer.pubkey(),
+        &channel,
+        &payer_ata,
+        &payer_ata,
+        &mint,
+        top_up_amount,
+    );
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&payer.pubkey()),
+        &[&payer],
+        svm.latest_blockhash(),
+    );
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::EscrowAddressMismatch,
     );
 }
 
