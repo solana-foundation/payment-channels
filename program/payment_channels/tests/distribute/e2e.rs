@@ -1,10 +1,7 @@
 //! End-to-end LiteSVM scenarios for `distribute`.
 //!
 //! Drives the full open → optional `settle` → distribute pipeline against
-//! the compiled `.so`. Byte-level mutation stands in for fields whose
-//! owning instructions are still stubbed: `status` (`request_close` /
-//! `finalize`), `payer_withdrawn_at` (`withdraw_payer`), and `paid_out`
-//! (post-prior-distribute simulation).
+//! the compiled `.so`.
 
 #![allow(clippy::result_large_err)]
 
@@ -90,9 +87,7 @@ fn read_paid_out(svm: &LiteSVM, channel: &Pubkey) -> u64 {
 }
 
 // ---------------------------------------------------------------------------
-// Channel state mutators — stand in for stubbed `request_close` /
-// `finalize` / `withdraw_payer`. Once those land, every call site here
-// becomes a one-line ix submission.
+// Direct byte writes to `Channel.status` / `paid_out` / `payer_withdrawn_at`.
 
 fn mutate_channel<F: FnOnce(&mut Vec<u8>)>(svm: &mut LiteSVM, channel: &Pubkey, f: F) {
     let mut acct = svm.get_account(channel).expect("channel exists");

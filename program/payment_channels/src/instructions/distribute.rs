@@ -58,8 +58,7 @@ pub struct DistributeAccounts<'a> {
     pub channel_token_account: &'a mut AccountView,
     /// Payer refund destination. Used **only** by the FINALIZED branch when
     /// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `== 0` and
-    /// `deposit > settled`; the implicit remainder of `pool` no longer
-    /// touches this account.
+    /// `deposit > settled`.
     pub payer_token_account: &'a mut AccountView,
     /// Implicit-remainder destination: receives
     /// `floor(pool * (10_000 − Σ bps) / 10_000)` whenever `payee_bps > 0`.

@@ -1,7 +1,6 @@
 //! End-to-end validation of `topUp` against the compiled .so.
 
 #![allow(clippy::result_large_err)]
-#![allow(deprecated)]
 
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};

@@ -212,8 +212,8 @@ fn bps_sum_above_10000_rejected() {
 
 #[test]
 fn duplicate_recipient_rejected() {
-    // Hoisted to `open` so distribute's preimage-hash check transitively
-    // proves uniqueness without re-scanning the recipient list.
+    // `open` enforces uniqueness so `distribute` can trust the preimage
+    // hash without rescanning the recipient list.
     let dup = Pubkey::new_unique();
     assert_eq!(
         OpenRun {

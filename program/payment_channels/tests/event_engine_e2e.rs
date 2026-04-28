@@ -8,9 +8,9 @@
 // `FailedTransactionMetadata` from litesvm is large by design; boxing it
 // in our test harness is churn for no benefit.
 #![allow(clippy::result_large_err)]
-// Our `ProgramError::NotEnoughAccountKeys` still round-trips through the
-// runtime as `InstructionError::NotEnoughAccountKeys`; the renamed
-// `MissingAccount` variant is a separate enum member that wouldn't match.
+// `InstructionError::NotEnoughAccountKeys` is marked deprecated upstream
+// but is still the variant the runtime emits when the program returns
+// `ProgramError::NotEnoughAccountKeys`, so we match on it directly.
 #![allow(deprecated)]
 
 use litesvm::LiteSVM;

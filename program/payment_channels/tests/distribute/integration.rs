@@ -44,10 +44,9 @@ fn closing_status_rejects() {
 
 #[test]
 fn wrong_mint_rejects() {
-    // Distribute trusts the channel PDA (`refactor: drop tautological
-    // channel PDA re-derivation`, 6b323f8) but still binds the mint
-    // account to `channel.mint`. A random `mint` against a `ChannelBuilder`
-    // that committed `Pubkey::default()` exercises the guard.
+    // `distribute` binds the `mint` account to `channel.mint`. A random
+    // `mint` against a `ChannelBuilder` that committed `Pubkey::default()`
+    // exercises that guard.
     let payer = Pubkey::new_unique();
     let splits = one_split();
     assert_eq!(

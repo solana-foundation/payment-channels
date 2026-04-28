@@ -4,7 +4,7 @@
 ///
 /// On-chain uses `sol_blake3`. Host-side test builds use the `blake3` dev-dep
 /// so unit tests can assert digest determinism / distinctness; non-test host
-/// builds panic — there is no silent zero stub to mask digest mismatches.
+/// builds panic so missing-syscall mismatches surface immediately.
 #[inline]
 pub fn blake3(input: &[u8]) -> [u8; 32] {
     #[cfg(any(target_os = "solana", target_arch = "bpf"))]
