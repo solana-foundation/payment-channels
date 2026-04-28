@@ -10,10 +10,10 @@ use std::str::FromStr;
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 use payment_channels::PaymentChannelsError;
+use payment_channels::VOUCHER_PAYLOAD_SIZE;
 use payment_channels::ed25519;
 use payment_channels::event_engine::event_authority_pda;
-use payment_channels::instructions::open::{DISCRIMINATOR as OPEN_DISCRIMINATOR};
-use payment_channels::VOUCHER_PAYLOAD_SIZE;
+use payment_channels::instructions::open::DISCRIMINATOR as OPEN_DISCRIMINATOR;
 use payment_channels_client::instructions::{Settle, SettleInstructionArgs};
 use payment_channels_client::types::{DistributionRecipients, SettleArgs, VoucherArgs};
 use solana_instruction::{AccountMeta, Instruction};
@@ -33,7 +33,10 @@ use crate::common::token_2022::{
     POINTER_EXTENSION_LEN, TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN,
     add_account_extension, add_mint_extension,
 };
-use crate::common::{ATA_PROGRAM, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM, SYSVAR_RENT, expect_custom_err};
+use crate::common::{
+    ATA_PROGRAM, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM, SYSVAR_RENT,
+    expect_custom_err,
+};
 
 const GRACE_PERIOD: u32 = 3600;
 const DEFAULT_SALT: u64 = 0x1234_5678_9abc_def0;

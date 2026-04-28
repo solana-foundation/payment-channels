@@ -101,7 +101,7 @@ impl DistributionRecipients {
     }
 
     /// Infallible view of the distribution plan
-    /// 
+    ///
     /// Slices `count` entries and computes
     /// `payee_bps = 10_000 − Σ bpsᵢ`. Total — `count` is clamped to
     /// `MAX_DISTRIBUTION_RECIPIENTS` so the slice can't panic, and
