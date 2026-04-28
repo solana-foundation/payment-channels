@@ -151,9 +151,6 @@ pub fn process(
     let tp = *accs.token_program.address();
     let decimals = validate_mint(accs.mint, &tp)?;
 
-    // Stored seeds came from `open` and produced this very PDA; the
-    // owner/discriminator/version checks above already prove that. Re-deriving
-    // the address from the same fields would be tautological.
     let salt = ch.salt();
 
     // Validate the fixed token accounts first.
