@@ -122,6 +122,24 @@ fn zero_recipients_passes_arg_validation() {
 }
 
 #[test]
+fn duplicate_recipient_rejected() {
+    // Two entries with the same recipient address must reject at `open`.
+    // Hoisted there so `distribute`'s preimage-hash check transitively
+    // proves uniqueness without re-scanning.
+    let mut data = open_ix_data(SALT, DEPOSIT, GRACE, 2);
+    let second_recipient_offset = FIRST_RECIPIENT_OFFSET + ENTRY_LEN;
+    let first_recipient = data[FIRST_RECIPIENT_OFFSET..FIRST_RECIPIENT_OFFSET + 32].to_vec();
+    data[second_recipient_offset..second_recipient_offset + 32].copy_from_slice(&first_recipient);
+
+    assert_eq!(
+        run_open(data),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::DuplicateRecipient as u32
+        )),
+    );
+}
+
+#[test]
 fn bps_sum_above_10000_rejected() {
     // Σ shareBps == 10_001 is past the new upper bound and must reject.
     let mut data = open_ix_data(SALT, DEPOSIT, GRACE, 2);

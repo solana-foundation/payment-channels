@@ -941,11 +941,17 @@ fn wrong_payee_ata() {
 }
 
 #[test]
-fn max_recipients_accepted() {
-    let recipient = Pubkey::new_unique();
-    let splits: Vec<Split> = (0..MAX_DISTRIBUTION_RECIPIENTS)
+fn many_distinct_recipients_accepted() {
+    // The program caps recipients at MAX_DISTRIBUTION_RECIPIENTS (32), but a
+    // legacy transaction can't carry 32 distinct ATAs alongside the fixed
+    // accounts without an Address Lookup Table. 16 distinct recipients
+    // exercises the same loop and is comfortably within the legacy tx size.
+    // The 32-count plan validation itself is already covered at `open` in
+    // `tests/open/distribution.rs::max_recipients_passes_arg_validation`.
+    const N: usize = 16;
+    let splits: Vec<Split> = (0..N)
         .map(|_| Split {
-            owner: recipient,
+            owner: Pubkey::new_unique(),
             bps: 1,
         })
         .collect();
@@ -954,12 +960,12 @@ fn max_recipients_accepted() {
 
     s.send(s.distribute_ix()).expect("distribute ok");
 
-    assert_eq!(s.recipient_atas.len(), MAX_DISTRIBUTION_RECIPIENTS);
-    assert!(
-        s.recipient_atas
-            .iter()
-            .all(|ata| ata == &s.recipient_atas[0])
-    );
-    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 3_200);
+    assert_eq!(s.recipient_atas.len(), N);
+    let unique: std::collections::HashSet<_> = s.recipient_atas.iter().collect();
+    assert_eq!(unique.len(), N);
+    // pool = settled - paid_out = 1_000_000; per-recipient floor = 1_000_000 * 1 / 10_000 = 100.
+    for ata in &s.recipient_atas {
+        assert_eq!(token_balance(&s.svm, ata), 100);
+    }
     assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
 }

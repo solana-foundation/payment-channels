@@ -106,6 +106,9 @@ pub enum PaymentChannelsError {
     /// 31 - Payee token account is not ATA(payee, mint, token_program)
     #[error("Payee token account is not ATA(payee, mint, token_program)")]
     InvalidPayeeTokenAccount = 0x1F,
+    /// 32 - Distribution plan contains a duplicate recipient address
+    #[error("Distribution plan contains a duplicate recipient address")]
+    DuplicateRecipient = 0x20,
 }
 
 impl From<PaymentChannelsError> for solana_program_error::ProgramError {

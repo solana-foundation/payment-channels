@@ -628,6 +628,12 @@
         "kind": "errorNode",
         "message": "Payee token account is not ATA(payee, mint, token_program)",
         "name": "invalidPayeeTokenAccount"
+      },
+      {
+        "code": 32,
+        "kind": "errorNode",
+        "message": "Distribution plan contains a duplicate recipient address",
+        "name": "duplicateRecipient"
       }
     ],
     "events": [],

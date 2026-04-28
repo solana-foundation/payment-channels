@@ -76,4 +76,6 @@ pub enum PaymentChannelsError {
     NothingToDistribute = 30,
     #[error("Payee token account is not ATA(payee, mint, token_program)")]
     InvalidPayeeTokenAccount = 31,
+    #[error("Distribution plan contains a duplicate recipient address")]
+    DuplicateRecipient = 32,
 }

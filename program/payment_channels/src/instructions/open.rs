@@ -167,6 +167,7 @@ pub fn process(
     }
 
     let validated = args.recipients.validate_view()?;
+    args.recipients.assert_unique_recipients()?;
 
     let deposit = args.deposit();
     if deposit == 0 {
