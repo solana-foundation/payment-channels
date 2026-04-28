@@ -1,7 +1,5 @@
-mod accounts;
-mod bounds;
-mod distribution;
 mod e2e;
+mod integration;
 
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
@@ -12,114 +10,118 @@ use payment_channels::state::Channel;
 use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
-use solana_pubkey::{Pubkey, pubkey};
+use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 
-use crate::common::PROGRAM_ID;
+use crate::common::{
+    ATA_PROGRAM, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM, SYSVAR_RENT,
+};
 
-pub(super) const SPL_TOKEN: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-pub(super) const ATA_PROGRAM: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
-pub(super) const SYSTEM_PROGRAM: Pubkey = pubkey!("11111111111111111111111111111111");
-pub(super) const SYSVAR_RENT: Pubkey = pubkey!("SysvarRent111111111111111111111111111111111");
 pub(super) const EVENT_AUTHORITY: Pubkey =
     Pubkey::new_from_array(*event_authority_pda::ID.as_array());
 
-/// Build raw `open` instruction data.
+/// Execution descriptor for a single `open` Mollusk run.
 ///
-/// Wire layout: `discriminator(1) | salt(8) | deposit(8) | grace(4) |
-/// num_recipients(1) | entries(MAX×40)`. Active entries (indices 0..num_recipients)
-/// are given distinct non-zero values; trailing entries are zeroed.
-pub(super) fn open_ix_data(
-    salt: u64,
-    deposit: u64,
-    grace_period: u32,
-    num_recipients: u8,
-) -> Vec<u8> {
-    let mut data = vec![DISCRIMINATOR];
-    data.extend_from_slice(&salt.to_le_bytes());
-    data.extend_from_slice(&deposit.to_le_bytes());
-    data.extend_from_slice(&grace_period.to_le_bytes());
-    data.push(num_recipients);
-    for i in 0..MAX_DISTRIBUTION_RECIPIENTS {
-        if (i as u8) < num_recipients {
-            data.extend_from_slice(&[i as u8 + 1; 32]);
-            data.extend_from_slice(&(1000u64 + i as u64).to_le_bytes());
-        } else {
-            data.extend_from_slice(&[0u8; 40]);
+/// Construct with [`OpenRun::new`] for the arg fields; override any public
+/// field via struct update syntax before calling [`OpenRun::run`].
+pub(super) struct OpenRun {
+    pub salt: u64,
+    pub deposit: u64,
+    pub grace_period: u32,
+    pub num_recipients: u8,
+    pub payer: Pubkey,
+    pub payer_is_signer: bool,
+    pub payee: Pubkey,
+    pub mint: Pubkey,
+    pub authorized_signer: Pubkey,
+    /// Defaults to a random pubkey, causing `ChannelAddressMismatch`.
+    pub channel: Pubkey,
+    /// Defaults to a random pubkey.
+    pub channel_ata: Pubkey,
+}
+
+impl OpenRun {
+    pub fn new(salt: u64, deposit: u64, grace_period: u32, num_recipients: u8) -> Self {
+        Self {
+            salt,
+            deposit,
+            grace_period,
+            num_recipients,
+            payer: Pubkey::new_unique(),
+            payer_is_signer: true,
+            payee: Pubkey::new_unique(),
+            mint: Pubkey::new_unique(),
+            authorized_signer: Pubkey::new_unique(),
+            channel: Pubkey::new_unique(),
+            channel_ata: Pubkey::new_unique(),
         }
     }
-    data
-}
 
-/// Load a Mollusk instance with the compiled program.
-pub(super) fn load_mollusk() -> Mollusk {
-    let path = std::env::var("PAYMENT_CHANNELS_SO")
-        .unwrap_or_else(|_| "../../target/deploy/payment_channels.so".into());
-    let elf = mollusk_svm::file::read_file(&path);
-    let mut m = Mollusk::default();
-    m.add_program_with_loader_and_elf(
-        &PROGRAM_ID,
-        &mollusk_svm::program::loader_keys::LOADER_V3,
-        &elf,
-    );
-    m
-}
+    pub fn run(self) -> ProgramResult {
+        let mollusk = Mollusk::load_program();
 
-/// Run `open` with a signed payer and dummy accounts.
-///
-/// Fails at arg validation (`InvalidInstructionData`) if the data is invalid,
-/// or advances past it and fails at the channel-address check
-/// (`InvalidAccountData`) because the dummy channel pubkey is not the derived
-/// PDA.
-pub(super) fn run_open(ix_data: Vec<u8>) -> ProgramResult {
-    let mollusk = load_mollusk();
-
-    let ix = Instruction::new_with_bytes(
-        PROGRAM_ID,
-        &ix_data,
-        vec![
-            AccountMeta::new(Pubkey::new_unique(), true), // payer
-            AccountMeta::new_readonly(Pubkey::new_unique(), false), // payee
-            AccountMeta::new_readonly(Pubkey::new_unique(), false), // mint
-            AccountMeta::new_readonly(Pubkey::new_unique(), false), // authorized_signer
-            AccountMeta::new(Pubkey::new_unique(), false), // channel
-            AccountMeta::new(Pubkey::new_unique(), false), // payer_token_account
-            AccountMeta::new(Pubkey::new_unique(), false), // channel_token_account
-            AccountMeta::new_readonly(Pubkey::new_unique(), false), // token_program
-            AccountMeta::new_readonly(Pubkey::new_unique(), false), // system_program
-            AccountMeta::new_readonly(Pubkey::new_unique(), false), // rent
-            AccountMeta::new_readonly(Pubkey::new_unique(), false), // associated_token_program
-            AccountMeta::new_readonly(Pubkey::new_unique(), false), // event_authority
-            AccountMeta::new_readonly(PROGRAM_ID, false), // self_program
-        ],
-    );
-
-    let dummy = Account {
-        lamports: 1_000_000,
-        ..Default::default()
-    };
-    // Channel account needs Channel::LEN bytes so init_at's size check passes
-    // and execution reaches the channel-address guard.
-    let channel_account = Account {
-        lamports: 1_000_000,
-        data: vec![0u8; Channel::LEN],
-        ..Default::default()
-    };
-    let accounts: Vec<(Pubkey, Account)> = ix
-        .accounts
-        .iter()
-        .filter(|m| m.pubkey != PROGRAM_ID)
-        .map(|m| {
-            let acc = if m.pubkey == ix.accounts[4].pubkey {
-                channel_account.clone()
+        let mut data = vec![DISCRIMINATOR];
+        data.extend_from_slice(&self.salt.to_le_bytes());
+        data.extend_from_slice(&self.deposit.to_le_bytes());
+        data.extend_from_slice(&self.grace_period.to_le_bytes());
+        data.push(self.num_recipients);
+        for i in 0..MAX_DISTRIBUTION_RECIPIENTS {
+            if (i as u8) < self.num_recipients {
+                data.extend_from_slice(&[i as u8 + 1; 32]);
+                data.extend_from_slice(&(1000u64 + i as u64).to_le_bytes());
             } else {
-                dummy.clone()
-            };
-            (m.pubkey, acc)
-        })
-        .collect();
+                data.extend_from_slice(&[0u8; 40]);
+            }
+        }
 
-    mollusk.process_instruction(&ix, &accounts).program_result
+        let ix = Instruction::new_with_bytes(
+            PROGRAM_ID,
+            &data,
+            vec![
+                AccountMeta::new(self.payer, self.payer_is_signer),
+                AccountMeta::new_readonly(self.payee, false),
+                AccountMeta::new_readonly(self.mint, false),
+                AccountMeta::new_readonly(self.authorized_signer, false),
+                AccountMeta::new(self.channel, false),
+                AccountMeta::new(Pubkey::new_unique(), false), // payer_token_account
+                AccountMeta::new(self.channel_ata, false),
+                AccountMeta::new_readonly(SPL_TOKEN, false),
+                AccountMeta::new_readonly(SYSTEM_PROGRAM, false),
+                AccountMeta::new_readonly(SYSVAR_RENT, false),
+                AccountMeta::new_readonly(ATA_PROGRAM, false),
+                AccountMeta::new_readonly(EVENT_AUTHORITY, false),
+                AccountMeta::new_readonly(PROGRAM_ID, false),
+            ],
+        );
+
+        let dummy = Account {
+            lamports: 1_000_000,
+            ..Default::default()
+        };
+        // Channel account needs Channel::LEN bytes so the program can write
+        // into it after the address checks pass (reached only in escrow test).
+        let channel_account = Account {
+            lamports: 1_000_000,
+            data: vec![0u8; Channel::LEN],
+            ..Default::default()
+        };
+
+        let accounts: Vec<(Pubkey, Account)> = ix
+            .accounts
+            .iter()
+            .filter(|m| m.pubkey != PROGRAM_ID)
+            .map(|m| {
+                let acc = if m.pubkey == self.channel {
+                    channel_account.clone()
+                } else {
+                    dummy.clone()
+                };
+                (m.pubkey, acc)
+            })
+            .collect();
+
+        mollusk.process_instruction(&ix, &accounts).program_result
+    }
 }
 
 /// Airdrop, create mint, mint `deposit` tokens to payer's ATA.
@@ -184,9 +186,22 @@ pub(super) fn open_ix(
     grace_period: u32,
     num_recipients: u8,
 ) -> Instruction {
+    let mut data = vec![DISCRIMINATOR];
+    data.extend_from_slice(&salt.to_le_bytes());
+    data.extend_from_slice(&deposit.to_le_bytes());
+    data.extend_from_slice(&grace_period.to_le_bytes());
+    data.push(num_recipients);
+    for i in 0..MAX_DISTRIBUTION_RECIPIENTS {
+        if (i as u8) < num_recipients {
+            data.extend_from_slice(&[i as u8 + 1; 32]);
+            data.extend_from_slice(&(1000u64 + i as u64).to_le_bytes());
+        } else {
+            data.extend_from_slice(&[0u8; 40]);
+        }
+    }
     Instruction::new_with_bytes(
         PROGRAM_ID,
-        &open_ix_data(salt, deposit, grace_period, num_recipients),
+        &data,
         vec![
             AccountMeta::new(*payer, true),
             AccountMeta::new_readonly(*payee, false),

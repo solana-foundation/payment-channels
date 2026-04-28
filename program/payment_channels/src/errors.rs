@@ -50,4 +50,8 @@ pub enum PaymentChannelsError {
     EscrowAddressMismatch = 17,
     #[error("Payer and payee must be different accounts")]
     PayerPayeeMustDiffer = 18,
+    #[error("Caller is not the channel payer")]
+    UnauthorizedPayer = 19,
+    #[error("Mint account does not match channel's recorded mint")]
+    MintAddressMismatch = 20,
 }

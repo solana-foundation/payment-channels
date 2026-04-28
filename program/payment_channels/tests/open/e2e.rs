@@ -11,8 +11,10 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
+use litesvm::LiteSVM;
+
 use super::{derive_pdas, open_ix, setup_funded_svm};
-use crate::common::load_program;
+use crate::common::ProgramLoader;
 
 const SALT: u64 = 42;
 const DEPOSIT: u64 = 5_000_000;
@@ -32,7 +34,7 @@ fn read_i64(data: &[u8], offset: usize) -> i64 {
 
 #[test]
 fn open_sets_channel_fields() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
 
     let payee = Pubkey::new_unique();
     let authorized_signer = Pubkey::new_unique();
