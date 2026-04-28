@@ -165,7 +165,7 @@ pub fn process(
         return Err(PaymentChannelsError::PayerPayeeMustDiffer.into());
     }
 
-    let recipient_count = args.recipients.validate()?;
+    let validated = args.recipients.validate_view()?;
 
     let deposit = args.deposit();
     if deposit == 0 {
@@ -180,7 +180,8 @@ pub fn process(
         args.salt(),
     );
 
-    if args.recipients.entries[..recipient_count]
+    if validated
+        .entries
         .iter()
         .any(|entry| entry.recipient == channel_address)
     {

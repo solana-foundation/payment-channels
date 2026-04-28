@@ -93,12 +93,6 @@ impl DistributionRecipients {
         })
     }
 
-    /// Backwards-compatible validation helper for callers that only need the
-    /// active recipient count.
-    pub fn validate(&self) -> Result<usize, ProgramError> {
-        Ok(self.validate_view()?.entries.len())
-    }
-
     /// Raw bytes of `count(1) || entries[0..count](count×34)` — the blake3
     /// preimage for [`Channel::distribution_hash`](crate::Channel::distribution_hash).
     #[inline(always)]
@@ -149,7 +143,7 @@ mod tests {
 
     #[test]
     fn validate_zero_count_accepted() {
-        assert_eq!(make_recipients(0).validate().unwrap(), 0);
+        assert_eq!(make_recipients(0).validate_view().unwrap().entries.len(), 0,);
     }
 
     #[test]
@@ -172,8 +166,10 @@ mod tests {
     fn validate_max_count_accepted() {
         assert_eq!(
             make_recipients(MAX_DISTRIBUTION_RECIPIENTS as u8)
-                .validate()
-                .unwrap(),
+                .validate_view()
+                .unwrap()
+                .entries
+                .len(),
             MAX_DISTRIBUTION_RECIPIENTS,
         );
     }
@@ -186,7 +182,7 @@ mod tests {
         }; MAX_DISTRIBUTION_RECIPIENTS];
         entries[0].bps = (BPS_DENOMINATOR as u16).to_le_bytes();
         let r = DistributionRecipients { count: 1, entries };
-        assert_eq!(r.validate().unwrap(), 1);
+        assert_eq!(r.validate_view().unwrap().entries.len(), 1);
     }
 
     #[test]
@@ -197,7 +193,7 @@ mod tests {
         }; MAX_DISTRIBUTION_RECIPIENTS];
         entries[0].bps = (BPS_DENOMINATOR as u16 + 1).to_le_bytes();
         let r = DistributionRecipients { count: 1, entries };
-        assert!(r.validate().is_err());
+        assert!(r.validate_view().is_err());
     }
 
     #[test]
@@ -209,7 +205,7 @@ mod tests {
                 bps: [0u8; 2],
             }; MAX_DISTRIBUTION_RECIPIENTS],
         };
-        assert!(r.validate().is_err());
+        assert!(r.validate_view().is_err());
     }
 
     #[test]
