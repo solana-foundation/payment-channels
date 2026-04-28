@@ -109,6 +109,9 @@ pub enum PaymentChannelsError {
     /// 32 - Distribution plan contains a duplicate recipient address
     #[error("Distribution plan contains a duplicate recipient address")]
     DuplicateRecipient = 0x20,
+    /// 33 - Recipient ATA tail length does not match the committed plan's entry count
+    #[error("Recipient ATA tail length does not match the committed plan's entry count")]
+    RecipientAccountCountMismatch = 0x21,
 }
 
 impl From<PaymentChannelsError> for solana_program_error::ProgramError {

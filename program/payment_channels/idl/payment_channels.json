@@ -634,6 +634,12 @@
         "kind": "errorNode",
         "message": "Distribution plan contains a duplicate recipient address",
         "name": "duplicateRecipient"
+      },
+      {
+        "code": 33,
+        "kind": "errorNode",
+        "message": "Recipient ATA tail length does not match the committed plan's entry count",
+        "name": "recipientAccountCountMismatch"
       }
     ],
     "events": [],

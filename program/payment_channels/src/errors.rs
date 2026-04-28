@@ -78,4 +78,6 @@ pub enum PaymentChannelsError {
     InvalidPayeeTokenAccount = 31,
     #[error("Distribution plan contains a duplicate recipient address")]
     DuplicateRecipient = 32,
+    #[error("Recipient ATA tail length does not match the committed plan's entry count")]
+    RecipientAccountCountMismatch = 33,
 }
