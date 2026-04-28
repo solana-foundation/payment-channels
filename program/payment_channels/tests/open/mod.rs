@@ -10,7 +10,7 @@ use payment_channels::state::Channel;
 use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
-use solana_pubkey::{Pubkey, pubkey};
+use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 
 use crate::common::{

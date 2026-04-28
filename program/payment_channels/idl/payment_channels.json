@@ -568,6 +568,12 @@
         "kind": "errorNode",
         "message": "Caller is not the channel payer",
         "name": "unauthorizedPayer"
+      },
+      {
+        "code": 20,
+        "kind": "errorNode",
+        "message": "Mint account does not match channel's recorded mint",
+        "name": "mintAddressMismatch"
       }
     ],
     "events": [],
