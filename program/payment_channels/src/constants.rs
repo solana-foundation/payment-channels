@@ -1,12 +1,3 @@
-/// SPL Token (classic) program ID.
-pub const SPL_TOKEN_PROGRAM_ID: pinocchio::Address = pinocchio_token::ID;
-
-/// SPL Token-2022 program ID.
-pub const TOKEN_2022_PROGRAM_ID: pinocchio::Address = pinocchio_token_2022::ID;
-
-/// Associated-Token-Account program ID.
-pub const ATA_PROGRAM_ID: pinocchio::Address = pinocchio_associated_token_account::ID;
-
 /// Owner of the treasury ATAs that receive rounding residuals when a channel
 /// is finalized by `distribute`.
 /// TODO Placeholder — **replace before mainnet deploy**. The treasury ATA is derived

@@ -1,7 +1,6 @@
 use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer, error::ProgramError};
 use pinocchio_token_2022::instructions::TransferChecked;
 
-use crate::constants::{ATA_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID};
 use crate::errors::PaymentChannelsError;
 
 mod base_layout {
@@ -48,7 +47,7 @@ mod extension_id {
 pub fn derive_ata(owner: &Address, mint: &Address, token_program: &Address) -> Address {
     Address::find_program_address(
         &[owner.as_ref(), token_program.as_ref(), mint.as_ref()],
-        &ATA_PROGRAM_ID,
+        &pinocchio_associated_token_account::ID,
     )
     .0
 }
@@ -100,12 +99,12 @@ pub fn validate_ata_token_account(
 /// else — most importantly transfer fees, hooks, or confidential transfers —
 /// is rejected so amount accounting cannot diverge from the literal `amount`.
 pub fn validate_mint(mint: &AccountView, token_program: &Address) -> Result<u8, ProgramError> {
-    let decimals = if *token_program == SPL_TOKEN_PROGRAM_ID {
+    let decimals = if *token_program == pinocchio_token::ID {
         // pinocchio_token enforces owner == SPL classic + exact length.
         pinocchio_token::state::Mint::from_account_view(mint)
             .map_err(|_| PaymentChannelsError::MintAccountMismatch)?
             .decimals()
-    } else if *token_program == TOKEN_2022_PROGRAM_ID {
+    } else if *token_program == pinocchio_token_2022::ID {
         // pinocchio_token_2022 enforces owner == Token-2022 and (when
         // extensions are present) the AccountType discriminator byte.
         pinocchio_token_2022::state::Mint::from_account_view(mint)
@@ -115,7 +114,7 @@ pub fn validate_mint(mint: &AccountView, token_program: &Address) -> Result<u8, 
         return Err(PaymentChannelsError::InvalidTokenProgram.into());
     };
 
-    if *token_program == TOKEN_2022_PROGRAM_ID {
+    if *token_program == pinocchio_token_2022::ID {
         let data = mint.try_borrow()?;
         if data.len() > base_layout::MINT_LEN {
             // Upstream's `validate_account_type` checks the discriminator at
@@ -144,7 +143,7 @@ pub fn validate_token_account(
     token_program: &Address,
     account_error: PaymentChannelsError,
 ) -> ProgramResult {
-    let (mint_addr, owner_addr, initialized) = if *token_program == SPL_TOKEN_PROGRAM_ID {
+    let (mint_addr, owner_addr, initialized) = if *token_program == pinocchio_token::ID {
         let acc = pinocchio_token::state::Account::from_account_view(account)
             .map_err(|_| account_error)?;
         let initialized = matches!(
@@ -152,7 +151,7 @@ pub fn validate_token_account(
             pinocchio_token::state::AccountState::Initialized
         );
         (*acc.mint(), *acc.owner(), initialized)
-    } else if *token_program == TOKEN_2022_PROGRAM_ID {
+    } else if *token_program == pinocchio_token_2022::ID {
         let acc = pinocchio_token_2022::state::Account::from_account_view(account)
             .map_err(|_| account_error)?;
         let initialized = matches!(
@@ -168,7 +167,7 @@ pub fn validate_token_account(
         return Err(account_error.into());
     }
 
-    if *token_program == TOKEN_2022_PROGRAM_ID {
+    if *token_program == pinocchio_token_2022::ID {
         let data = account.try_borrow()?;
         if data.len() > base_layout::TOKEN_ACCOUNT_LEN {
             // Token-account base layout already aligns with the AccountType
@@ -187,11 +186,11 @@ pub fn token_account_amount(
     token_program: &Address,
     account_error: PaymentChannelsError,
 ) -> Result<u64, ProgramError> {
-    if *token_program == SPL_TOKEN_PROGRAM_ID {
+    if *token_program == pinocchio_token::ID {
         Ok(pinocchio_token::state::Account::from_account_view(account)
             .map_err(|_| account_error)?
             .amount())
-    } else if *token_program == TOKEN_2022_PROGRAM_ID {
+    } else if *token_program == pinocchio_token_2022::ID {
         Ok(
             pinocchio_token_2022::state::Account::from_account_view(account)
                 .map_err(|_| account_error)?
