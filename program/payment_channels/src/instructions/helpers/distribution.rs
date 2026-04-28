@@ -100,11 +100,13 @@ impl DistributionRecipients {
         })
     }
 
-    /// Non-validating projection: slices `count` entries and computes
+    /// Infallible view of the distribution plan
+    /// 
+    /// Slices `count` entries and computes
     /// `payee_bps = 10_000 − Σ bpsᵢ`. Total — `count` is clamped to
     /// `MAX_DISTRIBUTION_RECIPIENTS` so the slice can't panic, and
     /// `payee_bps` saturates at 0 if `Σ bps` exceeds the denominator.
-    /// Callers must hold a separate proof of validity (open: `validate_view`;
+    /// Callers must hold a separate proof of validity (open: [`Self::validate_view`];
     /// distribute: preimage-hash equality with the committed plan).
     pub fn view(&self) -> ValidatedDistribution<'_> {
         let n = (self.count as usize).min(MAX_DISTRIBUTION_RECIPIENTS);
