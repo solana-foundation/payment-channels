@@ -62,9 +62,9 @@ pub struct DistributeAccounts<'a> {
     /// touches this account.
     pub payer_token_account: &'a mut AccountView,
     /// Implicit-remainder destination: receives
-    /// `floor(pool * (10_000 − Σ bps) / 10_000)` on every `distribute` where
-    /// `pool > 0`. Always validated even when `Σ bps == 10_000` (transfer
-    /// is then a no-op).
+    /// `floor(pool * (10_000 − Σ bps) / 10_000)` whenever `payee_bps > 0`.
+    /// Always supplied because the accounts schema is fixed; the transfer
+    /// call is skipped at the call site when `Σ bps == 10_000`.
     pub payee_token_account: &'a mut AccountView,
     /// Treasury destination: receives flooring residual when the channel is
     /// finalized and ready to close.
@@ -331,17 +331,22 @@ fn transfer_pool(
             .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
     }
 
-    let payee_share = floor_bps_share(pool, payee_bps)?;
-    transfer_checked_signed_if_nonzero(
-        accs.channel_token_account,
-        accs.mint,
-        accs.payee_token_account,
-        accs.channel,
-        payee_share,
-        decimals,
-        token_program,
-        signers,
-    )?;
+    let payee_share = if payee_bps != 0 {
+        let share = floor_bps_share(pool, payee_bps)?;
+        transfer_checked_signed_if_nonzero(
+            accs.channel_token_account,
+            accs.mint,
+            accs.payee_token_account,
+            accs.channel,
+            share,
+            decimals,
+            token_program,
+            signers,
+        )?;
+        share
+    } else {
+        0
+    };
 
     let transferred = sum_paid
         .checked_add(payee_share)
