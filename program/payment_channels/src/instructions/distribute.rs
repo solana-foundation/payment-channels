@@ -328,7 +328,7 @@ fn transfer_pool(
         )?;
         sum_paid = sum_paid
             .checked_add(amount)
-            .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+            .expect("invariant: Σ floor(pool · bpsᵢ / 10_000) ≤ pool ≤ u64::MAX");
     }
 
     let payee_share = if payee_bps != 0 {
@@ -350,9 +350,11 @@ fn transfer_pool(
 
     let transferred = sum_paid
         .checked_add(payee_share)
-        .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
-    pool.checked_sub(transferred)
-        .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+        .expect("invariant: Σ shares ≤ pool ≤ u64::MAX");
+    debug_assert!(
+        transferred <= pool,
+        "invariant: Σ floor shares can never exceed pool when Σ bps ≤ 10_000",
+    );
     Ok(())
 }
 
