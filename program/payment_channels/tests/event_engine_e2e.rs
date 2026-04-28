@@ -27,7 +27,7 @@ use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 
 mod common;
-use common::{PROGRAM_ID, expect_custom_err, load_program};
+use common::{PROGRAM_ID, ProgramLoader, expect_custom_err};
 
 const SPL_TOKEN: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const ATA_PROGRAM: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
@@ -46,7 +46,7 @@ fn fund(svm: &mut LiteSVM, pubkey: &Pubkey, lamports: u64) {
 fn open_emits_opened_event_with_anchor_compatible_wire_format() {
     use payment_channels::instructions::open::{DISCRIMINATOR, MAX_DISTRIBUTION_RECIPIENTS};
 
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let payer = Keypair::new();
     fund(&mut svm, &payer.pubkey(), 10_000_000_000);
 
@@ -189,7 +189,7 @@ fn build_direct_emit_event_ix(
 
 #[test]
 fn emit_event_rejects_bad_authority() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let payer = Keypair::new();
     fund(&mut svm, &payer.pubkey(), 1_000_000_000);
     let attacker = Keypair::new();
@@ -210,7 +210,7 @@ fn emit_event_rejects_bad_authority() {
 
 #[test]
 fn emit_event_rejects_non_signer_authority() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let payer = Keypair::new();
     fund(&mut svm, &payer.pubkey(), 1_000_000_000);
     let (pda, _bump) = event_authority();
@@ -232,7 +232,7 @@ fn emit_event_rejects_non_signer_authority() {
 
 #[test]
 fn emit_event_rejects_zero_accounts() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let payer = Keypair::new();
     fund(&mut svm, &payer.pubkey(), 1_000_000_000);
 
@@ -256,7 +256,7 @@ fn emit_event_rejects_zero_accounts() {
 
 #[test]
 fn emit_event_rejects_extra_accounts() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let payer = Keypair::new();
     fund(&mut svm, &payer.pubkey(), 1_000_000_000);
     let (pda, _bump) = event_authority();

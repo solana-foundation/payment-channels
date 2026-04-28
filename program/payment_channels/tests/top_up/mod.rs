@@ -3,79 +3,14 @@ mod integration;
 
 use mollusk_svm::{Mollusk, result::ProgramResult};
 use payment_channels::instructions::top_up::{DISCRIMINATOR, TopUpArgs};
-use payment_channels::state::channel::ChannelStatus;
-use payment_channels::state::{Channel, Transmutable};
+use payment_channels::state::Transmutable;
 use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
-use crate::common::PROGRAM_ID;
+use crate::common::{PROGRAM_ID, ProgramLoader};
 
 pub(super) const DEPOSIT: u64 = 1_000_000;
-
-/// Builds a [`Channel`] blob for use in unit/integration tests.
-pub(super) struct ChannelBuilder {
-    status: ChannelStatus,
-    deposit: u64,
-    payer: Pubkey,
-    mint: Pubkey,
-}
-
-impl ChannelBuilder {
-    pub fn new() -> Self {
-        Self {
-            status: ChannelStatus::Open,
-            deposit: 0,
-            payer: Pubkey::default(),
-            mint: Pubkey::default(),
-        }
-    }
-
-    pub fn status(mut self, status: ChannelStatus) -> Self {
-        self.status = status;
-        self
-    }
-
-    pub fn deposit(mut self, deposit: u64) -> Self {
-        self.deposit = deposit;
-        self
-    }
-
-    pub fn payer(mut self, payer: Pubkey) -> Self {
-        self.payer = payer;
-        self
-    }
-
-    pub fn mint(mut self, mint: Pubkey) -> Self {
-        self.mint = mint;
-        self
-    }
-
-    pub fn build(self) -> Vec<u8> {
-        let mut data = vec![0u8; Channel::LEN];
-        data[0] = 1; // AccountDiscriminator::Channel
-        data[1] = 1; // CURRENT_CHANNEL_VERSION
-        data[3] = self.status as u8;
-        data[12..20].copy_from_slice(&self.deposit.to_le_bytes());
-        data[88..120].copy_from_slice(&self.payer.to_bytes());
-        data[184..216].copy_from_slice(&self.mint.to_bytes());
-        data
-    }
-}
-
-/// Load a Mollusk instance with the compiled program.
-pub(super) fn load_mollusk() -> Mollusk {
-    let path = std::env::var("PAYMENT_CHANNELS_SO")
-        .unwrap_or_else(|_| "../../target/deploy/payment_channels.so".into());
-    let elf = mollusk_svm::file::read_file(&path);
-    let mut m = Mollusk::default();
-    m.add_program_with_loader_and_elf(
-        &PROGRAM_ID,
-        &mollusk_svm::program::loader_keys::LOADER_V3,
-        &elf,
-    );
-    m
-}
 
 /// Execution descriptor for a single `topUp` Mollusk run.
 ///
@@ -106,7 +41,7 @@ impl TopUpRun {
     }
 
     pub fn run(self) -> ProgramResult {
-        let mollusk = load_mollusk();
+        let mollusk = Mollusk::load_program();
         let channel_pubkey = Pubkey::new_unique();
 
         let mut ix_data = vec![DISCRIMINATOR];

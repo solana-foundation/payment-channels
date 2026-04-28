@@ -4,7 +4,9 @@ use payment_channels::state::channel::ChannelStatus;
 use solana_program_error::ProgramError;
 use solana_pubkey::Pubkey;
 
-use super::{ChannelBuilder, DEPOSIT, TopUpRun};
+use crate::common::ChannelBuilder;
+
+use super::{DEPOSIT, TopUpRun};
 
 #[test]
 fn zero_amount_rejects() {

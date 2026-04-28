@@ -16,17 +16,15 @@ use solana_account::Account;
 use solana_instruction::error::InstructionError;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
-use solana_pubkey::{Pubkey, pubkey};
+use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 
-use crate::common::{PROGRAM_ID, expect_custom_err, load_program};
-
-const SPL_TOKEN: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-const ATA_PROGRAM: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
-const SYSTEM_PROGRAM: Pubkey = pubkey!("11111111111111111111111111111111");
-const SYSVAR_RENT: Pubkey = pubkey!("SysvarRent111111111111111111111111111111111");
+use crate::common::{
+    ATA_PROGRAM, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM, SYSVAR_RENT,
+    expect_custom_err,
+};
 
 fn event_authority() -> Pubkey {
     Pubkey::find_program_address(&[EVENT_AUTHORITY_SEED], &PROGRAM_ID).0
@@ -153,7 +151,7 @@ fn build_top_up_ix(
 
 #[test]
 fn top_up_increases_deposit() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let payer = Keypair::new();
     svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -217,7 +215,7 @@ fn top_up_increases_deposit() {
 
 #[test]
 fn top_up_zero_amount_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let payer = Keypair::new();
     svm.airdrop(&payer.pubkey(), 1_000_000_000).unwrap();
 
@@ -246,7 +244,7 @@ fn top_up_zero_amount_rejects() {
 
 #[test]
 fn top_up_non_open_status_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let payer = Keypair::new();
     svm.airdrop(&payer.pubkey(), 1_000_000_000).unwrap();
 
@@ -281,7 +279,7 @@ fn top_up_non_open_status_rejects() {
 
 #[test]
 fn top_up_wrong_payer_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let alice = Keypair::new(); // channel.payer
     let bob = Keypair::new(); // unauthorized caller
     svm.airdrop(&bob.pubkey(), 1_000_000_000).unwrap();
@@ -311,7 +309,7 @@ fn top_up_wrong_payer_rejects() {
 
 #[test]
 fn top_up_wrong_mint_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let payer = Keypair::new();
     svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -371,7 +369,7 @@ fn top_up_wrong_mint_rejects() {
 
 #[test]
 fn top_up_wrong_escrow_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let payer = Keypair::new();
     svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -429,7 +427,7 @@ fn top_up_wrong_escrow_rejects() {
 
 #[test]
 fn top_up_unsigned_payer_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     let channel_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 1_000_000_000).unwrap();

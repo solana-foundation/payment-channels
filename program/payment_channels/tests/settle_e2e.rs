@@ -18,7 +18,7 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 
 mod common;
-use common::{PROGRAM_ID, expect_custom_err, load_program};
+use common::{PROGRAM_ID, ProgramLoader, expect_custom_err};
 
 fn instructions_sysvar_id() -> Pubkey {
     Pubkey::from_str("Sysvar1nstructions1111111111111111111111111").unwrap()
@@ -145,7 +145,7 @@ fn build_compute_budget_limit_ix(limit: u32) -> Instruction {
 
 #[test]
 fn settle_advances_watermark_on_valid_voucher() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -179,7 +179,7 @@ fn settle_advances_watermark_on_valid_voucher() {
 
 #[test]
 fn settle_batches_two_paired_ix_advance_watermark() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -227,7 +227,7 @@ fn settle_batches_two_paired_ix_advance_watermark() {
 
 #[test]
 fn settle_without_preceding_ed25519_ix_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -258,7 +258,7 @@ fn settle_without_preceding_ed25519_ix_rejects() {
 
 #[test]
 fn settle_on_non_open_status_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -294,7 +294,7 @@ fn settle_on_non_open_status_rejects() {
 
 #[test]
 fn settle_after_expiry_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -336,7 +336,7 @@ fn settle_after_expiry_rejects() {
 
 #[test]
 fn settle_voucher_channel_mismatch_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -371,7 +371,7 @@ fn settle_voucher_channel_mismatch_rejects() {
 
 #[test]
 fn settle_voucher_over_deposit_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -405,7 +405,7 @@ fn settle_voucher_over_deposit_rejects() {
 
 #[test]
 fn settle_voucher_not_monotonic_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -439,7 +439,7 @@ fn settle_voucher_not_monotonic_rejects() {
 
 #[test]
 fn settle_voucher_message_mismatch_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -480,7 +480,7 @@ fn settle_voucher_message_mismatch_rejects() {
 
 #[test]
 fn settle_voucher_signer_mismatch_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -515,7 +515,7 @@ fn settle_voucher_signer_mismatch_rejects() {
 
 #[test]
 fn settle_malformed_ed25519_ix_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -553,7 +553,7 @@ fn settle_malformed_ed25519_ix_rejects() {
 
 #[test]
 fn settle_preceding_compute_budget_ix_rejects() {
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
@@ -595,7 +595,7 @@ fn settle_with_invalid_signature_rejects_before_settle_runs() {
     // program's `parse` guard.
     use solana_transaction_error::TransactionError;
 
-    let mut svm = load_program();
+    let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
