@@ -100,11 +100,31 @@ impl DistributionRecipients {
         })
     }
 
+    /// Non-validating projection: slices `count` entries and computes
+    /// `payee_bps = 10_000 − Σ bpsᵢ`. Total — `count` is clamped to
+    /// `MAX_DISTRIBUTION_RECIPIENTS` so the slice can't panic, and
+    /// `payee_bps` saturates at 0 if `Σ bps` exceeds the denominator.
+    /// Callers must hold a separate proof of validity (open: `validate_view`;
+    /// distribute: preimage-hash equality with the committed plan).
+    pub fn view(&self) -> ValidatedDistribution<'_> {
+        let n = (self.count as usize).min(MAX_DISTRIBUTION_RECIPIENTS);
+        let entries = &self.entries[..n];
+        let bps_sum: u32 = entries.iter().map(|e| e.bps() as u32).sum();
+        ValidatedDistribution {
+            entries,
+            payee_bps: BPS_DENOMINATOR.saturating_sub(bps_sum),
+        }
+    }
+
     /// Raw bytes of `count(1) || entries[0..count](count×34)` — the blake3
     /// preimage for [`Channel::distribution_hash`](crate::Channel::distribution_hash).
+    /// `count` is clamped to `MAX_DISTRIBUTION_RECIPIENTS` so a forged
+    /// out-of-range count cannot panic the slice; the unclamped count byte
+    /// is preserved verbatim as the first preimage byte, so distinct logical
+    /// plans cannot alias to the same digest.
     #[inline(always)]
     pub fn preimage(&self) -> &[u8] {
-        let n = self.count as usize;
+        let n = (self.count as usize).min(MAX_DISTRIBUTION_RECIPIENTS);
         &self.as_bytes()[..1 + n * DistributionEntry::LEN]
     }
 
@@ -166,6 +186,57 @@ mod tests {
 
         assert_eq!(view.entries.len(), 2);
         assert_eq!(view.payee_bps, 4500);
+    }
+
+    #[test]
+    fn view_returns_active_entries_and_payee_bps() {
+        let mut entries = [DistributionEntry {
+            recipient: Address::default(),
+            bps: 0u16.to_le_bytes(),
+        }; MAX_DISTRIBUTION_RECIPIENTS];
+        entries[0].bps = 2500u16.to_le_bytes();
+        entries[1].bps = 3000u16.to_le_bytes();
+        let r = DistributionRecipients { count: 2, entries };
+        let view = r.view();
+
+        assert_eq!(view.entries.len(), 2);
+        assert_eq!(view.payee_bps, 4500);
+    }
+
+    #[test]
+    fn view_clamps_count_above_max_without_panic() {
+        let mut r = make_recipients(MAX_DISTRIBUTION_RECIPIENTS as u8);
+        r.count = MAX_DISTRIBUTION_RECIPIENTS as u8 + 1;
+        let view = r.view();
+        assert_eq!(view.entries.len(), MAX_DISTRIBUTION_RECIPIENTS);
+    }
+
+    #[test]
+    fn view_saturates_payee_bps_when_sum_exceeds_denominator() {
+        let mut entries = [DistributionEntry {
+            recipient: Address::default(),
+            bps: 0u16.to_le_bytes(),
+        }; MAX_DISTRIBUTION_RECIPIENTS];
+        entries[0].bps = 6000u16.to_le_bytes();
+        entries[1].bps = 6000u16.to_le_bytes();
+        let r = DistributionRecipients { count: 2, entries };
+        let view = r.view();
+        assert_eq!(view.payee_bps, 0);
+    }
+
+    #[test]
+    fn preimage_clamps_count_above_max_without_panic() {
+        // count = MAX + 1 = 33; preimage() must produce a 1 + 32*34 = 1089
+        // byte slice (not panic) and its first byte must equal 33 (the
+        // unclamped count byte preserved verbatim).
+        let mut r = make_recipients(MAX_DISTRIBUTION_RECIPIENTS as u8);
+        r.count = MAX_DISTRIBUTION_RECIPIENTS as u8 + 1;
+        let bytes = r.preimage();
+        assert_eq!(
+            bytes.len(),
+            1 + MAX_DISTRIBUTION_RECIPIENTS * DistributionEntry::LEN,
+        );
+        assert_eq!(bytes[0], MAX_DISTRIBUTION_RECIPIENTS as u8 + 1);
     }
 
     #[test]
