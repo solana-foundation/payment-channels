@@ -7,12 +7,10 @@ pub mod token;
 pub mod voucher;
 
 pub use distribution::{
-    BPS_DENOMINATOR, DistributionEntry, DistributionRecipients, MAX_DISTRIBUTION_RECIPIENTS,
-    ValidatedDistribution, floor_bps_share,
+    DistributionEntry, DistributionRecipients, MAX_DISTRIBUTION_RECIPIENTS, floor_bps_share,
 };
-pub use hash::blake3;
 pub use token::{
-    derive_ata, token_account_amount, transfer_checked_signed_if_nonzero, validate_ata_address,
+    derive_ata, token_account_amount, transfer_checked_signed_if_nonzero,
     validate_ata_token_account, validate_mint, validate_token_account,
 };
 

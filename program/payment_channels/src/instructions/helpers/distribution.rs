@@ -13,7 +13,7 @@ pub const MAX_DISTRIBUTION_RECIPIENTS: usize = 32;
 /// fully drain the pool, payee carve-out is zero) or fall below it (the
 /// remainder `BPS_DENOMINATOR − Σ` becomes the payee's implicit share at
 /// `distribute`).
-pub const BPS_DENOMINATOR: u32 = 10_000;
+const BPS_DENOMINATOR: u32 = 10_000;
 
 /// One entry in the distribution plan committed at `open`.
 #[repr(C)]
@@ -49,8 +49,6 @@ pub struct DistributionRecipients {
 pub struct ValidatedDistribution<'a> {
     /// Active entries selected by `DistributionRecipients::count`.
     pub entries: &'a [DistributionEntry],
-    /// Sum of all active recipient basis points.
-    pub bps_sum: u32,
     /// Basis points left for the channel payee's implicit remainder share.
     pub payee_bps: u32,
 }
@@ -88,7 +86,6 @@ impl DistributionRecipients {
         }
         Ok(ValidatedDistribution {
             entries,
-            bps_sum,
             payee_bps: BPS_DENOMINATOR - bps_sum,
         })
     }
@@ -103,7 +100,7 @@ impl DistributionRecipients {
 
     /// Blake3 hash of the active preimage committed into the channel at `open`.
     pub fn preimage_hash(&self) -> [u8; 32] {
-        super::blake3(self.preimage())
+        super::hash::blake3(self.preimage())
     }
 }
 
@@ -158,7 +155,6 @@ mod tests {
         let view = r.validate_view().unwrap();
 
         assert_eq!(view.entries.len(), 2);
-        assert_eq!(view.bps_sum, 5500);
         assert_eq!(view.payee_bps, 4500);
     }
 

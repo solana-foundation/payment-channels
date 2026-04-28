@@ -54,7 +54,7 @@ pub fn derive_ata(owner: &Address, mint: &Address, token_program: &Address) -> A
 }
 
 /// Validates only the associated-token-account address for a role.
-pub fn validate_ata_address(
+fn validate_ata_address(
     account: &AccountView,
     expected_owner: &Address,
     expected_mint: &Address,
