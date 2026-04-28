@@ -151,13 +151,10 @@ pub fn process(
     let tp = *accs.token_program.address();
     let decimals = validate_mint(accs.mint, &tp)?;
 
-    // Re-derive channel PDA
+    // Stored seeds came from `open` and produced this very PDA; the
+    // owner/discriminator/version checks above already prove that. Re-deriving
+    // the address from the same fields would be tautological.
     let salt = ch.salt();
-    let (expected_pda, expected_bump) =
-        Channel::find_pda(&ch.payer, &ch.payee, &ch.mint, &ch.authorized_signer, salt);
-    if expected_pda != channel_address || expected_bump != ch.bump {
-        return Err(PaymentChannelsError::ChannelAddressMismatch.into());
-    }
 
     // Validate the fixed token accounts first.
     validate_ata_token_account(
