@@ -191,7 +191,10 @@ mod tests {
         }; MAX_DISTRIBUTION_RECIPIENTS];
         entries[0].bps = (BPS_DENOMINATOR as u16 + 1).to_le_bytes();
         let r = DistributionRecipients { count: 1, entries };
-        assert!(r.validate_view().is_err());
+        assert_eq!(
+            r.validate_view().map(|_| ()),
+            Err(ProgramError::from(PaymentChannelsError::InvalidSplitConfig)),
+        );
     }
 
     #[test]
@@ -203,7 +206,12 @@ mod tests {
                 bps: [0u8; 2],
             }; MAX_DISTRIBUTION_RECIPIENTS],
         };
-        assert!(r.validate_view().is_err());
+        assert_eq!(
+            r.validate_view().map(|_| ()),
+            Err(ProgramError::from(
+                PaymentChannelsError::InvalidRecipientCount
+            )),
+        );
     }
 
     #[test]
