@@ -23,7 +23,10 @@ mod tlv {
     /// Token-2022 writes an account-type byte at this shared offset before TLV
     /// extension data for both mints and token accounts.
     pub(super) const ACCOUNT_TYPE_OFFSET: usize = super::base_layout::TOKEN_ACCOUNT_LEN;
+    /// First byte of the TLV trailer — immediately after the account-type
+    /// discriminator byte.
     pub(super) const START: usize = ACCOUNT_TYPE_OFFSET + size_of::<AccountType>();
+    /// TLV header layout: `u16 type | u16 length`.
     pub(super) const HEADER_LEN: usize = 4;
 }
 
@@ -31,13 +34,21 @@ mod tlv {
 /// the Token-2022 TLV wire format and intentionally mirrored here to keep this
 /// program no-alloc/no-std. Asserted against upstream in the test module.
 mod extension_id {
+    /// Sentinel for an empty TLV slot — terminates the extension walk.
     pub(super) const UNINITIALIZED: u16 = 0;
+    /// Token-account-only: locks the `owner` field after initialization.
     pub(super) const IMMUTABLE_OWNER: u16 = 7;
+    /// Mint-only: pointer to off-chain or inline metadata; transfer-amount-neutral.
     pub(super) const METADATA_POINTER: u16 = 18;
+    /// Mint-only: inline metadata payload paired with `METADATA_POINTER`.
     pub(super) const TOKEN_METADATA: u16 = 19;
+    /// Mint-only: pointer to a token-group account; transfer-amount-neutral.
     pub(super) const GROUP_POINTER: u16 = 20;
+    /// Mint-only: inline group payload paired with `GROUP_POINTER`.
     pub(super) const TOKEN_GROUP: u16 = 21;
+    /// Mint-only: pointer to a group-member account; transfer-amount-neutral.
     pub(super) const GROUP_MEMBER_POINTER: u16 = 22;
+    /// Mint-only: inline group-member payload paired with `GROUP_MEMBER_POINTER`.
     pub(super) const TOKEN_GROUP_MEMBER: u16 = 23;
 }
 
