@@ -574,6 +574,12 @@
         "kind": "errorNode",
         "message": "Mint account does not match channel's recorded mint",
         "name": "mintAddressMismatch"
+      },
+      {
+        "code": 21,
+        "kind": "errorNode",
+        "message": "Caller is not the channel payee",
+        "name": "unauthorizedMerchant"
       }
     ],
     "events": [],

@@ -73,6 +73,9 @@ pub enum PaymentChannelsError {
     /// 20 - Mint account does not match channel's recorded mint
     #[error("Mint account does not match channel's recorded mint")]
     MintAddressMismatch = 0x14,
+    /// 21 - Caller is not the channel payee
+    #[error("Caller is not the channel payee")]
+    UnauthorizedMerchant = 0x15,
 }
 
 impl From<PaymentChannelsError> for solana_program_error::ProgramError {
