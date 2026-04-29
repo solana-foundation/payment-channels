@@ -10,8 +10,8 @@ pub use distribution::{
     DistributionEntry, DistributionRecipients, MAX_DISTRIBUTION_RECIPIENTS, floor_bps_share,
 };
 pub use token::{
-    derive_ata, token_account_amount, transfer_checked_signed_if_nonzero,
-    validate_ata_token_account, validate_mint, validate_token_account,
+    derive_ata, token_account_amount, transfer_checked_signed, validate_ata_token_account,
+    validate_mint, validate_token_account,
 };
 
 use crate::state::channel::CHANNEL_SEED;

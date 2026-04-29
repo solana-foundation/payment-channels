@@ -133,7 +133,7 @@ pub fn validate_mint(mint: &AccountView, token_program: &Address) -> Result<u8, 
             // mint base region and that offset is zero — guard against
             // smuggled bytes here, then walk the whitelisted TLV trailer.
             if !all_zero(&data[base_layout::MINT_LEN..tlv::ACCOUNT_TYPE_OFFSET]) {
-                return Err(PaymentChannelsError::UnsupportedTokenExtensions.into());
+                return Err(PaymentChannelsError::MalformedTokenAccountData.into());
             }
             scan_tlv_extensions(&data[tlv::START..], true)?;
         }
@@ -221,7 +221,7 @@ fn scan_tlv_extensions(mut data: &[u8], is_mint: bool) -> ProgramResult {
             return Ok(());
         }
         if data.len() < tlv::HEADER_LEN {
-            return Err(PaymentChannelsError::UnsupportedTokenExtensions.into());
+            return Err(PaymentChannelsError::MalformedTokenAccountData.into());
         }
 
         let extension_type = u16::from_le_bytes([data[0], data[1]]);
@@ -238,7 +238,7 @@ fn scan_tlv_extensions(mut data: &[u8], is_mint: bool) -> ProgramResult {
             .checked_add(value_len)
             .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
         if next > data.len() {
-            return Err(PaymentChannelsError::UnsupportedTokenExtensions.into());
+            return Err(PaymentChannelsError::MalformedTokenAccountData.into());
         }
         data = &data[next..];
     }
@@ -246,10 +246,9 @@ fn scan_tlv_extensions(mut data: &[u8], is_mint: bool) -> ProgramResult {
     Ok(())
 }
 
-/// Invokes a signed `TransferChecked` CPI from a channel-owned token account,
-/// skipping the CPI entirely when `amount == 0`.
+/// Invokes a signed `TransferChecked` CPI from a channel-owned token account.
 #[allow(clippy::too_many_arguments)]
-pub fn transfer_checked_signed_if_nonzero(
+pub fn transfer_checked_signed(
     from: &AccountView,
     mint: &AccountView,
     to: &AccountView,
@@ -317,5 +316,151 @@ mod token_2022_extension_id_tests {
             ExtensionType::GroupMemberPointer as u16
         );
         assert_eq!(TOKEN_GROUP_MEMBER, ExtensionType::TokenGroupMember as u16);
+    }
+}
+
+#[cfg(test)]
+mod tlv_tests {
+    use super::extension_id::*;
+    use super::*;
+
+    fn header(extension_type: u16, value_len: u16) -> [u8; 4] {
+        let t = extension_type.to_le_bytes();
+        let l = value_len.to_le_bytes();
+        [t[0], t[1], l[0], l[1]]
+    }
+
+    fn expect_err(result: ProgramResult, expected: PaymentChannelsError) {
+        match result {
+            Ok(()) => panic!("expected error, got Ok"),
+            Err(ProgramError::Custom(c)) => assert_eq!(c, expected as u32),
+            Err(e) => panic!("expected custom error, got {e:?}"),
+        }
+    }
+
+    #[test]
+    fn extension_allowed_mint_whitelist() {
+        for id in [
+            METADATA_POINTER,
+            TOKEN_METADATA,
+            GROUP_POINTER,
+            TOKEN_GROUP,
+            GROUP_MEMBER_POINTER,
+            TOKEN_GROUP_MEMBER,
+        ] {
+            assert!(
+                extension_allowed(id, true),
+                "mint id {id} should be allowed"
+            );
+        }
+    }
+
+    #[test]
+    fn extension_allowed_rejects_immutable_owner_on_mint() {
+        assert!(!extension_allowed(IMMUTABLE_OWNER, true));
+    }
+
+    #[test]
+    fn extension_allowed_token_account_whitelist() {
+        assert!(extension_allowed(IMMUTABLE_OWNER, false));
+        // Mint-only ids must not slip through on token accounts.
+        for id in [
+            METADATA_POINTER,
+            TOKEN_METADATA,
+            GROUP_POINTER,
+            TOKEN_GROUP,
+            GROUP_MEMBER_POINTER,
+            TOKEN_GROUP_MEMBER,
+        ] {
+            assert!(
+                !extension_allowed(id, false),
+                "mint-only id {id} must not be allowed on token accounts",
+            );
+        }
+    }
+
+    #[test]
+    fn extension_allowed_rejects_unknown_id() {
+        assert!(!extension_allowed(0xFFFF, true));
+        assert!(!extension_allowed(0xFFFF, false));
+    }
+
+    #[test]
+    fn scan_accepts_empty_trailer() {
+        assert!(scan_tlv_extensions(&[], true).is_ok());
+        assert!(scan_tlv_extensions(&[], false).is_ok());
+    }
+
+    #[test]
+    fn scan_accepts_single_whitelisted_mint_extension() {
+        let bytes = header(METADATA_POINTER, 0);
+        assert!(scan_tlv_extensions(&bytes, true).is_ok());
+    }
+
+    #[test]
+    fn scan_accepts_chained_whitelisted_mint_extensions() {
+        // [METADATA_POINTER hdr | 2-byte payload | TOKEN_METADATA hdr | 1-byte payload]
+        let h1 = header(METADATA_POINTER, 2);
+        let h2 = header(TOKEN_METADATA, 1);
+        let bytes: [u8; 11] = [
+            h1[0], h1[1], h1[2], h1[3], 0xAA, 0xBB, h2[0], h2[1], h2[2], h2[3], 0xCC,
+        ];
+        assert!(scan_tlv_extensions(&bytes, true).is_ok());
+    }
+
+    #[test]
+    fn scan_terminates_on_uninitialized_header() {
+        // UNINITIALIZED type byte short-circuits the walk, leaving the fake
+        // out-of-whitelist tail unread.
+        let h1 = header(UNINITIALIZED, 0);
+        let h2 = header(0xFFFF, 0);
+        let bytes: [u8; 8] = [h1[0], h1[1], h1[2], h1[3], h2[0], h2[1], h2[2], h2[3]];
+        assert!(scan_tlv_extensions(&bytes, true).is_ok());
+    }
+
+    #[test]
+    fn scan_treats_trailing_zero_region_as_terminator() {
+        let h = header(METADATA_POINTER, 0);
+        let mut bytes = [0u8; 4 + 64];
+        bytes[..4].copy_from_slice(&h);
+        assert!(scan_tlv_extensions(&bytes, true).is_ok());
+    }
+
+    #[test]
+    fn scan_rejects_truncated_header() {
+        let bytes = [0x12, 0x00, 0x01];
+        expect_err(
+            scan_tlv_extensions(&bytes, true),
+            PaymentChannelsError::MalformedTokenAccountData,
+        );
+    }
+
+    #[test]
+    fn scan_rejects_value_len_overflowing_remaining() {
+        // declared value_len=8, only 4 payload bytes supplied
+        let h = header(METADATA_POINTER, 8);
+        let bytes: [u8; 8] = [h[0], h[1], h[2], h[3], 0, 0, 0, 0];
+        expect_err(
+            scan_tlv_extensions(&bytes, true),
+            PaymentChannelsError::MalformedTokenAccountData,
+        );
+    }
+
+    #[test]
+    fn scan_rejects_non_whitelisted_type() {
+        let bytes = header(0xFFFF, 0);
+        expect_err(
+            scan_tlv_extensions(&bytes, true),
+            PaymentChannelsError::UnsupportedTokenExtensions,
+        );
+    }
+
+    #[test]
+    fn scan_rejects_mint_only_id_on_token_account() {
+        let bytes = header(METADATA_POINTER, 0);
+        expect_err(
+            scan_tlv_extensions(&bytes, false),
+            PaymentChannelsError::UnsupportedTokenExtensions,
+        );
     }
 }

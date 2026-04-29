@@ -79,7 +79,7 @@ impl DistributionRecipients {
     /// because `distribute` re-establishes the same plan via the blake3
     /// preimage check; floored per-entry shares are biased against aggregated
     /// splits, so duplicates are rejected outright instead of summed downstream.
-    pub fn validate_view(&self) -> Result<ValidatedDistribution<'_>, ProgramError> {
+    pub fn validate(&self) -> Result<ValidatedDistribution<'_>, ProgramError> {
         let n = self.count as usize;
         if n > MAX_DISTRIBUTION_RECIPIENTS {
             return Err(PaymentChannelsError::InvalidRecipientCount.into());
@@ -109,21 +109,19 @@ impl DistributionRecipients {
         })
     }
 
-    /// Infallible view of the distribution plan
+    /// Infallible view of an already-validated distribution plan.
     ///
-    /// Slices `count` entries and computes
-    /// `payee_bps = 10_000 − Σ bpsᵢ`. Total — `count` is clamped to
-    /// `MAX_DISTRIBUTION_RECIPIENTS` so the slice can't panic, and
-    /// `payee_bps` saturates at 0 if `Σ bps` exceeds the denominator.
-    /// Callers must hold a separate proof of validity (open: [`Self::validate_view`];
-    /// distribute: preimage-hash equality with the committed plan).
-    pub fn view(&self) -> ValidatedDistribution<'_> {
-        let n = (self.count as usize).min(MAX_DISTRIBUTION_RECIPIENTS);
-        let entries = &self.entries[..n];
+    /// Caller must hold a proof that `count <= MAX_DISTRIBUTION_RECIPIENTS`
+    /// and `Σ bps <= 10_000` — either freshly returned by [`Self::validate`]
+    /// (open) or proven byte-identical to a validated plan via
+    /// `distribution_hash` equality (distribute). Violating the precondition
+    /// either panics on the slice or underflows on `payee_bps`.
+    pub fn view_unchecked(&self) -> ValidatedDistribution<'_> {
+        let entries = &self.entries[..self.count as usize];
         let bps_sum: u32 = entries.iter().map(|e| e.bps() as u32).sum();
         ValidatedDistribution {
             entries,
-            payee_bps: BPS_DENOMINATOR.saturating_sub(bps_sum),
+            payee_bps: BPS_DENOMINATOR - bps_sum,
         }
     }
 
@@ -173,7 +171,7 @@ mod tests {
             recipient: Address::default(),
             bps: 100u16.to_le_bytes(),
         }; MAX_DISTRIBUTION_RECIPIENTS];
-        // Distinct address per slot so `validate_view`'s dedup pass passes
+        // Distinct address per slot so `validate`'s dedup pass passes
         // for any `count`; tests that need duplicates assemble entries inline.
         for (i, e) in entries.iter_mut().enumerate() {
             e.recipient = Address::new_from_array([i as u8 + 1; 32]);
@@ -183,11 +181,11 @@ mod tests {
 
     #[test]
     fn validate_zero_count_accepted() {
-        assert_eq!(make_recipients(0).validate_view().unwrap().entries.len(), 0,);
+        assert_eq!(make_recipients(0).validate().unwrap().entries.len(), 0,);
     }
 
     #[test]
-    fn validate_view_returns_active_entries_and_payee_bps() {
+    fn validate_returns_active_entries_and_payee_bps() {
         let mut entries = [DistributionEntry {
             recipient: Address::default(),
             bps: 0u16.to_le_bytes(),
@@ -197,14 +195,14 @@ mod tests {
         entries[1].recipient = Address::new_from_array([2u8; 32]);
         entries[1].bps = 3000u16.to_le_bytes();
         let r = DistributionRecipients { count: 2, entries };
-        let view = r.validate_view().unwrap();
+        let view = r.validate().unwrap();
 
         assert_eq!(view.entries.len(), 2);
         assert_eq!(view.payee_bps, 4500);
     }
 
     #[test]
-    fn view_returns_active_entries_and_payee_bps() {
+    fn view_unchecked_returns_active_entries_and_payee_bps() {
         let mut entries = [DistributionEntry {
             recipient: Address::default(),
             bps: 0u16.to_le_bytes(),
@@ -212,31 +210,10 @@ mod tests {
         entries[0].bps = 2500u16.to_le_bytes();
         entries[1].bps = 3000u16.to_le_bytes();
         let r = DistributionRecipients { count: 2, entries };
-        let view = r.view();
+        let view = r.view_unchecked();
 
         assert_eq!(view.entries.len(), 2);
         assert_eq!(view.payee_bps, 4500);
-    }
-
-    #[test]
-    fn view_clamps_count_above_max_without_panic() {
-        let mut r = make_recipients(MAX_DISTRIBUTION_RECIPIENTS as u8);
-        r.count = MAX_DISTRIBUTION_RECIPIENTS as u8 + 1;
-        let view = r.view();
-        assert_eq!(view.entries.len(), MAX_DISTRIBUTION_RECIPIENTS);
-    }
-
-    #[test]
-    fn view_saturates_payee_bps_when_sum_exceeds_denominator() {
-        let mut entries = [DistributionEntry {
-            recipient: Address::default(),
-            bps: 0u16.to_le_bytes(),
-        }; MAX_DISTRIBUTION_RECIPIENTS];
-        entries[0].bps = 6000u16.to_le_bytes();
-        entries[1].bps = 6000u16.to_le_bytes();
-        let r = DistributionRecipients { count: 2, entries };
-        let view = r.view();
-        assert_eq!(view.payee_bps, 0);
     }
 
     #[test]
@@ -258,7 +235,7 @@ mod tests {
     fn validate_max_count_accepted() {
         assert_eq!(
             make_recipients(MAX_DISTRIBUTION_RECIPIENTS as u8)
-                .validate_view()
+                .validate()
                 .unwrap()
                 .entries
                 .len(),
@@ -274,7 +251,7 @@ mod tests {
         }; MAX_DISTRIBUTION_RECIPIENTS];
         entries[0].bps = (BPS_DENOMINATOR as u16).to_le_bytes();
         let r = DistributionRecipients { count: 1, entries };
-        assert_eq!(r.validate_view().unwrap().entries.len(), 1);
+        assert_eq!(r.validate().unwrap().entries.len(), 1);
     }
 
     #[test]
@@ -286,7 +263,7 @@ mod tests {
         entries[0].bps = (BPS_DENOMINATOR as u16 + 1).to_le_bytes();
         let r = DistributionRecipients { count: 1, entries };
         assert_eq!(
-            r.validate_view().map(|_| ()),
+            r.validate().map(|_| ()),
             Err(ProgramError::from(PaymentChannelsError::InvalidSplitConfig)),
         );
     }
@@ -301,7 +278,7 @@ mod tests {
             }; MAX_DISTRIBUTION_RECIPIENTS],
         };
         assert_eq!(
-            r.validate_view().map(|_| ()),
+            r.validate().map(|_| ()),
             Err(ProgramError::from(
                 PaymentChannelsError::InvalidRecipientCount
             )),
@@ -344,15 +321,15 @@ mod tests {
     }
 
     #[test]
-    fn validate_view_accepts_distinct_recipients() {
+    fn validate_accepts_distinct_recipients() {
         // make_recipients seeds slot i with address [i+1; 32], so all 32
         // active entries have distinct recipients.
         let r = make_recipients(3);
-        assert!(r.validate_view().is_ok());
+        assert!(r.validate().is_ok());
     }
 
     #[test]
-    fn validate_view_rejects_duplicate_recipient() {
+    fn validate_rejects_duplicate_recipient() {
         let mut entries = [DistributionEntry {
             recipient: Address::default(),
             bps: 100u16.to_le_bytes(),
@@ -362,13 +339,13 @@ mod tests {
         entries[2].recipient = Address::new_from_array([1u8; 32]);
         let r = DistributionRecipients { count: 3, entries };
         assert_eq!(
-            r.validate_view().map(|_| ()),
+            r.validate().map(|_| ()),
             Err(ProgramError::from(PaymentChannelsError::DuplicateRecipient)),
         );
     }
 
     #[test]
-    fn validate_view_ignores_inactive_tail() {
+    fn validate_ignores_inactive_tail() {
         // Active prefix is unique; inactive tail repeats an active address.
         // Dedup must scan only `entries[..count]`.
         let mut entries = [DistributionEntry {
@@ -381,6 +358,6 @@ mod tests {
             e.recipient = Address::new_from_array([1u8; 32]);
         }
         let r = DistributionRecipients { count: 2, entries };
-        assert!(r.validate_view().is_ok());
+        assert!(r.validate().is_ok());
     }
 }

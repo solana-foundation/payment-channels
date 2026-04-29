@@ -13,8 +13,7 @@ use crate::constants::TREASURY_OWNER;
 use crate::errors::PaymentChannelsError;
 use crate::instructions::helpers::{
     DistributionEntry, DistributionRecipients, channel_signer_seeds, floor_bps_share,
-    token_account_amount, transfer_checked_signed_if_nonzero, validate_ata_token_account,
-    validate_mint,
+    token_account_amount, transfer_checked_signed, validate_ata_token_account, validate_mint,
 };
 use crate::state::channel::{Channel, ChannelStatus};
 use crate::state::{Transmutable, load};
@@ -190,7 +189,7 @@ pub fn process(
         return Err(PaymentChannelsError::InvalidDistributionHash.into());
     }
 
-    let distribution = args.recipients.view();
+    let distribution = args.recipients.view_unchecked();
 
     if accs.recipient_token_accounts.len() != distribution.entries.len() {
         return Err(PaymentChannelsError::RecipientAccountCountMismatch.into());
@@ -267,7 +266,7 @@ pub fn process(
     if status == ChannelStatus::Finalized {
         // Payer refund branch — one-shot, gated by payer_withdrawn_at.
         if payer_withdrawn_at == 0 && deposit > settled {
-            transfer_checked_signed_if_nonzero(
+            transfer_checked_signed(
                 accs.channel_token_account,
                 accs.mint,
                 accs.payer_token_account,
@@ -308,7 +307,7 @@ fn transfer_pool(
     for (entry, recipient_token_account) in entries.iter().zip(accs.recipient_token_accounts.iter())
     {
         let amount = floor_bps_share(pool, entry.bps() as u32)?;
-        transfer_checked_signed_if_nonzero(
+        transfer_checked_signed(
             accs.channel_token_account,
             accs.mint,
             recipient_token_account,
@@ -325,7 +324,7 @@ fn transfer_pool(
 
     let payee_share = if payee_bps != 0 {
         let share = floor_bps_share(pool, payee_bps)?;
-        transfer_checked_signed_if_nonzero(
+        transfer_checked_signed(
             accs.channel_token_account,
             accs.mint,
             accs.payee_token_account,
@@ -363,7 +362,7 @@ fn sweep_finalized_residual(
         token_program,
         PaymentChannelsError::InvalidChannelTokenAccount,
     )?;
-    transfer_checked_signed_if_nonzero(
+    transfer_checked_signed(
         accs.channel_token_account,
         accs.mint,
         accs.treasury_token_account,

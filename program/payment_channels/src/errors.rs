@@ -82,4 +82,6 @@ pub enum PaymentChannelsError {
     RecipientAccountCountMismatch = 33,
     #[error("Caller is not the channel payer")]
     UnauthorizedPayer = 34,
+    #[error("Token account or mint TLV trailer is malformed")]
+    MalformedTokenAccountData = 35,
 }

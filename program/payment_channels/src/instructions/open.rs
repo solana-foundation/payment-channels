@@ -166,7 +166,7 @@ pub fn process(
         return Err(PaymentChannelsError::PayerPayeeMustDiffer.into());
     }
 
-    let validated = args.recipients.validate_view()?;
+    let validated = args.recipients.validate()?;
 
     let deposit = args.deposit();
     if deposit == 0 {

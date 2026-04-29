@@ -115,6 +115,9 @@ pub enum PaymentChannelsError {
     /// 34 - Caller is not the channel payer
     #[error("Caller is not the channel payer")]
     UnauthorizedPayer = 0x22,
+    /// 35 - Token account or mint TLV trailer is malformed
+    #[error("Token account or mint TLV trailer is malformed")]
+    MalformedTokenAccountData = 0x23,
 }
 
 impl From<PaymentChannelsError> for solana_program_error::ProgramError {

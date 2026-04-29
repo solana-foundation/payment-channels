@@ -646,6 +646,12 @@
         "kind": "errorNode",
         "message": "Caller is not the channel payer",
         "name": "unauthorizedPayer"
+      },
+      {
+        "code": 35,
+        "kind": "errorNode",
+        "message": "Token account or mint TLV trailer is malformed",
+        "name": "malformedTokenAccountData"
       }
     ],
     "events": [],
