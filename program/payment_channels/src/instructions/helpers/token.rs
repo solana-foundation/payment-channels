@@ -6,13 +6,14 @@ use crate::errors::PaymentChannelsError;
 mod base_layout {
     use pinocchio_token_2022::state::{Account as TokenAccount, Mint as TokenMint};
 
-    /// SPL classic Mint byte length. Token-2022 mints with extensions are longer;
-    /// Token-2022's TLV trailer is parsed explicitly so only exact-accounting-safe
-    /// extensions are accepted.
+    /// SPL classic mint byte length. Token-2022 mints with extensions are
+    /// longer; the gap between this and `TOKEN_ACCOUNT_LEN` is enforced to be
+    /// all-zero so a Mint can never be misread as an Account with extensions.
     pub(super) const MINT_LEN: usize = TokenMint::BASE_LEN;
 
-    /// SPL classic token account byte length. Token-2022 account extensions follow
-    /// the base account region.
+    /// SPL classic token account byte length. Token-2022 account extensions
+    /// follow the base account region; Token-2022 mints share this offset for
+    /// the account-type discriminator byte.
     pub(super) const TOKEN_ACCOUNT_LEN: usize = TokenAccount::BASE_LEN;
 }
 
@@ -20,6 +21,10 @@ mod tlv {
     use core::mem::size_of;
     use pinocchio_token_2022::state::AccountType;
 
+    /// Length of a TLV `type` field (`u16`).
+    pub(super) const TYPE_LEN: usize = size_of::<u16>();
+    /// Length of a TLV `length` field (`u16`).
+    pub(super) const LENGTH_LEN: usize = size_of::<u16>();
     /// Token-2022 writes an account-type byte at this shared offset before TLV
     /// extension data for both mints and token accounts.
     pub(super) const ACCOUNT_TYPE_OFFSET: usize = super::base_layout::TOKEN_ACCOUNT_LEN;
@@ -27,7 +32,7 @@ mod tlv {
     /// discriminator byte.
     pub(super) const START: usize = ACCOUNT_TYPE_OFFSET + size_of::<AccountType>();
     /// TLV header layout: `u16 type | u16 length`.
-    pub(super) const HEADER_LEN: usize = 4;
+    pub(super) const HEADER_LEN: usize = TYPE_LEN + LENGTH_LEN;
 }
 
 /// Token-2022 extension type ids accepted by this program. They are part of
@@ -104,11 +109,12 @@ pub fn validate_ata_token_account(
 
 /// Validates a mint account against `token_program` and returns its decimals.
 ///
-/// SPL classic mints must be exactly `MINT_LEN`. Token-2022 mints are accepted
-/// only when their TLV trailer carries extensions whitelisted as
-/// transfer-amount-neutral (metadata/group pointers and payloads); anything
-/// else — most importantly transfer fees, hooks, or confidential transfers —
-/// is rejected so amount accounting cannot diverge from the literal `amount`.
+/// SPL classic mints must match the exact `pinocchio_token::state::Mint` layout.
+/// Token-2022 mints are accepted only when their TLV trailer carries extensions
+/// whitelisted as transfer-amount-neutral (metadata/group pointers and
+/// payloads); anything else — most importantly transfer fees, hooks, or
+/// confidential transfers — is rejected so amount accounting cannot diverge
+/// from the literal `amount`.
 pub fn validate_mint(mint: &AccountView, token_program: &Address) -> Result<u8, ProgramError> {
     let decimals = if *token_program == pinocchio_token::ID {
         // pinocchio_token enforces owner == SPL classic + exact length.
@@ -127,12 +133,14 @@ pub fn validate_mint(mint: &AccountView, token_program: &Address) -> Result<u8, 
 
     if *token_program == pinocchio_token_2022::ID {
         let data = mint.try_borrow()?;
-        if data.len() > base_layout::MINT_LEN {
-            // Upstream's `validate_account_type` checks the discriminator at
-            // `Account::BASE_LEN` but doesn't enforce that the gap between the
-            // mint base region and that offset is zero — guard against
-            // smuggled bytes here, then walk the whitelisted TLV trailer.
-            if !all_zero(&data[base_layout::MINT_LEN..tlv::ACCOUNT_TYPE_OFFSET]) {
+        if data.len() >= tlv::START {
+            // The gap between the mint base region and the AccountType
+            // discriminator must be all zero so a Mint can never be misread
+            // as an Account with extensions.
+            if data[base_layout::MINT_LEN..tlv::ACCOUNT_TYPE_OFFSET]
+                .iter()
+                .any(|b| *b != 0)
+            {
                 return Err(PaymentChannelsError::MalformedTokenAccountData.into());
             }
             scan_tlv_extensions(&data[tlv::START..], true)?;
@@ -180,10 +188,7 @@ pub fn validate_token_account(
 
     if *token_program == pinocchio_token_2022::ID {
         let data = account.try_borrow()?;
-        if data.len() > base_layout::TOKEN_ACCOUNT_LEN {
-            // Token-account base layout already aligns with the AccountType
-            // discriminator offset, so there's no padding to police — go
-            // straight to the whitelisted TLV walk.
+        if data.len() >= tlv::START {
             scan_tlv_extensions(&data[tlv::START..], false)?;
         }
     }
@@ -213,17 +218,13 @@ pub fn token_account_amount(
 }
 
 /// Walks the Token-2022 TLV trailer and rejects any extension type not
-/// whitelisted for the given account kind. Stops at the first uninitialized
-/// or all-zero region, which marks unused TLV space.
+/// whitelisted for the given account kind. The 2-byte `Uninitialized`
+/// (0x0000) type field is the sole sentinel; trailing bytes too short to
+/// encode a type are accepted. Duplicate whitelisted entries are not
+/// rejected — every allowed extension is transfer-amount-neutral, so
+/// duplicates can't perturb escrow accounting.
 fn scan_tlv_extensions(mut data: &[u8], is_mint: bool) -> ProgramResult {
-    while !data.is_empty() {
-        if all_zero(data) {
-            return Ok(());
-        }
-        if data.len() < tlv::HEADER_LEN {
-            return Err(PaymentChannelsError::MalformedTokenAccountData.into());
-        }
-
+    while data.len() >= tlv::TYPE_LEN {
         let extension_type = u16::from_le_bytes([data[0], data[1]]);
         if extension_type == extension_id::UNINITIALIZED {
             return Ok(());
@@ -231,6 +232,10 @@ fn scan_tlv_extensions(mut data: &[u8], is_mint: bool) -> ProgramResult {
 
         if !extension_allowed(extension_type, is_mint) {
             return Err(PaymentChannelsError::UnsupportedTokenExtensions.into());
+        }
+
+        if data.len() < tlv::HEADER_LEN {
+            return Err(PaymentChannelsError::MalformedTokenAccountData.into());
         }
 
         let value_len = u16::from_le_bytes([data[2], data[3]]) as usize;
@@ -291,11 +296,6 @@ fn extension_allowed(extension_type: u16, is_mint: bool) -> bool {
     } else {
         extension_type == extension_id::IMMUTABLE_OWNER
     }
-}
-
-/// True iff every byte in `bytes` is zero.
-fn all_zero(bytes: &[u8]) -> bool {
-    bytes.iter().all(|b| *b == 0)
 }
 
 #[cfg(test)]
@@ -419,7 +419,9 @@ mod tlv_tests {
     }
 
     #[test]
-    fn scan_treats_trailing_zero_region_as_terminator() {
+    fn scan_terminates_on_uninitialized_sentinel_in_trailer() {
+        // The first two zero bytes after the whitelisted entry decode to
+        // UNINITIALIZED and end the walk; the remaining tail is unread.
         let h = header(METADATA_POINTER, 0);
         let mut bytes = [0u8; 4 + 64];
         bytes[..4].copy_from_slice(&h);
@@ -433,6 +435,44 @@ mod tlv_tests {
             scan_tlv_extensions(&bytes, true),
             PaymentChannelsError::MalformedTokenAccountData,
         );
+    }
+
+    #[test]
+    fn scan_accepts_single_trailing_zero_byte() {
+        // Below the 2-byte type field; mirrors upstream's graceful tail.
+        assert!(scan_tlv_extensions(&[0x00], true).is_ok());
+    }
+
+    #[test]
+    fn scan_accepts_single_trailing_nonzero_byte() {
+        assert!(scan_tlv_extensions(&[0xFF], true).is_ok());
+    }
+
+    #[test]
+    fn scan_rejects_two_trailing_bytes_as_whitelisted_type() {
+        // type=METADATA_POINTER (whitelisted) but no length bytes follow.
+        let bytes = [0x12, 0x00];
+        expect_err(
+            scan_tlv_extensions(&bytes, true),
+            PaymentChannelsError::MalformedTokenAccountData,
+        );
+    }
+
+    #[test]
+    fn scan_rejects_two_trailing_bytes_as_forbidden_type() {
+        // type=TransferFeeConfig (1) — must be rejected before the length check.
+        let bytes = [0x01, 0x00];
+        expect_err(
+            scan_tlv_extensions(&bytes, true),
+            PaymentChannelsError::UnsupportedTokenExtensions,
+        );
+    }
+
+    #[test]
+    fn scan_accepts_value_len_reaching_buffer_end() {
+        let h = header(METADATA_POINTER, 4);
+        let bytes: [u8; 8] = [h[0], h[1], h[2], h[3], 0xAA, 0xBB, 0xCC, 0xDD];
+        assert!(scan_tlv_extensions(&bytes, true).is_ok());
     }
 
     #[test]
