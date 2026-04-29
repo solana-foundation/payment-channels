@@ -8,9 +8,9 @@
 // `FailedTransactionMetadata` from litesvm is large by design; boxing it
 // in our test harness is churn for no benefit.
 #![allow(clippy::result_large_err)]
-// Our `ProgramError::NotEnoughAccountKeys` still round-trips through the
-// runtime as `InstructionError::NotEnoughAccountKeys`; the renamed
-// `MissingAccount` variant is a separate enum member that wouldn't match.
+// `InstructionError::NotEnoughAccountKeys` is marked deprecated upstream
+// but is still the variant the runtime emits when the program returns
+// `ProgramError::NotEnoughAccountKeys`, so we match on it directly.
 #![allow(deprecated)]
 
 use litesvm::LiteSVM;
@@ -93,8 +93,8 @@ fn open_emits_opened_event_with_anchor_compatible_wire_format() {
     data.extend_from_slice(&grace_period.to_le_bytes());
     data.push(1u8); // num_recipients
     data.extend_from_slice(&[1u8; 32]); // recipient pubkey
-    data.extend_from_slice(&deposit.to_le_bytes()); // amount
-    data.extend_from_slice(&[0u8; (MAX_DISTRIBUTION_RECIPIENTS - 1) * 40]);
+    data.extend_from_slice(&5000u16.to_le_bytes()); // bps
+    data.extend_from_slice(&[0u8; (MAX_DISTRIBUTION_RECIPIENTS - 1) * 34]);
 
     let ix = Instruction::new_with_bytes(
         PROGRAM_ID,

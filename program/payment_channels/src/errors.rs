@@ -42,7 +42,7 @@ pub enum PaymentChannelsError {
     InvalidDistributionHash = 13,
     #[error("Deposit must be non-zero")]
     DepositMustBeNonZero = 14,
-    #[error("Recipient count must be between 1 and 30")]
+    #[error("num_recipients outside [0, 32]")]
     InvalidRecipientCount = 15,
     #[error("Channel account does not match derived PDA")]
     ChannelAddressMismatch = 16,
@@ -50,8 +50,38 @@ pub enum PaymentChannelsError {
     EscrowAddressMismatch = 17,
     #[error("Payer and payee must be different accounts")]
     PayerPayeeMustDiffer = 18,
+    #[error("Each shareBps must be non-zero and Σbps must be at most 10_000")]
+    InvalidSplitConfig = 19,
+    #[error("Recipient token account is not the expected ATA")]
+    InvalidRecipientAccount = 20,
+    #[error("Mint account does not match channel.mint")]
+    MintAccountMismatch = 21,
+    #[error("Payer account does not match channel.payer")]
+    PayerAccountMismatch = 22,
+    #[error("Token program must be SPL Token or Token-2022")]
+    InvalidTokenProgram = 23,
+    #[error("Treasury token account is not ATA(TREASURY_OWNER, mint, token_program)")]
+    TreasuryAddressMismatch = 24,
+    #[error("Arithmetic overflow")]
+    ArithmeticOverflow = 25,
+    #[error("Channel is not in OPEN or FINALIZED")]
+    ChannelNotDistributable = 26,
+    #[error("Channel token account is not ATA(channel, mint, token_program)")]
+    InvalidChannelTokenAccount = 27,
+    #[error("Payer token account is not ATA(payer, mint, token_program)")]
+    InvalidPayerTokenAccount = 28,
+    #[error("Token-2022 mint or token account uses unsupported extensions for exact distribution")]
+    UnsupportedTokenExtensions = 29,
+    #[error("No newly settled funds to distribute")]
+    NothingToDistribute = 30,
+    #[error("Payee token account is not ATA(payee, mint, token_program)")]
+    InvalidPayeeTokenAccount = 31,
+    #[error("Distribution plan contains a duplicate recipient address")]
+    DuplicateRecipient = 32,
+    #[error("Recipient ATA tail length does not match the committed plan's entry count")]
+    RecipientAccountCountMismatch = 33,
     #[error("Caller is not the channel payer")]
-    UnauthorizedPayer = 19,
-    #[error("Mint account does not match channel's recorded mint")]
-    MintAddressMismatch = 20,
+    UnauthorizedPayer = 34,
+    #[error("Token account or mint TLV trailer is malformed")]
+    MalformedTokenAccountData = 35,
 }

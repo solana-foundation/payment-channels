@@ -2,11 +2,19 @@
 
 pub mod distribution;
 pub mod ed25519;
+pub mod hash;
+pub mod token;
 pub mod voucher;
 
-pub use distribution::{DistributionEntry, DistributionRecipients, MAX_DISTRIBUTION_RECIPIENTS};
+pub use distribution::{
+    DistributionEntry, DistributionRecipients, MAX_DISTRIBUTION_RECIPIENTS, floor_bps_share,
+};
+pub use token::{
+    derive_ata, token_account_amount, transfer_checked_signed, validate_ata_token_account,
+    validate_mint, validate_token_account,
+};
 
-use crate::state::CHANNEL_SEED;
+use crate::state::channel::CHANNEL_SEED;
 use pinocchio::cpi::Seed;
 
 /// Constructs the PDA signer seeds for a channel account.
