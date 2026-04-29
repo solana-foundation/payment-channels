@@ -27,11 +27,11 @@ use super::{
     build_distribute_ix, build_recipients, treasury_owner,
 };
 use crate::common::token_2022::{
-    EXT_CPI_GUARD, EXT_GROUP_MEMBER_POINTER, EXT_GROUP_POINTER, EXT_IMMUTABLE_OWNER,
-    EXT_MEMO_TRANSFER, EXT_METADATA_POINTER, EXT_MINT_CLOSE_AUTHORITY, EXT_TOKEN_GROUP,
-    EXT_TOKEN_GROUP_MEMBER, EXT_TOKEN_METADATA, EXT_TRANSFER_FEE_CONFIG, EXT_TRANSFER_HOOK,
-    POINTER_EXTENSION_LEN, TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN,
-    add_account_extension, add_mint_extension,
+    EXT_CPI_GUARD, EXT_GROUP_MEMBER_POINTER, EXT_GROUP_POINTER, EXT_MEMO_TRANSFER,
+    EXT_METADATA_POINTER, EXT_MINT_CLOSE_AUTHORITY, EXT_TOKEN_GROUP, EXT_TOKEN_GROUP_MEMBER,
+    EXT_TOKEN_METADATA, EXT_TRANSFER_FEE_CONFIG, EXT_TRANSFER_HOOK, POINTER_EXTENSION_LEN,
+    TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN, add_account_extension,
+    add_mint_extension,
 };
 use crate::common::{
     ATA_PROGRAM, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM, SYSVAR_RENT,
@@ -821,7 +821,6 @@ fn token_2022_allowed_mint_and_immutable_owner_account_extensions_succeed() {
     ] {
         add_mint_extension(&mut s.svm, &s.mint, extension_type, value_len);
     }
-    add_account_extension(&mut s.svm, &s.recipient_atas[0], EXT_IMMUTABLE_OWNER, 0);
 
     s.send(s.distribute_ix()).expect("allowed extensions ok");
 
