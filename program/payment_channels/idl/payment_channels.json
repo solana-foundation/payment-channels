@@ -652,6 +652,12 @@
         "kind": "errorNode",
         "message": "Token account or mint TLV trailer is malformed",
         "name": "malformedTokenAccountData"
+      },
+      {
+        "code": 36,
+        "kind": "errorNode",
+        "message": "Token-2022 TLV trailer contains a duplicate extension entry",
+        "name": "duplicateTokenExtension"
       }
     ],
     "events": [],
