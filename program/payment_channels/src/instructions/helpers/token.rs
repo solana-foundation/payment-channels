@@ -219,11 +219,13 @@ pub fn token_account_amount(
 
 /// Walks the Token-2022 TLV trailer and rejects any extension type not
 /// whitelisted for the given account kind. The 2-byte `Uninitialized`
-/// (0x0000) type field is the sole sentinel; trailing bytes too short to
-/// encode a type are accepted. Duplicate whitelisted entries are not
-/// rejected — every allowed extension is transfer-amount-neutral, so
-/// duplicates can't perturb escrow accounting.
+/// (0x0000) type field is the sole sentinel; a tail too short to encode a
+/// type field cannot represent an extension and is treated as buffer end.
+/// Duplicate entries of any type are rejected — Token-2022's on-chain
+/// initializer enforces uniqueness, so a duplicate signals data the
+/// program would never produce.
 fn scan_tlv_extensions(mut data: &[u8], is_mint: bool) -> ProgramResult {
+    let mut seen: u32 = 0;
     while data.len() >= tlv::TYPE_LEN {
         let extension_type = u16::from_le_bytes([data[0], data[1]]);
         if extension_type == extension_id::UNINITIALIZED {
@@ -233,6 +235,14 @@ fn scan_tlv_extensions(mut data: &[u8], is_mint: bool) -> ProgramResult {
         if !extension_allowed(extension_type, is_mint) {
             return Err(PaymentChannelsError::UnsupportedTokenExtensions.into());
         }
+
+        // Whitelisted ids fit in 0..32 (max id is TOKEN_GROUP_MEMBER = 23),
+        // so a u32 bitmask suffices to dedupe.
+        let bit = 1u32 << (extension_type as u32);
+        if seen & bit != 0 {
+            return Err(PaymentChannelsError::DuplicateTokenExtension.into());
+        }
+        seen |= bit;
 
         if data.len() < tlv::HEADER_LEN {
             return Err(PaymentChannelsError::MalformedTokenAccountData.into());
@@ -406,6 +416,17 @@ mod tlv_tests {
             h1[0], h1[1], h1[2], h1[3], 0xAA, 0xBB, h2[0], h2[1], h2[2], h2[3], 0xCC,
         ];
         assert!(scan_tlv_extensions(&bytes, true).is_ok());
+    }
+
+    #[test]
+    fn scan_rejects_duplicate_whitelisted_extension() {
+        let h1 = header(METADATA_POINTER, 0);
+        let h2 = header(METADATA_POINTER, 0);
+        let bytes: [u8; 8] = [h1[0], h1[1], h1[2], h1[3], h2[0], h2[1], h2[2], h2[3]];
+        expect_err(
+            scan_tlv_extensions(&bytes, true),
+            PaymentChannelsError::DuplicateTokenExtension,
+        );
     }
 
     #[test]
