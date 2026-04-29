@@ -1,10 +1,16 @@
 #[cfg(feature = "idl")]
 use codama::CodamaType;
 use core::mem::size_of;
-use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
+use pinocchio::{
+    AccountView, Address, ProgramResult,
+    error::ProgramError,
+    sysvars::{Sysvar, clock::Clock},
+};
 
 use crate::errors::PaymentChannelsError;
 use crate::instructions::VoucherArgs;
+use crate::instructions::helpers::voucher::verify_voucher;
+use crate::state::channel::{Channel, ChannelStatus};
 use crate::state::{Transmutable, load};
 
 /// Instruction discriminator byte for `settleAndFinalize`.
@@ -44,16 +50,16 @@ pub struct SettleAndFinalizeAccounts<'a> {
     /// [`status`](crate::Channel::status), and
     /// [`closure_started_at`](crate::Channel::closure_started_at) all get
     /// written.
-    pub channel: &'a AccountView,
+    pub channel: &'a mut AccountView,
     /// Consulted only when
     /// [`SettleAndFinalizeArgs::has_voucher`] == 1.
     pub instructions_sysvar: &'a AccountView,
 }
 
-impl<'a> TryFrom<&'a [AccountView]> for SettleAndFinalizeAccounts<'a> {
+impl<'a> TryFrom<&'a mut [AccountView]> for SettleAndFinalizeAccounts<'a> {
     type Error = ProgramError;
 
-    fn try_from(accounts: &'a [AccountView]) -> Result<Self, Self::Error> {
+    fn try_from(accounts: &'a mut [AccountView]) -> Result<Self, Self::Error> {
         let [merchant, channel, instructions_sysvar] = accounts else {
             return Err(ProgramError::NotEnoughAccountKeys);
         };
@@ -72,9 +78,54 @@ impl<'a> TryFrom<&'a [AccountView]> for SettleAndFinalizeAccounts<'a> {
 /// [`closure_started_at`](crate::Channel::closure_started_at) to 0.
 pub fn process(
     _program_id: &Address,
-    accounts: &[AccountView],
-    _args: &SettleAndFinalizeArgs,
+    accounts: &mut [AccountView],
+    args: &SettleAndFinalizeArgs,
 ) -> ProgramResult {
-    let _accs = SettleAndFinalizeAccounts::try_from(accounts)?;
-    Err(PaymentChannelsError::NotImplemented.into())
+    let accs = SettleAndFinalizeAccounts::try_from(accounts)?;
+
+    if !accs.merchant.is_signer() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+
+    // Capture before mutable borrow of channel below.
+    let channel_address = *accs.channel.address();
+    let now = Clock::get()?.unix_timestamp;
+
+    let mut ch = Channel::from_account_mut(accs.channel)?;
+
+    match ChannelStatus::try_from(ch.status)? {
+        ChannelStatus::Open => {}
+        ChannelStatus::Closing => {
+            let deadline = ch
+                .closure_started_at()
+                .checked_add(ch.grace_period() as i64)
+                .ok_or(ProgramError::ArithmeticOverflow)?;
+            if now >= deadline {
+                return Err(PaymentChannelsError::InvalidChannelStatus.into());
+            }
+        }
+        ChannelStatus::Finalized => {
+            return Err(PaymentChannelsError::InvalidChannelStatus.into());
+        }
+    }
+
+    if accs.merchant.address() != &ch.payee {
+        return Err(PaymentChannelsError::UnauthorizedMerchant.into());
+    }
+
+    if args.has_voucher != 0 {
+        let new_watermark = verify_voucher(
+            &channel_address,
+            &ch,
+            &args.voucher,
+            accs.instructions_sysvar,
+            now,
+        )?;
+        ch.set_settled(new_watermark);
+    }
+
+    ch.status = ChannelStatus::Finalized as u8;
+    ch.set_closure_started_at(0);
+
+    Ok(())
 }

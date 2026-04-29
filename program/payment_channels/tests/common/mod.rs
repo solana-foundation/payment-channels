@@ -73,7 +73,12 @@ pub fn expect_custom_err(
 pub struct ChannelBuilder {
     status: ChannelStatus,
     deposit: u64,
+    settled: u64,
+    closure_started_at: i64,
+    grace_period: u32,
     payer: Pubkey,
+    payee: Pubkey,
+    authorized_signer: Pubkey,
     mint: Pubkey,
 }
 
@@ -82,7 +87,12 @@ impl ChannelBuilder {
         Self {
             status: ChannelStatus::Open,
             deposit: 0,
+            settled: 0,
+            closure_started_at: 0,
+            grace_period: 0,
             payer: Pubkey::default(),
+            payee: Pubkey::default(),
+            authorized_signer: Pubkey::default(),
             mint: Pubkey::default(),
         }
     }
@@ -97,8 +107,33 @@ impl ChannelBuilder {
         self
     }
 
+    pub fn settled(mut self, settled: u64) -> Self {
+        self.settled = settled;
+        self
+    }
+
+    pub fn closure_started_at(mut self, v: i64) -> Self {
+        self.closure_started_at = v;
+        self
+    }
+
+    pub fn grace_period(mut self, v: u32) -> Self {
+        self.grace_period = v;
+        self
+    }
+
     pub fn payer(mut self, payer: Pubkey) -> Self {
         self.payer = payer;
+        self
+    }
+
+    pub fn payee(mut self, payee: Pubkey) -> Self {
+        self.payee = payee;
+        self
+    }
+
+    pub fn authorized_signer(mut self, authorized_signer: Pubkey) -> Self {
+        self.authorized_signer = authorized_signer;
         self
     }
 
@@ -113,7 +148,12 @@ impl ChannelBuilder {
         data[1] = 1; // CURRENT_CHANNEL_VERSION
         data[3] = self.status as u8;
         data[12..20].copy_from_slice(&self.deposit.to_le_bytes());
+        data[20..28].copy_from_slice(&self.settled.to_le_bytes());
+        data[36..44].copy_from_slice(&self.closure_started_at.to_le_bytes());
+        data[52..56].copy_from_slice(&self.grace_period.to_le_bytes());
         data[88..120].copy_from_slice(&self.payer.to_bytes());
+        data[120..152].copy_from_slice(&self.payee.to_bytes());
+        data[152..184].copy_from_slice(&self.authorized_signer.to_bytes());
         data[184..216].copy_from_slice(&self.mint.to_bytes());
         data
     }
