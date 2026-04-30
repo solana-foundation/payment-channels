@@ -42,11 +42,10 @@ impl AccountValidator for AccountView {
         token_program: &Address,
         mint: &Address,
     ) -> Result<(), PaymentChannelsError> {
-        let expected_address = Address::create_program_address(
+        let (expected_address, _) = Address::find_program_address(
             &[owner.as_ref(), token_program.as_ref(), mint.as_ref()],
             &pinocchio_associated_token_account::ID,
-        )
-        .map_err(|_| PaymentChannelsError::AddressMismatch)?;
+        );
         if self.address() != &expected_address {
             return Err(PaymentChannelsError::AddressMismatch);
         }
@@ -60,11 +59,10 @@ impl AccountValidator for AccountView {
         token_program: &Address,
         mint: &Address,
     ) -> Result<(), PaymentChannelsError> {
-        let expected_address = Address::create_program_address(
+        let (expected_address, _) = Address::find_program_address(
             &[owner.as_ref(), token_program.as_ref(), mint.as_ref()],
             &pinocchio_associated_token_account::ID,
-        )
-        .map_err(|_| PaymentChannelsError::AddressMismatch)?;
+        );
         if self.address() != &expected_address {
             return Err(PaymentChannelsError::AddressMismatch);
         }

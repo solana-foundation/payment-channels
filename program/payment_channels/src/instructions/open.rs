@@ -197,13 +197,16 @@ pub fn process(
 
     let token_program = accs.token_program.address();
     accs.channel_token_account
-        .validate_as_ata_unchecked(&channel_address, accs.mint.address(), token_program)
+        .validate_as_ata_unchecked(&channel_address, token_program, accs.mint.address())
         .map_err(|_| PaymentChannelsError::EscrowAddressMismatch)?;
 
     let decimals = accs.mint.validate_as_mint(token_program)?;
     accs.payer_token_account
-        .validate_as_ata_unchecked(accs.payer.address(), accs.mint.address(), token_program)
-        .map_err(|_| PaymentChannelsError::InvalidPayerTokenAccount)?;
+        .validate_as_ata_checked(accs.payer.address(), token_program, accs.mint.address())
+        .map_err(|e| match e {
+            PaymentChannelsError::AddressMismatch => PaymentChannelsError::InvalidPayerTokenAccount,
+            other => other,
+        })?;
 
     // Allocate the channel PDA. The runtime verifies the seeds match
     // accs.channel.address(); mismatched account → CPI failure.

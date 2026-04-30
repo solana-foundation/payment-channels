@@ -187,7 +187,12 @@ pub fn process(
     {
         recipient_token_account
             .validate_as_ata_checked(&entry.recipient, &tp, &ch.mint)
-            .map_err(|_| PaymentChannelsError::InvalidRecipientAccount)?;
+            .map_err(|e| match e {
+                PaymentChannelsError::AddressMismatch => {
+                    PaymentChannelsError::InvalidRecipientAccount
+                }
+                other => other,
+            })?;
     }
 
     // Pool = settled − paid_out.
