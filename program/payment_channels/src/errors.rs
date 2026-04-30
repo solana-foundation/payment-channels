@@ -84,6 +84,8 @@ pub enum PaymentChannelsError {
     UnauthorizedPayer = 34,
     #[error("Token account or mint TLV trailer is malformed")]
     MalformedTokenAccountData = 35,
+    #[error("Account address mismatch")]
+    AddressMismatch = 36,
     #[error("Token-2022 TLV trailer contains a duplicate extension entry")]
-    DuplicateTokenExtension = 36,
+    DuplicateTokenExtension = 37,
 }
