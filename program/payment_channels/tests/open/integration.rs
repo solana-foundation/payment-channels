@@ -19,18 +19,11 @@ use crate::common::token_2022::{
     POINTER_EXTENSION_LEN, TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN,
     add_account_extension, add_mint_extension,
 };
-use crate::common::{ProgramLoader, SPL_TOKEN, expect_custom_err};
+use crate::common::{ProgramLoader, SPL_TOKEN, expect_custom_err, token_balance};
 
 const SALT: u64 = 1;
 const DEPOSIT: u64 = 1_000_000;
 const GRACE: u32 = 3_600;
-
-fn token_balance(svm: &LiteSVM, ata: &Pubkey) -> u64 {
-    let acct = svm.get_account(ata).expect("token account exists");
-    let mut buf = [0u8; 8];
-    buf.copy_from_slice(&acct.data[64..72]);
-    u64::from_le_bytes(buf)
-}
 
 #[test]
 fn zero_deposit_rejected() {

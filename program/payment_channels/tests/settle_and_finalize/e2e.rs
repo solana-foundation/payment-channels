@@ -2,8 +2,6 @@
 
 #![allow(clippy::result_large_err)]
 
-use std::str::FromStr;
-
 use litesvm::LiteSVM;
 use payment_channels::ed25519;
 use payment_channels::state::channel::ChannelStatus;
@@ -18,15 +16,9 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-use crate::common::{PROGRAM_ID, ProgramLoader, expect_custom_err};
-
-fn instructions_sysvar_id() -> Pubkey {
-    Pubkey::from_str("Sysvar1nstructions1111111111111111111111111").unwrap()
-}
-
-fn ed25519_program_id() -> Pubkey {
-    Pubkey::new_from_array(*ed25519::PROGRAM_ID.as_array())
-}
+use crate::common::{
+    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, ed25519_program_id, expect_custom_err,
+};
 
 /// Inject a 216-byte Channel owned by PROGRAM_ID.
 ///
@@ -119,7 +111,7 @@ fn build_saf_ix(channel: &Pubkey, args: SettleAndFinalizeArgs, merchant: &Pubkey
     SettleAndFinalize {
         merchant: *merchant,
         channel: *channel,
-        instructions_sysvar: instructions_sysvar_id(),
+        instructions_sysvar: INSTRUCTIONS_SYSVAR,
     }
     .instruction(SettleAndFinalizeInstructionArgs {
         settle_and_finalize_args: args,
