@@ -68,6 +68,11 @@ impl AccountValidator for AccountView {
                 // misread as an Account with extensions; upstream's
                 // validate_account_type checks the discriminator byte itself
                 // but not these padding bytes.
+                //
+                // SAFE: the `>= tlv::START` guard bounds both
+                // `data[MINT_LEN..ACCOUNT_TYPE_OFFSET]` and the trailer
+                // slice below; `MINT_LEN < TOKEN_ACCOUNT_LEN` is a
+                // Token-2022 wire-format invariant.
                 if data[base_layout::MINT_LEN..tlv::ACCOUNT_TYPE_OFFSET]
                     .iter()
                     .any(|b| *b != 0)
