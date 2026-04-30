@@ -1,4 +1,4 @@
-use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer, error::ProgramError};
+use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer};
 use pinocchio_token_2022::instructions::TransferChecked;
 
 use crate::errors::PaymentChannelsError;
@@ -57,7 +57,7 @@ pub fn token_account_amount(
     account: &AccountView,
     token_program: &Address,
     account_error: PaymentChannelsError,
-) -> Result<u64, ProgramError> {
+) -> Result<u64, PaymentChannelsError> {
     if *token_program == pinocchio_token::ID {
         Ok(pinocchio_token::state::Account::from_account_view(account)
             .map_err(|_| account_error)?
@@ -69,7 +69,7 @@ pub fn token_account_amount(
                 .amount(),
         )
     } else {
-        Err(PaymentChannelsError::InvalidTokenProgram.into())
+        Err(PaymentChannelsError::InvalidTokenProgram)
     }
 }
 
@@ -85,7 +85,7 @@ pub(crate) fn scan_tlv_extensions(
             return Ok(());
         }
         if data.len() < tlv::HEADER_LEN {
-            return Err(PaymentChannelsError::MalformedTokenAccountData.into());
+            return Err(PaymentChannelsError::MalformedTokenAccountData);
         }
 
         let extension_type = u16::from_le_bytes([data[0], data[1]]);
@@ -94,7 +94,7 @@ pub(crate) fn scan_tlv_extensions(
         }
 
         if !extension_allowed(extension_type, is_mint) {
-            return Err(PaymentChannelsError::UnsupportedTokenExtensions.into());
+            return Err(PaymentChannelsError::UnsupportedTokenExtensions);
         }
 
         let value_len = u16::from_le_bytes([data[2], data[3]]) as usize;
@@ -102,7 +102,7 @@ pub(crate) fn scan_tlv_extensions(
             .checked_add(value_len)
             .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
         if next > data.len() {
-            return Err(PaymentChannelsError::MalformedTokenAccountData.into());
+            return Err(PaymentChannelsError::MalformedTokenAccountData);
         }
         data = &data[next..];
     }

@@ -118,6 +118,9 @@ pub enum PaymentChannelsError {
     /// 35 - Token account or mint TLV trailer is malformed
     #[error("Token account or mint TLV trailer is malformed")]
     MalformedTokenAccountData = 0x23,
+    /// 36 - Account address mismatch
+    #[error("Account address mismatch")]
+    AddressMismatch = 0x24,
 }
 
 impl From<PaymentChannelsError> for solana_program_error::ProgramError {
