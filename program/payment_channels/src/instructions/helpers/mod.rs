@@ -7,11 +7,11 @@ pub mod hash;
 pub mod token;
 pub mod voucher;
 
-pub use account::AccountValidator;
+pub(crate) use account::{AccountValidator, ValidatedMint, ValidatedTokenAccount};
 pub use distribution::{
     DistributionEntry, DistributionRecipients, MAX_DISTRIBUTION_RECIPIENTS, floor_bps_share,
 };
-pub use token::{token_account_amount, transfer_checked_signed};
+pub(crate) use token::TokenProgramKind;
 
 use crate::state::channel::CHANNEL_SEED;
 use pinocchio::cpi::Seed;

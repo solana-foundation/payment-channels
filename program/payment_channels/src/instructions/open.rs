@@ -7,7 +7,7 @@ use pinocchio_system::instructions::CreateAccount;
 use pinocchio_token_2022::instructions::TransferChecked;
 
 use crate::errors::PaymentChannelsError;
-use crate::helpers::AccountValidator;
+use crate::helpers::{AccountValidator, TokenProgramKind};
 use crate::state::Channel;
 
 use crate::event_engine::EventSerialize;
@@ -195,14 +195,14 @@ pub fn process(
         return Err(PaymentChannelsError::ChannelAddressMismatch.into());
     }
 
-    let token_program = accs.token_program.address();
+    let program = TokenProgramKind::try_from_address(accs.token_program.address())?;
     accs.channel_token_account
-        .validate_as_ata_unchecked(&channel_address, token_program, accs.mint.address())
+        .verify_ata_address(&channel_address, program, accs.mint.address())
         .map_err(|_| PaymentChannelsError::EscrowAddressMismatch)?;
 
-    let decimals = accs.mint.validate_as_mint(token_program)?;
+    let mint = accs.mint.validate_as_mint(program)?;
     accs.payer_token_account
-        .validate_as_ata_checked(accs.payer.address(), token_program, accs.mint.address())
+        .validate_as_token_account(accs.payer.address(), &mint)
         .map_err(|e| match e {
             PaymentChannelsError::AddressMismatch => PaymentChannelsError::InvalidPayerTokenAccount,
             other => other,
@@ -245,12 +245,12 @@ pub fn process(
     // Transfer the deposit from payer to escrow.
     TransferChecked {
         from: accs.payer_token_account,
-        mint: accs.mint,
+        mint: mint.view(),
         to: accs.channel_token_account,
         authority: accs.payer,
         amount: deposit,
-        decimals,
-        token_program,
+        decimals: mint.decimals(),
+        token_program: mint.program_id(),
     }
     .invoke()?;
 

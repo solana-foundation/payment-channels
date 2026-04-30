@@ -86,6 +86,4 @@ pub enum PaymentChannelsError {
     MalformedTokenAccountData = 35,
     #[error("Account address mismatch")]
     AddressMismatch = 36,
-    #[error("Token-2022 TLV trailer contains a duplicate extension entry")]
-    DuplicateTokenExtension = 37,
 }

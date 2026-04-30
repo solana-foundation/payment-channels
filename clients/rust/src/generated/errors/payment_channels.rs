@@ -121,9 +121,6 @@ pub enum PaymentChannelsError {
     /// 36 - Account address mismatch
     #[error("Account address mismatch")]
     AddressMismatch = 0x24,
-    /// 37 - Token-2022 TLV trailer contains a duplicate extension entry
-    #[error("Token-2022 TLV trailer contains a duplicate extension entry")]
-    DuplicateTokenExtension = 0x25,
 }
 
 impl From<PaymentChannelsError> for solana_program_error::ProgramError {

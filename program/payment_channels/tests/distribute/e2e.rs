@@ -841,7 +841,8 @@ fn unsupported_token_2022_mint_extensions_reject_without_state_changes() {
             owner: Pubkey::new_unique(),
             bps: 5000,
         }];
-        let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
+        let (deposit, settled, paid_out) = pool(200_000, 0, 100_000);
+        let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
         let paid_out_before = read_paid_out(&s.svm, &s.channel);
         add_mint_extension(&mut s.svm, &s.mint, extension_type, value_len);
 
@@ -861,7 +862,8 @@ fn unsupported_token_2022_account_extensions_reject_without_state_changes() {
             owner: Pubkey::new_unique(),
             bps: 5000,
         }];
-        let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
+        let (deposit, settled, paid_out) = pool(200_000, 0, 100_000);
+        let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
         let paid_out_before = read_paid_out(&s.svm, &s.channel);
         add_account_extension(&mut s.svm, &s.recipient_atas[0], extension_type, 1);
 
@@ -894,7 +896,8 @@ fn wrong_recipient_ata() {
         owner: Pubkey::new_unique(),
         bps: 1000,
     }];
-    let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
+    let (deposit, settled, paid_out) = pool(200_000, 0, 100_000);
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
     let rogue_owner = Pubkey::new_unique();
     s.svm.airdrop(&rogue_owner, 1_000_000).ok();
     let rogue_ata = CreateAssociatedTokenAccount::new(&mut s.svm, &s.fee_payer, &s.mint)
@@ -923,7 +926,8 @@ fn wrong_treasury_ata() {
         owner: Pubkey::new_unique(),
         bps: 1000,
     }];
-    let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
+    let (deposit, settled, paid_out) = pool(200_000, 0, 100_000);
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
     let rogue_owner = Pubkey::new_unique();
     s.svm.airdrop(&rogue_owner, 1_000_000).ok();
     let rogue_ata = CreateAssociatedTokenAccount::new(&mut s.svm, &s.fee_payer, &s.mint)
@@ -952,7 +956,8 @@ fn wrong_token_program() {
         owner: Pubkey::new_unique(),
         bps: 1000,
     }];
-    let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
+    let (deposit, settled, paid_out) = pool(200_000, 0, 100_000);
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
     let system_id = Pubkey::default();
     let ix = build_distribute_ix(
         &s.channel,
@@ -988,7 +993,8 @@ fn status_closing_rejects() {
         owner: Pubkey::new_unique(),
         bps: 1000,
     }];
-    let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_CLOSING);
+    let (deposit, settled, paid_out) = pool(200_000, 0, 100_000);
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_CLOSING);
     expect_custom_err(
         s.send(s.distribute_ix()),
         PaymentChannelsError::ChannelNotDistributable,
@@ -1001,7 +1007,8 @@ fn num_recipients_exceeds_max() {
         owner: Pubkey::new_unique(),
         bps: 1000,
     }];
-    let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
+    let (deposit, settled, paid_out) = pool(200_000, 0, 100_000);
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
     let mut bad = s.recipients();
     bad.count = 33;
     let ix = build_distribute_ix(
@@ -1025,7 +1032,8 @@ fn recipient_tail_length_mismatch_rejects() {
         owner: Pubkey::new_unique(),
         bps: 1000,
     }];
-    let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
+    let (deposit, settled, paid_out) = pool(200_000, 0, 100_000);
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
     let ix = build_distribute_ix(
         &s.channel,
         &s.payer,
@@ -1075,7 +1083,8 @@ fn bps_sum_equals_10000_still_validates_payee_ata() {
         owner: Pubkey::new_unique(),
         bps: 10_000,
     }];
-    let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
+    let (deposit, settled, paid_out) = pool(200_000, 0, 100_000);
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
     let rogue_owner = Pubkey::new_unique();
     s.svm.airdrop(&rogue_owner, 1_000_000).ok();
     let rogue_ata = CreateAssociatedTokenAccount::new(&mut s.svm, &s.fee_payer, &s.mint)
@@ -1104,7 +1113,8 @@ fn wrong_payee_ata() {
         owner: Pubkey::new_unique(),
         bps: 1000,
     }];
-    let mut s = Scenario::build(splits, 200_000, 0, 100_000, STATUS_OPEN);
+    let (deposit, settled, paid_out) = pool(200_000, 0, 100_000);
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
     let rogue_owner = Pubkey::new_unique();
     s.svm.airdrop(&rogue_owner, 1_000_000).ok();
     let rogue_ata = CreateAssociatedTokenAccount::new(&mut s.svm, &s.fee_payer, &s.mint)

@@ -658,12 +658,6 @@
         "kind": "errorNode",
         "message": "Account address mismatch",
         "name": "addressMismatch"
-      },
-      {
-        "code": 37,
-        "kind": "errorNode",
-        "message": "Token-2022 TLV trailer contains a duplicate extension entry",
-        "name": "duplicateTokenExtension"
       }
     ],
     "events": [],

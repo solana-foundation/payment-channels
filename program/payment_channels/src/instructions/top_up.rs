@@ -5,7 +5,7 @@ use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 use pinocchio_token_2022::instructions::TransferChecked;
 
 use crate::errors::PaymentChannelsError;
-use crate::helpers::AccountValidator;
+use crate::helpers::{AccountValidator, TokenProgramKind};
 use crate::state::channel::ChannelStatus;
 use crate::state::{Channel, Transmutable, load};
 
@@ -102,9 +102,9 @@ pub fn process(
 
     // Capture before the mutable borrow of channel below.
     let channel_address = *accs.channel.address();
-    let token_program = accs.token_program.address();
+    let program = TokenProgramKind::try_from_address(accs.token_program.address())?;
 
-    let decimals = {
+    let mint = {
         let mut ch = Channel::from_account_mut(accs.channel)?;
 
         if ch.status != ChannelStatus::Open as u8 {
@@ -119,14 +119,12 @@ pub fn process(
             return Err(PaymentChannelsError::MintAccountMismatch.into());
         }
 
-        let decimals = accs.mint.validate_as_mint(token_program)?;
+        let mint = accs.mint.validate_as_mint(program)?;
 
-        // Re-derive the canonical escrow ATA using the mint recorded at open.
-        // Without this a caller could pass any token account, increment
-        // ch.deposit, and leave the actual escrow underfunded.
-
-        accs.channel_token_account
-            .validate_as_ata_unchecked(&channel_address, token_program, &ch.mint)
+        // Re-derive the canonical escrow ATA. Without this a caller could
+        // pass any token account, increment ch.deposit, and leave the
+        // actual escrow underfunded.
+        mint.verify_ata_address(accs.channel_token_account, &channel_address)
             .map_err(|_| PaymentChannelsError::EscrowAddressMismatch)?;
 
         let new_deposit = ch
@@ -135,17 +133,17 @@ pub fn process(
             .ok_or(ProgramError::ArithmeticOverflow)?;
         ch.set_deposit(new_deposit);
 
-        decimals
+        mint
     };
 
     TransferChecked {
         from: accs.payer_token_account,
-        mint: accs.mint,
+        mint: mint.view(),
         to: accs.channel_token_account,
         authority: accs.payer,
         amount,
-        decimals,
-        token_program,
+        decimals: mint.decimals(),
+        token_program: mint.program_id(),
     }
     .invoke()?;
 
