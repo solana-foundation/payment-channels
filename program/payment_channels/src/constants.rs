@@ -1,1 +1,8 @@
-pub const TOKEN_2022_PROGRAM_ID: pinocchio::Address = pinocchio_token_2022::ID;
+/// Owner of the treasury ATAs that receive rounding residuals when a channel
+/// is finalized by `distribute`.
+/// TODO Placeholder — **replace before mainnet deploy**. The treasury ATA is derived
+/// as `ATA(TREASURY_OWNER, mint, token_program)` and validated on-chain.
+pub const TREASURY_OWNER: pinocchio::Address = pinocchio::Address::new_from_array([
+    0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF,
+    0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF,
+]);

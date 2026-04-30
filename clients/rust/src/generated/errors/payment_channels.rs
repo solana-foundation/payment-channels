@@ -55,8 +55,8 @@ pub enum PaymentChannelsError {
     /// 14 - Deposit must be non-zero
     #[error("Deposit must be non-zero")]
     DepositMustBeNonZero = 0xE,
-    /// 15 - Recipient count must be between 1 and 30
-    #[error("Recipient count must be between 1 and 30")]
+    /// 15 - num_recipients outside [0, 32]
+    #[error("num_recipients outside [0, 32]")]
     InvalidRecipientCount = 0xF,
     /// 16 - Channel account does not match derived PDA
     #[error("Channel account does not match derived PDA")]
@@ -67,15 +67,63 @@ pub enum PaymentChannelsError {
     /// 18 - Payer and payee must be different accounts
     #[error("Payer and payee must be different accounts")]
     PayerPayeeMustDiffer = 0x12,
-    /// 19 - Caller is not the channel payer
+    /// 19 - Each shareBps must be non-zero and Σbps must be at most 10_000
+    #[error("Each shareBps must be non-zero and Σbps must be at most 10_000")]
+    InvalidSplitConfig = 0x13,
+    /// 20 - Recipient token account is not the expected ATA
+    #[error("Recipient token account is not the expected ATA")]
+    InvalidRecipientAccount = 0x14,
+    /// 21 - Mint account does not match channel.mint
+    #[error("Mint account does not match channel.mint")]
+    MintAccountMismatch = 0x15,
+    /// 22 - Payer account does not match channel.payer
+    #[error("Payer account does not match channel.payer")]
+    PayerAccountMismatch = 0x16,
+    /// 23 - Token program must be SPL Token or Token-2022
+    #[error("Token program must be SPL Token or Token-2022")]
+    InvalidTokenProgram = 0x17,
+    /// 24 - Treasury token account is not ATA(TREASURY_OWNER, mint, token_program)
+    #[error("Treasury token account is not ATA(TREASURY_OWNER, mint, token_program)")]
+    TreasuryAddressMismatch = 0x18,
+    /// 25 - Arithmetic overflow
+    #[error("Arithmetic overflow")]
+    ArithmeticOverflow = 0x19,
+    /// 26 - Channel is not in OPEN or FINALIZED
+    #[error("Channel is not in OPEN or FINALIZED")]
+    ChannelNotDistributable = 0x1A,
+    /// 27 - Channel token account is not ATA(channel, mint, token_program)
+    #[error("Channel token account is not ATA(channel, mint, token_program)")]
+    InvalidChannelTokenAccount = 0x1B,
+    /// 28 - Payer token account is not ATA(payer, mint, token_program)
+    #[error("Payer token account is not ATA(payer, mint, token_program)")]
+    InvalidPayerTokenAccount = 0x1C,
+    /// 29 - Token-2022 mint or token account uses unsupported extensions for exact distribution
+    #[error("Token-2022 mint or token account uses unsupported extensions for exact distribution")]
+    UnsupportedTokenExtensions = 0x1D,
+    /// 30 - No newly settled funds to distribute
+    #[error("No newly settled funds to distribute")]
+    NothingToDistribute = 0x1E,
+    /// 31 - Payee token account is not ATA(payee, mint, token_program)
+    #[error("Payee token account is not ATA(payee, mint, token_program)")]
+    InvalidPayeeTokenAccount = 0x1F,
+    /// 32 - Distribution plan contains a duplicate recipient address
+    #[error("Distribution plan contains a duplicate recipient address")]
+    DuplicateRecipient = 0x20,
+    /// 33 - Recipient ATA tail length does not match the committed plan's entry count
+    #[error("Recipient ATA tail length does not match the committed plan's entry count")]
+    RecipientAccountCountMismatch = 0x21,
+    /// 34 - Caller is not the channel payer
     #[error("Caller is not the channel payer")]
-    UnauthorizedPayer = 0x13,
-    /// 20 - Mint account does not match channel's recorded mint
+    UnauthorizedPayer = 0x22,
+    /// 35 - Mint account does not match channel's recorded mint
     #[error("Mint account does not match channel's recorded mint")]
-    MintAddressMismatch = 0x14,
-    /// 21 - Caller is not the channel payee
+    MintAddressMismatch = 0x23,
+    /// 36 - Caller is not the channel payee
     #[error("Caller is not the channel payee")]
-    UnauthorizedMerchant = 0x15,
+    UnauthorizedMerchant = 0x24,
+    /// 37 - Token account or mint TLV trailer is malformed
+    #[error("Token account or mint TLV trailer is malformed")]
+    MalformedTokenAccountData = 0x25,
 }
 
 impl From<PaymentChannelsError> for solana_program_error::ProgramError {

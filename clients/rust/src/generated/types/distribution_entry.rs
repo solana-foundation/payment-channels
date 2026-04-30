@@ -12,5 +12,5 @@ use solana_address::Address;
 #[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Eq, PartialEq)]
 pub struct DistributionEntry {
     pub recipient: Address,
-    pub amount: u64,
+    pub bps: u16,
 }

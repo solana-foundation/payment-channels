@@ -38,9 +38,9 @@ Actors: **C** = client (payer). **S** = server (merchant).
   - `requestClose`: Payer-signed. Callable in `OPEN`. Starts the grace period.
   - `withdraw_payer`: Payer-signed. Callable in `FINALIZED`. Refunds `deposit - settled`.
   - `finalize`: Permissionless. Post-grace. Transitions `CLOSING -> FINALIZED`.
-  - `distribute`: Permissionless in `OPEN` and `FINALIZED`. Caller supplies splits preimage; program verifies hash against `Channel.distribution_hash`. From `OPEN`, advances `paid_out` by paying `settled - paid_out` to recipients (channel stays OPEN). From `FINALIZED`, also refunds `deposit - settled` to the payer (if `payerWithdrawnAt == 0`) and tombstones the PDA.
+  - `distribute`: Permissionless in `OPEN` and `FINALIZED`. Caller supplies splits preimage; program verifies hash against `Channel.distribution_hash`. From `OPEN`, advances `paid_out` by paying `settled - paid_out` to recipients and leaves flooring residual in escrow (channel stays OPEN). From `FINALIZED`, also refunds `deposit - settled` to the payer (if `payerWithdrawnAt == 0`), sweeps residual to treasury, and tombstones the PDA.
 - **Escape-route self-sufficiency:** Clients persist the 402 challenge and `channelId` to independently invoke escape routes.
-- **Distribution commitment:** The PDA stores a 32-byte sha256 digest of the splits preimage. Splits are passed to `open` and hashed on-chain, making them publicly recoverable from instruction data. `distribute` requires the caller to supply the preimage for hash verification.
+- **Distribution commitment:** The PDA stores a 32-byte Blake3 digest of the splits preimage. Splits are passed to `open` and hashed on-chain, making them publicly recoverable from instruction data. `distribute` requires the caller to supply the preimage for hash verification.
 - **Vouchers are purely off-chain:** No on-chain transactions during metered requests.
 
 ### Server-Side Validation
@@ -75,7 +75,8 @@ To avoid paying Solana network fees for invalid transactions and to ensure proto
     // Solana-session extensions (not in MPP core; documented in Extensions section):
     "distributionSplits": [
       { "recipient": "<pubkey base58>", "shareBps": <integer 1–10000> }
-      // 1..=MAX_SPLITS entries; every shareBps > 0; Σ shareBps == 10000.
+      // 0..=MAX_SPLITS entries; every shareBps > 0; Σ shareBps ≤ 10000.
+      // The remainder `10000 − Σ shareBps` is the payee's implicit share.
       // Merchant's proposed splits; forwarded by the client as inputs to
       // `open` (program canonicalizes + hashes on-chain).
     ],
@@ -126,7 +127,7 @@ sequenceDiagram
 
     Note over S: (optional) mid-session distribute
     S->>P: submit `distribute` ix (preimage)
-    P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients (per on-chain splits)<br/>paid_out = settled<br/>state stays OPEN
+    P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients (per on-chain splits)<br/>paid_out = settled<br/>flooring residual stays in escrow<br/>state stays OPEN
     P-->>S: OK
 
     Note over S: Server decides to close
@@ -135,7 +136,7 @@ sequenceDiagram
     P-->>S: OK
 
     S->>P: submit `distribute` ix (preimage)
-    P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients (per on-chain splits)<br/>transfer (deposit − settled) → payer<br/>realloc to 8 bytes<br/>state = tombstoned
+    P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients (per on-chain splits)<br/>transfer (deposit − settled) → payer<br/>sweep residual → treasury<br/>realloc to 8 bytes<br/>state = tombstoned
     P-->>S: OK
 ```
 
@@ -155,7 +156,7 @@ sequenceDiagram
         P-->>S: OK
 
         S->>P: submit `distribute` ix (preimage)
-        P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients (per on-chain splits)<br/>transfer (deposit − settled) → payer<br/>realloc to 8 bytes<br/>state = tombstoned
+        P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients (per on-chain splits)<br/>transfer (deposit − settled) → payer<br/>sweep residual → treasury<br/>realloc to 8 bytes<br/>state = tombstoned
         P-->>S: OK
         S->>C: 200 + receipt { txHash, refunded }
     else Forced — server unresponsive
@@ -168,7 +169,7 @@ sequenceDiagram
         P->>P: freeze watermark<br/>state = FINALIZED
 
         A->>P: submit `distribute` ix (preimage)
-        P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients (per on-chain splits)<br/>(if payerWithdrawnAt == 0) transfer (deposit − settled) → payer<br/>realloc to 8 bytes<br/>state = tombstoned
+        P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients (per on-chain splits)<br/>(if payerWithdrawnAt == 0) transfer (deposit − settled) → payer<br/>sweep residual → treasury<br/>realloc to 8 bytes<br/>state = tombstoned
     end
 ```
 
@@ -351,4 +352,4 @@ Payment-Receipt: eyJtZXRob2QiOiJzb2xhbmEiLCJpbnRlbnQiOiJzZXNzaW9uIi...
 }
 ```
 
-On close-receipt responses (`POST /channel/close`), add `"txHash": "<base58 solana sig>"` identifying the `settleAndFinalize` tx the server submitted (optionally bundled with `distribute`), and (if the bundled `distribute` ran) `"refunded": "<u64 decimal>"` for the `deposit - settled` leg paid back to the payer.
+On close-receipt responses (`POST /channel/close`), add `"txHash": "<base58 solana sig>"` identifying the `settleAndFinalize` tx the server submitted (optionally bundled with `distribute`), and (if the bundled `distribute` ran) `"refunded": "<u64 decimal>"` for the `deposit - settled` branch paid back to the payer.

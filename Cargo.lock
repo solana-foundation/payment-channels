@@ -3474,6 +3474,7 @@ dependencies = [
  "solana-signer",
  "solana-transaction",
  "solana-transaction-error",
+ "spl-token-2022-interface",
  "thiserror 2.0.18",
 ]
 

@@ -98,7 +98,7 @@ pub struct Channel {
     #[cfg_attr(feature = "idl", codama(type = number(i64)))]
     closure_started_at: [u8; 8],
     /// Unix ts of the payer's one-shot refund via `withdraw_payer`; 0
-    /// means not yet withdrawn. Gates the atomic refund leg inside
+    /// means not yet withdrawn. Gates the atomic refund branch inside
     /// `distribute` when it runs from `FINALIZED`.
     #[cfg_attr(feature = "idl", codama(type = number(i64)))]
     payer_withdrawn_at: [u8; 8],
@@ -112,7 +112,9 @@ pub struct Channel {
     /// `topUp`, `requestClose`, `withdraw_payer`).
     pub payer: Address,
     /// PDA seed binding; retained on-struct because every ix that
-    /// re-derives the channel address needs the original pubkey.
+    /// re-derives the channel address needs the original pubkey. Also the
+    /// implicit-remainder destination on `distribute` (the runtime payee
+    /// ATA is `ATA(payee, mint, token_program)`).
     pub payee: Address,
     /// Pubkey that signs vouchers; equals [`Self::payer`] unless a
     /// delegate was bound at `open`. Matched against the pubkey

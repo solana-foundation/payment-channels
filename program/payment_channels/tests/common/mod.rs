@@ -2,6 +2,8 @@
 
 #![allow(dead_code)]
 
+pub mod token_2022;
+
 use litesvm::LiteSVM;
 use mollusk_svm::Mollusk;
 use payment_channels::PaymentChannelsError;
@@ -15,6 +17,7 @@ use solana_transaction_error::TransactionError;
 pub const PROGRAM_ID: Pubkey = Pubkey::new_from_array(*payment_channels::ID.as_array());
 
 pub const SPL_TOKEN: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+pub const TOKEN_2022: Pubkey = pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 pub const ATA_PROGRAM: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 pub const SYSTEM_PROGRAM: Pubkey = pubkey!("11111111111111111111111111111111");
 pub const SYSVAR_RENT: Pubkey = pubkey!("SysvarRent111111111111111111111111111111111");

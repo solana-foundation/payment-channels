@@ -4,7 +4,7 @@ use core::mem::size_of;
 use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer, error::ProgramError};
 use pinocchio_associated_token_account::instructions::Create as CreateAta;
 use pinocchio_system::instructions::CreateAccount;
-use pinocchio_token::instructions::Transfer as TransferTokens;
+use pinocchio_token_2022::instructions::TransferChecked;
 
 use crate::errors::PaymentChannelsError;
 use crate::state::Channel;
@@ -13,7 +13,10 @@ use crate::event_engine::EventSerialize;
 use crate::event_engine::emit_event;
 use crate::events::Opened;
 pub use crate::instructions::helpers::MAX_DISTRIBUTION_RECIPIENTS;
-use crate::instructions::helpers::{DistributionRecipients, channel_signer_seeds};
+use crate::instructions::helpers::{
+    DistributionRecipients, channel_signer_seeds, derive_ata, validate_ata_token_account,
+    validate_mint,
+};
 use crate::state::{Transmutable, load};
 
 /// Instruction discriminator byte for `open`.
@@ -25,7 +28,7 @@ pub const DISCRIMINATOR: u8 = 1;
 /// [`distribute`](crate::instructions::distribute) later verifies a matching
 /// preimage before paying out splits.
 ///
-/// Wire layout: `salt(8) | deposit(8) | grace_period(4) | count(1) | entries(32×40)`.
+/// Wire layout: `salt(8) | deposit(8) | grace_period(4) | count(1) | entries(32×34)`.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
@@ -163,14 +166,12 @@ pub fn process(
         return Err(PaymentChannelsError::PayerPayeeMustDiffer.into());
     }
 
-    args.recipients.validate()?;
+    let validated = args.recipients.validate()?;
 
     let deposit = args.deposit();
     if deposit == 0 {
         return Err(PaymentChannelsError::DepositMustBeNonZero.into());
     }
-
-    let distribution_hash = args.recipients.preimage_hash();
 
     let (channel_address, bump) = Channel::find_pda(
         accs.payer.address(),
@@ -180,22 +181,34 @@ pub fn process(
         args.salt(),
     );
 
+    if validated
+        .entries
+        .iter()
+        .any(|entry| entry.recipient == channel_address)
+    {
+        return Err(PaymentChannelsError::InvalidSplitConfig.into());
+    }
+
+    let distribution_hash = args.recipients.preimage_hash();
+
     // Client-side derives these addresses; validate explicitly as defense in
     // depth before any mutation (CPI enforcement provides a second layer).
     if accs.channel.address() != &channel_address {
         return Err(PaymentChannelsError::ChannelAddressMismatch.into());
     }
-    let (expected_ata, _) = Address::find_program_address(
-        &[
-            channel_address.as_ref(),
-            accs.token_program.address().as_ref(),
-            accs.mint.address().as_ref(),
-        ],
-        &pinocchio_associated_token_account::ID,
-    );
+    let token_program = accs.token_program.address();
+    let expected_ata = derive_ata(&channel_address, accs.mint.address(), token_program);
     if accs.channel_token_account.address() != &expected_ata {
         return Err(PaymentChannelsError::EscrowAddressMismatch.into());
     }
+    let decimals = validate_mint(accs.mint, token_program)?;
+    validate_ata_token_account(
+        accs.payer_token_account,
+        accs.payer.address(),
+        accs.mint.address(),
+        token_program,
+        PaymentChannelsError::InvalidPayerTokenAccount,
+    )?;
 
     // Allocate the channel PDA. The runtime verifies the seeds match
     // accs.channel.address(); mismatched account → CPI failure.
@@ -232,12 +245,15 @@ pub fn process(
     .invoke()?;
 
     // Transfer the deposit from payer to escrow.
-    TransferTokens::new(
-        accs.payer_token_account,
-        accs.channel_token_account,
-        accs.payer,
-        deposit,
-    )
+    TransferChecked {
+        from: accs.payer_token_account,
+        mint: accs.mint,
+        to: accs.channel_token_account,
+        authority: accs.payer,
+        amount: deposit,
+        decimals,
+        token_program,
+    }
     .invoke()?;
 
     Channel::init_at(

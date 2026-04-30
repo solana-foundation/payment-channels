@@ -12,32 +12,29 @@ import {
   getAddressEncoder,
   getStructDecoder,
   getStructEncoder,
-  getU64Decoder,
-  getU64Encoder,
+  getU16Decoder,
+  getU16Encoder,
   type Address,
   type FixedSizeCodec,
   type FixedSizeDecoder,
   type FixedSizeEncoder,
 } from "@solana/kit";
 
-export type DistributionEntry = { recipient: Address; amount: bigint };
+export type DistributionEntry = { recipient: Address; bps: number };
 
-export type DistributionEntryArgs = {
-  recipient: Address;
-  amount: number | bigint;
-};
+export type DistributionEntryArgs = DistributionEntry;
 
 export function getDistributionEntryEncoder(): FixedSizeEncoder<DistributionEntryArgs> {
   return getStructEncoder([
     ["recipient", getAddressEncoder()],
-    ["amount", getU64Encoder()],
+    ["bps", getU16Encoder()],
   ]);
 }
 
 export function getDistributionEntryDecoder(): FixedSizeDecoder<DistributionEntry> {
   return getStructDecoder([
     ["recipient", getAddressDecoder()],
-    ["amount", getU64Decoder()],
+    ["bps", getU16Decoder()],
   ]);
 }
 
