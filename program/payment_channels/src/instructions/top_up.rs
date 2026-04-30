@@ -5,7 +5,7 @@ use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 use pinocchio_token_2022::instructions::TransferChecked;
 
 use crate::errors::PaymentChannelsError;
-use crate::instructions::helpers::{derive_ata, validate_mint};
+use crate::helpers::AccountValidator;
 use crate::state::channel::ChannelStatus;
 use crate::state::{Channel, Transmutable, load};
 
@@ -119,15 +119,15 @@ pub fn process(
             return Err(PaymentChannelsError::MintAccountMismatch.into());
         }
 
-        let decimals = validate_mint(accs.mint, token_program)?;
+        let decimals = accs.mint.validate_as_mint(token_program)?;
 
         // Re-derive the canonical escrow ATA using the mint recorded at open.
         // Without this a caller could pass any token account, increment
         // ch.deposit, and leave the actual escrow underfunded.
-        let expected_ata = derive_ata(&channel_address, &ch.mint, token_program);
-        if accs.channel_token_account.address() != &expected_ata {
-            return Err(PaymentChannelsError::EscrowAddressMismatch.into());
-        }
+
+        accs.channel_token_account
+            .validate_as_ata_unchecked(&channel_address, token_program, &ch.mint)
+            .map_err(|_| PaymentChannelsError::EscrowAddressMismatch)?;
 
         let new_deposit = ch
             .deposit()
