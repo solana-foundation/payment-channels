@@ -658,6 +658,12 @@
         "kind": "errorNode",
         "message": "Caller is not the channel payee",
         "name": "unauthorizedPayee"
+      },
+      {
+        "code": 37,
+        "kind": "errorNode",
+        "message": "Account address mismatch",
+        "name": "addressMismatch"
       }
     ],
     "events": [],

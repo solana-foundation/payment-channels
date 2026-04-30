@@ -121,6 +121,9 @@ pub enum PaymentChannelsError {
     /// 36 - Caller is not the channel payee
     #[error("Caller is not the channel payee")]
     UnauthorizedPayee = 0x24,
+    /// 37 - Account address mismatch
+    #[error("Account address mismatch")]
+    AddressMismatch = 0x25,
 }
 
 impl From<PaymentChannelsError> for solana_program_error::ProgramError {

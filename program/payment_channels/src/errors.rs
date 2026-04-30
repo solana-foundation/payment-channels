@@ -86,4 +86,6 @@ pub enum PaymentChannelsError {
     MalformedTokenAccountData = 35,
     #[error("Caller is not the channel payee")]
     UnauthorizedPayee = 36,
+    #[error("Account address mismatch")]
+    AddressMismatch = 37,
 }
