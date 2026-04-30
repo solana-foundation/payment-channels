@@ -123,7 +123,7 @@ impl<'a> ChannelTokenAccountView<'a, Unchecked> {
         mint: &MintAccountView<'a, Checked>,
     ) -> Result<ChannelTokenAccountView<'a, Checked>, PaymentChannelsError> {
         self.inner.validate_as_ata_checked(
-            &channel_address,
+            channel_address,
             token_program.address(),
             mint.address(),
         )?;

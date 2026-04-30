@@ -275,7 +275,7 @@ pub fn process(
             )?;
         }
         sweep_finalized_residual(
-            &mut channel,
+            &channel,
             &channel_token_account,
             &mint,
             &token_program,
@@ -301,8 +301,8 @@ pub fn process(
 ///
 /// All recipient and fixed token accounts have already been validated, so this
 /// helper is only responsible for payout math and signed token CPIs.
+#[allow(clippy::too_many_arguments)]
 fn transfer_pool(
-    // accs: &mut DistributeAccounts<'_>,
     recipients: &RecipientTokenAccountsView<'_, Checked>,
     channel: &ChannelAccountView<'_, Checked>,
     channel_token_account: &ChannelTokenAccountView<'_, Checked>,
@@ -329,7 +329,7 @@ fn transfer_pool(
             channel,
             amount,
             decimals,
-            &token_program,
+            token_program,
             signers,
         )?;
         sum_paid = sum_paid
@@ -340,13 +340,13 @@ fn transfer_pool(
     let payee_share = if payee_bps != 0 {
         let share = floor_bps_share(pool, payee_bps)?;
         transfer_checked_signed(
-            &channel_token_account,
-            &mint,
+            channel_token_account,
+            mint,
             &payee_token_account.as_any(),
-            &channel,
+            channel,
             share,
             decimals,
-            &token_program,
+            token_program,
             signers,
         )?;
         share
@@ -377,13 +377,13 @@ fn sweep_finalized_residual(
 ) -> ProgramResult {
     let residual = token_program.amount(&channel_token_account.as_any())?;
     transfer_checked_signed(
-        &channel_token_account,
-        &mint,
+        channel_token_account,
+        mint,
         &treasury_token_account.as_any(),
-        &channel,
+        channel,
         residual,
         decimals,
-        &token_program,
+        token_program,
         signers,
     )
 }
@@ -399,9 +399,9 @@ fn close_finalized_channel(
 ) -> ProgramResult {
     // Close the escrow SPL account; rent flows to payer SOL account.
     CloseAccount {
-        account: &channel_token_account,
-        destination: &payer,
-        authority: &channel,
+        account: channel_token_account,
+        destination: payer,
+        authority: channel,
         token_program: token_program.address(),
     }
     .invoke_signed(signers)?;
