@@ -1,7 +1,13 @@
-use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer};
+use pinocchio::{ProgramResult, cpi::Signer};
 use pinocchio_token_2022::instructions::TransferChecked;
 
-use crate::errors::PaymentChannelsError;
+use crate::{
+    errors::PaymentChannelsError,
+    helpers::view::{
+        AnyTokenAccountsView, ChannelAccountView, ChannelTokenAccountView, Checked,
+        MintAccountView, TokenProgramAccountView,
+    },
+};
 
 pub(crate) mod base_layout {
     use pinocchio_token_2022::state::{Account as TokenAccount, Mint as TokenMint};
@@ -52,27 +58,6 @@ mod extension_id {
     pub(crate) const TOKEN_GROUP_MEMBER: u16 = 23;
 }
 
-/// Returns the raw token amount from an already-validated token account.
-pub fn token_account_amount(
-    account: &AccountView,
-    token_program: &Address,
-    account_error: PaymentChannelsError,
-) -> Result<u64, PaymentChannelsError> {
-    if *token_program == pinocchio_token::ID {
-        Ok(pinocchio_token::state::Account::from_account_view(account)
-            .map_err(|_| account_error)?
-            .amount())
-    } else if *token_program == pinocchio_token_2022::ID {
-        Ok(
-            pinocchio_token_2022::state::Account::from_account_view(account)
-                .map_err(|_| account_error)?
-                .amount(),
-        )
-    } else {
-        Err(PaymentChannelsError::InvalidTokenProgram)
-    }
-}
-
 /// Walks the Token-2022 TLV trailer and rejects any extension type not
 /// whitelisted for the given account kind. Stops at the first uninitialized
 /// or all-zero region, which marks unused TLV space.
@@ -113,13 +98,13 @@ pub(crate) fn scan_tlv_extensions(
 /// Invokes a signed `TransferChecked` CPI from a channel-owned token account.
 #[allow(clippy::too_many_arguments)]
 pub fn transfer_checked_signed(
-    from: &AccountView,
-    mint: &AccountView,
-    to: &AccountView,
-    authority: &AccountView,
+    from: &ChannelTokenAccountView<'_, Checked>,
+    mint: &MintAccountView<'_, Checked>,
+    to: &AnyTokenAccountsView<'_, Checked>,
+    authority: &ChannelAccountView<'_, Checked>,
     amount: u64,
     decimals: u8,
-    token_program: &Address,
+    token_program: &TokenProgramAccountView<'_, Checked>,
     signers: &[Signer<'_, '_>],
 ) -> ProgramResult {
     if amount == 0 {
@@ -133,7 +118,7 @@ pub fn transfer_checked_signed(
         authority,
         amount,
         decimals,
-        token_program,
+        token_program: token_program.address(),
     }
     .invoke_signed(signers)
 }
