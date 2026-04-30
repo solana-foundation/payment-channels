@@ -98,14 +98,22 @@ impl TryFrom<u16> for ExtensionType {
     type Error = PaymentChannelsError;
 
     fn try_from(value: u16) -> Result<Self, Self::Error> {
+        const IMMUTABLE_OWNER: u16 = ExtensionType::ImmutableOwner as u16;
+        const METADATA_POINTER: u16 = ExtensionType::MetadataPointer as u16;
+        const TOKEN_METADATA: u16 = ExtensionType::TokenMetadata as u16;
+        const GROUP_POINTER: u16 = ExtensionType::GroupPointer as u16;
+        const TOKEN_GROUP: u16 = ExtensionType::TokenGroup as u16;
+        const GROUP_MEMBER_POINTER: u16 = ExtensionType::GroupMemberPointer as u16;
+        const TOKEN_GROUP_MEMBER: u16 = ExtensionType::TokenGroupMember as u16;
+
         match value {
-            7 => Ok(Self::ImmutableOwner),
-            18 => Ok(Self::MetadataPointer),
-            19 => Ok(Self::TokenMetadata),
-            20 => Ok(Self::GroupPointer),
-            21 => Ok(Self::TokenGroup),
-            22 => Ok(Self::GroupMemberPointer),
-            23 => Ok(Self::TokenGroupMember),
+            IMMUTABLE_OWNER => Ok(Self::ImmutableOwner),
+            METADATA_POINTER => Ok(Self::MetadataPointer),
+            TOKEN_METADATA => Ok(Self::TokenMetadata),
+            GROUP_POINTER => Ok(Self::GroupPointer),
+            TOKEN_GROUP => Ok(Self::TokenGroup),
+            GROUP_MEMBER_POINTER => Ok(Self::GroupMemberPointer),
+            TOKEN_GROUP_MEMBER => Ok(Self::TokenGroupMember),
             _ => Err(PaymentChannelsError::UnsupportedTokenExtensions),
         }
     }
