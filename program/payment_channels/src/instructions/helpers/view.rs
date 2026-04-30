@@ -28,29 +28,10 @@ pub struct AnyTokenAccountsView<'a, S: State = Unchecked> {
     _s: PhantomData<S>,
 }
 
-#[allow(dead_code)]
 impl<'a, S: State> AnyTokenAccountsView<'a, S> {
-    pub fn new(inner: &'a AccountView) -> Self {
+    pub fn from(inner: &'a AccountView) -> Self {
         Self {
             inner,
-            _s: Default::default(),
-        }
-    }
-}
-
-impl<'a> From<&'a AccountView> for AnyTokenAccountsView<'a, Unchecked> {
-    fn from(value: &'a AccountView) -> Self {
-        Self {
-            inner: value,
-            _s: Default::default(),
-        }
-    }
-}
-
-impl<'a> From<&'a AccountView> for AnyTokenAccountsView<'a, Checked> {
-    fn from(value: &'a AccountView) -> Self {
-        Self {
-            inner: value,
             _s: Default::default(),
         }
     }

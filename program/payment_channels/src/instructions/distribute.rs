@@ -10,8 +10,8 @@ use pinocchio::{
 use pinocchio_token_2022::instructions::CloseAccount;
 
 use crate::helpers::view::{
-    ChannelTokenAccountView, MintAccountView, PayeeTokenAccountView, PayerTokenAccountView,
-    TokenProgramAccountView, TreasuryTokenAccountView,
+    AnyTokenAccountsView, ChannelTokenAccountView, MintAccountView, PayeeTokenAccountView,
+    PayerTokenAccountView, TokenProgramAccountView, TreasuryTokenAccountView,
 };
 use crate::helpers::{
     AccountValidator,
@@ -325,7 +325,7 @@ fn transfer_pool(
         transfer_checked_signed(
             channel_token_account,
             mint,
-            &recipient_token_account.into(),
+            &AnyTokenAccountsView::<Checked>::from(recipient_token_account),
             channel,
             amount,
             decimals,
