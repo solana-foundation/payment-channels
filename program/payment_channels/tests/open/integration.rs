@@ -295,7 +295,7 @@ fn non_ata_payer_token_account_rejected() {
 }
 
 #[test]
-fn token_2022_allowed_mint_and_immutable_owner_payer_account_extensions_succeed() {
+fn token_2022_allowed_mint_extensions_succeed() {
     let mut svm = LiteSVM::load_program();
 
     let payee = Pubkey::new_unique();

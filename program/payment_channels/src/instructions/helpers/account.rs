@@ -186,7 +186,8 @@ impl<'a> ValidatedMint<'a> {
         self.program.id()
     }
 
-    /// `verify_ata_address` against this mint's program and address.
+    /// Asserts `ata` is the canonical ATA for `owner` under this mint's
+    /// program and address, without reading account state.
     #[inline]
     pub(crate) fn verify_ata_address(
         &self,

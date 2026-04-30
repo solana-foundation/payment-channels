@@ -40,14 +40,14 @@ impl TokenProgramKind {
 pub(crate) mod base_layout {
     use pinocchio_token_2022::state::{Account as TokenAccount, Mint as TokenMint};
 
-    /// SPL classic mint byte length. Token-2022 mints with extensions are
+    /// SPL Token mint byte length. Token-2022 mints with extensions are
     /// longer; the gap between this and `TOKEN_ACCOUNT_LEN` is enforced to be
     /// all-zero so a Mint can never be misread as an Account with extensions.
     pub(crate) const MINT_LEN: usize = TokenMint::BASE_LEN;
 
-    /// SPL classic token account byte length. Token-2022 account extensions
-    /// follow the base account region; Token-2022 mints share this offset for
-    /// the account-type discriminator byte.
+    /// SPL Token account byte length. Token-2022 account extensions follow
+    /// the base account region; Token-2022 mints share this offset for the
+    /// account-type discriminator byte.
     pub(crate) const TOKEN_ACCOUNT_LEN: usize = TokenAccount::BASE_LEN;
 }
 
@@ -154,7 +154,7 @@ pub(crate) struct ExtensionTlv<'a> {
 }
 
 impl<'a> ExtensionTlv<'a> {
-    pub fn new(trailer: &'a [u8]) -> Self {
+    pub(crate) fn new(trailer: &'a [u8]) -> Self {
         Self { remaining: trailer }
     }
 }

@@ -151,7 +151,8 @@ pub fn process(
 
     let salt = ch.salt();
 
-    // Validate the fixed token accounts first.
+    // Validate the fixed token accounts; recipient ATAs are validated
+    // inline in `transfer_pool`.
     let channel_ta = accs
         .channel_token_account
         .validate_as_token_account(&channel_address, &mint)

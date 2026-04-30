@@ -804,7 +804,7 @@ fn bad_preimage_hash() {
 }
 
 #[test]
-fn token_2022_allowed_mint_and_immutable_owner_account_extensions_succeed() {
+fn token_2022_allowed_mint_extensions_succeed() {
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 5000,
