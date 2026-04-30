@@ -1,18 +1,17 @@
 // Shared helpers for instruction handlers.
 
+pub mod account;
 pub mod distribution;
 pub mod ed25519;
 pub mod hash;
 pub mod token;
 pub mod voucher;
 
+pub use account::AccountValidator;
 pub use distribution::{
     DistributionEntry, DistributionRecipients, MAX_DISTRIBUTION_RECIPIENTS, floor_bps_share,
 };
-pub use token::{
-    derive_ata, token_account_amount, transfer_checked_signed, validate_ata_token_account,
-    validate_mint, validate_token_account,
-};
+pub use token::{token_account_amount, transfer_checked_signed};
 
 use crate::state::channel::CHANNEL_SEED;
 use pinocchio::cpi::Seed;

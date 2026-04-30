@@ -652,6 +652,12 @@
         "kind": "errorNode",
         "message": "Token account or mint TLV trailer is malformed",
         "name": "malformedTokenAccountData"
+      },
+      {
+        "code": 36,
+        "kind": "errorNode",
+        "message": "Account address mismatch",
+        "name": "addressMismatch"
       }
     ],
     "events": [],
