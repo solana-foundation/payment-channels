@@ -650,20 +650,14 @@
       {
         "code": 35,
         "kind": "errorNode",
-        "message": "Mint account does not match channel's recorded mint",
-        "name": "mintAddressMismatch"
+        "message": "Token account or mint TLV trailer is malformed",
+        "name": "malformedTokenAccountData"
       },
       {
         "code": 36,
         "kind": "errorNode",
         "message": "Caller is not the channel payee",
-        "name": "unauthorizedMerchant"
-      },
-      {
-        "code": 37,
-        "kind": "errorNode",
-        "message": "Token account or mint TLV trailer is malformed",
-        "name": "malformedTokenAccountData"
+        "name": "unauthorizedPayee"
       }
     ],
     "events": [],

@@ -110,7 +110,7 @@ pub fn process(
     }
 
     if accs.merchant.address() != &ch.payee {
-        return Err(PaymentChannelsError::UnauthorizedMerchant.into());
+        return Err(PaymentChannelsError::UnauthorizedPayee.into());
     }
 
     if args.has_voucher != 0 {
