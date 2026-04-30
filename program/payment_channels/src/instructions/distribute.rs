@@ -201,20 +201,6 @@ pub fn process(
     let recipient_token_accounts =
         accs.recipient_token_accounts
             .check(distribution.entries, &token_program, &mint)?;
-    // for (entry, recipient_token_account) in distribution
-    //     .entries
-    //     .iter()
-    //     .zip(accs.recipient_token_accounts.iter())
-    // {
-    //     recipient_token_account
-    //         .validate_as_ata_checked(&entry.recipient, &tp, &ch.mint)
-    //         .map_err(|e| match e {
-    //             PaymentChannelsError::AddressMismatch => {
-    //                 PaymentChannelsError::InvalidRecipientAccount
-    //             }
-    //             other => other,
-    //         })?;
-    // }
 
     // Pool = settled − paid_out.
     let pool = ch

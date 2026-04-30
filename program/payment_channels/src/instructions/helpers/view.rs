@@ -64,23 +64,12 @@ macro_rules! decl_account_view {
             _s: PhantomData<S>,
         }
 
-        #[allow(dead_code)]
-        impl<'a> $T<'a, Unchecked> {
-            pub fn new_unchecked(inner: &'a mut AccountView) -> Self {
-                Self {
-                    inner,
-                    _s: Default::default(),
-                }
-            }
-        }
-
         impl<'a, S: State> $T<'a, S> {
             pub fn as_any(&self) -> AnyTokenAccountsView<'_, S> {
                 AnyTokenAccountsView { inner: self.inner, _s: PhantomData }
             }
         }
 
-        #[allow(dead_code)]
         impl<'a> From<&'a mut AccountView> for $T<'a, Unchecked> {
             fn from(value: &'a mut AccountView) -> Self {
                 Self {
@@ -102,6 +91,8 @@ macro_rules! decl_account_view {
     )*};
 }
 
+// General account view definitions
+
 decl_account_view!(
     ChannelAccountView,
     ChannelTokenAccountView,
@@ -114,7 +105,7 @@ decl_account_view!(
     TreasuryTokenAccountView,
 );
 
-// checks
+// General account view checks
 
 impl<'a> ChannelAccountView<'a, Unchecked> {
     pub fn check(self) -> Result<ChannelAccountView<'a, Checked>, PaymentChannelsError> {
@@ -259,7 +250,8 @@ impl<'a> PayeeTokenAccountView<'a, Unchecked> {
         })
     }
 }
-// Manual case-specific implementations
+
+// Edge case-specific manual implementations
 
 impl<'a, S> Deref for AnyTokenAccountsView<'a, S>
 where
@@ -274,16 +266,6 @@ where
 pub struct RecipientTokenAccountsView<'a, S: State = Unchecked> {
     inner: &'a mut [AccountView],
     _s: PhantomData<S>,
-}
-
-#[allow(dead_code)]
-impl<'a> RecipientTokenAccountsView<'a, Unchecked> {
-    pub fn new_unchecked(inner: &'a mut [AccountView]) -> Self {
-        Self {
-            inner,
-            _s: Default::default(),
-        }
-    }
 }
 
 impl<'a> RecipientTokenAccountsView<'a, Unchecked> {
@@ -311,7 +293,6 @@ impl<'a> RecipientTokenAccountsView<'a, Unchecked> {
     }
 }
 
-#[allow(dead_code)]
 impl<'a> From<&'a mut [AccountView]> for RecipientTokenAccountsView<'a, Unchecked> {
     fn from(value: &'a mut [AccountView]) -> Self {
         Self {
