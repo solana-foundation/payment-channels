@@ -14,15 +14,15 @@ use payment_channels::VOUCHER_PAYLOAD_SIZE;
 use payment_channels::ed25519;
 use payment_channels::event_engine::event_authority_pda;
 use payment_channels::instructions::open::DISCRIMINATOR as OPEN_DISCRIMINATOR;
-use payment_channels_client::instructions::{
-    Settle, SettleInstructionArgs, TopUp, TopUpInstructionArgs,
-};
-use payment_channels_client::types::{DistributionRecipients, SettleArgs, TopUpArgs, VoucherArgs};
+use payment_channels_client::instructions::{Settle, SettleInstructionArgs};
+use payment_channels_client::types::{DistributionRecipients, SettleArgs, VoucherArgs};
+use solana_instruction::error::InstructionError;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
+use solana_transaction_error::TransactionError;
 
 use super::{
     MAX_DISTRIBUTION_RECIPIENTS, STATUS_CLOSING, STATUS_FINALIZED, STATUS_OPEN, Split, TOKEN_2022,
@@ -37,7 +37,7 @@ use crate::common::token_2022::{
 };
 use crate::common::{
     ATA_PROGRAM, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM, SYSVAR_RENT,
-    expect_custom_err,
+    expect_custom_err, expect_instruction_err,
 };
 
 const GRACE_PERIOD: u32 = 3600;
@@ -1160,15 +1160,13 @@ fn many_distinct_recipients_accepted() {
 }
 
 // ===========================================================================
-// Negative-path tests against a tombstoned channel.
-//
-// After `distribute` runs from FINALIZED, the channel PDA stays alive at 8
-// bytes with `discriminator = AccountDiscriminator::ClosedChannel (= 2)`.
-// Every entry point that loads the channel via `Channel::from_account_mut`
-// must reject because the buffer is the wrong length / wrong discriminator
-// for `Channel`. These tests verify that wiring at the program-entrypoint
-// boundary, and that re-init at the same seeds is rejected by the system
-// program because the PDA is non-empty + program-owned.
+// LiteSVM-only tombstone tests. Mollusk variants for `distribute` / `top_up`
+// rejection on a tombstoned channel live in their respective `integration.rs`
+// suites; these scenarios exercise behavior that needs a real SVM:
+//   - the Ed25519 precompile + `Instructions` sysvar (settle),
+//   - the system program's `CreateAccount` rejection path through `open`'s
+//     CPI chain (across-tx reopen),
+//   - and end-of-tx rollback semantics (same-tx reopen).
 
 /// Drive a Scenario to FINALIZED with one 50/50 split, then run distribute
 /// to produce the tombstone. Returns the now-tombstoned scenario.
@@ -1189,8 +1187,8 @@ fn settle_on_tombstoned_channel_rejects() {
     let mut s = finalized_then_tombstoned();
 
     // A voucher that would be valid against a fresh channel at these seeds:
-    // strictly monotonic cumulative_amount, no expiry. The discriminator
-    // gate must trip before any voucher logic runs.
+    // strictly monotonic cumulative_amount, no expiry. `Channel::load_mut`
+    // length-gates the 1-byte tombstone buffer before any voucher logic runs.
     let voucher = VoucherArgs {
         channel_id: s.channel,
         cumulative_amount: 1,
@@ -1209,51 +1207,7 @@ fn settle_on_tombstoned_channel_rejects() {
         &[&s.fee_payer],
         blockhash,
     );
-    let result = s.svm.send_transaction(tx);
-    assert!(result.is_err(), "settle on tombstoned channel must fail");
-    assert_tombstone(&s.svm, &s.channel);
-}
-
-#[test]
-fn top_up_on_tombstoned_channel_rejects() {
-    let mut s = finalized_then_tombstoned();
-
-    // Build a top-up against the tombstoned channel. Amount is irrelevant —
-    // the discriminator gate trips before amount validation.
-    let top_up_ix = TopUp {
-        payer: s.payer,
-        channel: s.channel,
-        payer_token_account: s.payer_ata,
-        channel_token_account: s.channel_ata,
-        mint: s.mint,
-        token_program: s.token_program,
-    }
-    .instruction(TopUpInstructionArgs {
-        top_up_args: TopUpArgs { amount: 1 },
-    });
-
-    let blockhash = s.svm.latest_blockhash();
-    let tx = Transaction::new_signed_with_payer(
-        &[top_up_ix],
-        Some(&s.payer_keypair.pubkey()),
-        &[&s.payer_keypair],
-        blockhash,
-    );
-    let result = s.svm.send_transaction(tx);
-    assert!(result.is_err(), "top_up on tombstoned channel must fail");
-    assert_tombstone(&s.svm, &s.channel);
-}
-
-#[test]
-fn distribute_on_tombstoned_channel_rejects() {
-    let mut s = finalized_then_tombstoned();
-
-    // Re-submit the same distribute ix against the now-tombstoned channel.
-    let result = s.send(s.distribute_ix());
-    assert!(
-        result.is_err(),
-        "distribute on tombstoned channel must fail",
-    );
+    expect_instruction_err(s.svm.send_transaction(tx), InstructionError::InvalidAccountData);
     assert_tombstone(&s.svm, &s.channel);
 }
 
@@ -1262,8 +1216,10 @@ fn reopen_at_same_seeds_rejects_across_tx() {
     let mut s = finalized_then_tombstoned();
 
     // Attempt a fresh `open` on the same (payer, payee, mint, signer, salt)
-    // tuple in a new transaction. The system program rejects because the
-    // PDA is non-empty + program-owned, blocking the voucher-replay vector.
+    // tuple in a new transaction. The system program's `CreateAccount`
+    // rejects because the PDA is non-empty + program-owned, surfacing as
+    // `SystemError::AccountAlreadyInUse` (= 0) propagated through `open`'s
+    // CPI as `InstructionError::Custom(0)`.
     let open_ix = open_ix_for_splits(
         &s.payer,
         &s.payee,
@@ -1286,11 +1242,7 @@ fn reopen_at_same_seeds_rejects_across_tx() {
         &[&s.payer_keypair],
         blockhash,
     );
-    let result = s.svm.send_transaction(tx);
-    assert!(
-        result.is_err(),
-        "re-open at same seeds (across-tx) must fail",
-    );
+    expect_instruction_err(s.svm.send_transaction(tx), InstructionError::Custom(0));
     // Tombstone bytes preserved — no partial reinit happened.
     assert_tombstone(&s.svm, &s.channel);
 }
@@ -1331,11 +1283,21 @@ fn reopen_at_same_seeds_rejects_same_tx() {
         &[&s.payer_keypair],
         blockhash,
     );
-    let result = s.svm.send_transaction(tx);
-    assert!(
-        result.is_err(),
-        "distribute+open in same tx must fail on the open ix",
-    );
+    let err = s
+        .svm
+        .send_transaction(tx)
+        .expect_err("tx should fail")
+        .err;
+    // Lock down both the failing ix index (open is at index 2 — after
+    // compute-budget at 0 and distribute at 1) and the variant. A regression
+    // that shifts the failure to a different ix or a different system error
+    // would mask the in-tx replay protection this test asserts.
+    match err {
+        TransactionError::InstructionError(2, InstructionError::Custom(0)) => {}
+        other => panic!(
+            "expected open ix (index 2) to fail with SystemError::AccountAlreadyInUse, got {other:?}"
+        ),
+    }
 
     // Tx reverted: channel is restored to its pre-tx FINALIZED state.
     let acct = s.svm.get_account(&s.channel).expect("channel exists");

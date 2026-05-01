@@ -117,6 +117,19 @@ fn wrong_mint_rejects() {
 }
 
 #[test]
+fn tombstoned_channel_rejects() {
+    // After FINALIZED `distribute` tombstones the PDA, the channel data
+    // shrinks to a 1-byte `ClosedChannel` payload (discriminator = 2).
+    // `Channel::load_mut` length-gates inside `unsafe load_mut::<Channel>`
+    // before any discriminator/version/status logic runs, so top_up
+    // rejects with `InvalidAccountData`.
+    assert_eq!(
+        TopUpRun::new(Pubkey::new_unique(), vec![2u8], 1).run(),
+        ProgramResult::Failure(ProgramError::InvalidAccountData),
+    );
+}
+
+#[test]
 fn unknown_token_program_rejects() {
     // `validate_mint` runs after the mint-equality check and rejects any
     // `token_program` other than SPL Token or Token-2022.

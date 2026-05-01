@@ -402,8 +402,7 @@ fn tombstone_finalized_channel(
     .invoke_signed(signers)?;
 
     // Shrink the Channel PDA data from `Channel::LEN` (216) to
-    // `ClosedChannel::LEN` (1). `Channel::from_account_mut` was already
-    // dropped earlier in `process`, so no active borrow blocks the resize.
+    // `ClosedChannel::LEN` (1).
     accs.channel.resize(ClosedChannel::LEN)?;
 
     // Overwrite the now-truncated buffer with the tombstone header.
