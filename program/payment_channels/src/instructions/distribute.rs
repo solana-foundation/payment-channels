@@ -1,11 +1,3 @@
-use crate::constants::TREASURY_OWNER;
-use crate::errors::PaymentChannelsError;
-use crate::helpers::{AccountValidator, TokenProgramKind, ValidatedMint, ValidatedTokenAccount};
-use crate::instructions::helpers::{
-    DistributionEntry, DistributionRecipients, channel_signer_seeds, floor_bps_share,
-};
-use crate::state::channel::{Channel, ChannelStatus};
-use crate::state::{Transmutable, load};
 #[cfg(feature = "idl")]
 use codama::CodamaType;
 use core::mem::size_of;
@@ -14,6 +6,26 @@ use pinocchio::{
     cpi::Signer,
     error::ProgramError,
     sysvars::{Sysvar, clock::Clock},
+};
+use pinocchio_token_2022::instructions::CloseAccount;
+
+use crate::helpers::view::{
+    AnyTokenAccountsView, ChannelTokenAccountView, MintAccountView, PayeeTokenAccountView,
+    PayerTokenAccountView, TokenProgramAccountView, TreasuryTokenAccountView,
+};
+use crate::helpers::{
+    AccountValidator,
+    view::{PayerAccountView, RecipientTokenAccountsView},
+};
+use crate::instructions::helpers::{
+    DistributionEntry, DistributionRecipients, channel_signer_seeds, floor_bps_share,
+    transfer_checked_signed,
+};
+use crate::state::channel::{Channel, ChannelStatus};
+use crate::state::{Transmutable, load};
+use crate::{
+    errors::PaymentChannelsError,
+    helpers::view::{ChannelAccountView, Checked},
 };
 
 /// Instruction discriminator byte for `distribute`.
@@ -46,32 +58,32 @@ unsafe impl Transmutable for DistributeArgs {
 pub struct DistributeAccounts<'a> {
     /// Channel PDA whose accounting state is advanced and, on FINALIZED,
     /// tombstoned after all token movement is complete.
-    pub channel: &'a mut AccountView,
+    pub channel: ChannelAccountView<'a>,
     /// Original payer wallet. Receives SOL rent on FINALIZED cleanup and must
     /// match [`Channel::payer`](crate::Channel::payer).
-    pub payer: &'a mut AccountView,
+    pub payer: PayerAccountView<'a>,
     /// Escrow; source for all splits, the payee implicit remainder, and the
     /// FINALIZED payer refund.
-    pub channel_token_account: &'a mut AccountView,
+    pub channel_token_account: ChannelTokenAccountView<'a>,
     /// Payer refund destination. Used **only** by the FINALIZED branch when
     /// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `== 0` and
     /// `deposit > settled`.
-    pub payer_token_account: &'a mut AccountView,
+    pub payer_token_account: PayerTokenAccountView<'a>,
     /// Implicit-remainder destination: receives
     /// `floor(pool * (10_000 − Σ bps) / 10_000)` whenever `payee_bps > 0`.
     /// Always supplied because the accounts schema is fixed; the transfer
     /// call is skipped at the call site when `Σ bps == 10_000`.
-    pub payee_token_account: &'a mut AccountView,
+    pub payee_token_account: PayeeTokenAccountView<'a>,
     /// Treasury destination: receives flooring residual when the channel is
     /// finalized and ready to close.
-    pub treasury_token_account: &'a mut AccountView,
+    pub treasury_token_account: TreasuryTokenAccountView<'a>,
     /// Mint bound into the channel and used for every token transfer.
-    pub mint: &'a mut AccountView,
+    pub mint: MintAccountView<'a>,
     /// SPL Token or Token-2022 program used by the escrow and payout ATAs.
-    pub token_program: &'a mut AccountView,
+    pub token_program: TokenProgramAccountView<'a>,
     /// Dynamic recipient ATA tail, ordered exactly like the active entries in
     /// the revealed distribution plan.
-    pub recipient_token_accounts: &'a mut [AccountView],
+    pub recipient_token_accounts: RecipientTokenAccountsView<'a>,
 }
 
 impl<'a> TryFrom<&'a mut [AccountView]> for DistributeAccounts<'a> {
@@ -93,15 +105,15 @@ impl<'a> TryFrom<&'a mut [AccountView]> for DistributeAccounts<'a> {
             return Err(ProgramError::NotEnoughAccountKeys);
         };
         Ok(Self {
-            channel,
-            payer,
-            channel_token_account,
-            payer_token_account,
-            payee_token_account,
-            treasury_token_account,
-            mint,
-            token_program,
-            recipient_token_accounts: recipient_rest,
+            channel: channel.into(),
+            payer: payer.into(),
+            channel_token_account: channel_token_account.into(),
+            payer_token_account: payer_token_account.into(),
+            payee_token_account: payee_token_account.into(),
+            treasury_token_account: treasury_token_account.into(),
+            mint: mint.into(),
+            token_program: token_program.into(),
+            recipient_token_accounts: recipient_rest.into(),
         })
     }
 }
@@ -127,7 +139,8 @@ pub fn process(
     let now = Clock::get()?.unix_timestamp;
 
     // Owner / discriminator / version checks.
-    let mut ch = Channel::from_account_mut(accs.channel)?;
+    let mut channel = accs.channel.check()?;
+    let mut ch = Channel::from_account_mut(&mut channel)?;
 
     // Status gate.
     let status = ChannelStatus::try_from(ch.status)?;
@@ -143,29 +156,32 @@ pub fn process(
         return Err(PaymentChannelsError::MintAccountMismatch.into());
     }
 
+    let mut payer = accs.payer.check()?;
+
     // Token program + extension-aware Mint layout.
-    let program = TokenProgramKind::try_from_address(accs.token_program.address())?;
-    let mint = accs.mint.validate_as_mint(program)?;
+    let tp = *accs.token_program.address();
+    let decimals = accs.mint.validate_as_mint(&tp)?;
 
     let salt = ch.salt();
 
-    // Validate the fixed token accounts; recipient ATAs are validated
-    // inline in `transfer_pool`.
-    let channel_ta = accs
+    // Validate the fixed token accounts first.
+    let token_program = accs.token_program.check()?;
+    let mint = accs.mint.check(&token_program)?;
+    let channel_token_account = accs
         .channel_token_account
-        .validate_as_token_account(&channel_address, &mint)
+        .check(&channel_address, &token_program, &mint)
         .map_err(|_| PaymentChannelsError::InvalidChannelTokenAccount)?;
-    let payer_ta = accs
+    let payer_token_account = accs
         .payer_token_account
-        .validate_as_token_account(&ch.payer, &mint)
+        .check(&ch.payer, &token_program, &mint)
         .map_err(|_| PaymentChannelsError::InvalidPayerTokenAccount)?;
-    let payee_ta = accs
+    let payee_token_account = accs
         .payee_token_account
-        .validate_as_token_account(&ch.payee, &mint)
+        .check(&ch.payee, &token_program, &mint)
         .map_err(|_| PaymentChannelsError::InvalidPayeeTokenAccount)?;
-    let treasury_ta = accs
+    let treasury_token_account = accs
         .treasury_token_account
-        .validate_as_token_account(&TREASURY_OWNER, &mint)
+        .check(&token_program, &mint)
         .map_err(|_| PaymentChannelsError::TreasuryAddressMismatch)?;
 
     // Hash equality is the sole plan-level gate: a matching digest proves
@@ -181,6 +197,10 @@ pub fn process(
     if accs.recipient_token_accounts.len() != distribution.entries.len() {
         return Err(PaymentChannelsError::RecipientAccountCountMismatch.into());
     }
+
+    let recipient_token_accounts =
+        accs.recipient_token_accounts
+            .check(distribution.entries, &token_program, &mint)?;
 
     // Pool = settled − paid_out.
     let pool = ch
@@ -227,24 +247,49 @@ pub fn process(
     let signers = [Signer::from(&signer_seeds)];
 
     transfer_pool(
-        &channel_ta,
-        &payee_ta,
-        accs.recipient_token_accounts,
+        &recipient_token_accounts,
+        &channel,
+        &channel_token_account,
+        &mint,
+        &token_program,
+        &payee_token_account,
         distribution.entries,
         distribution.payee_bps,
         pool,
-        accs.channel,
-        &mint,
+        decimals,
         &signers,
     )?;
 
     if status == ChannelStatus::Finalized {
         // Payer refund branch — one-shot, gated by payer_withdrawn_at.
         if payer_withdrawn_at == 0 && deposit > settled {
-            channel_ta.transfer_signed_to(&payer_ta, accs.channel, deposit - settled, &signers)?;
+            transfer_checked_signed(
+                &channel_token_account,
+                &mint,
+                &payer_token_account.as_any(),
+                &channel,
+                deposit - settled,
+                decimals,
+                &token_program,
+                &signers,
+            )?;
         }
-        sweep_finalized_residual(&channel_ta, &treasury_ta, accs.channel, &signers)?;
-        close_finalized_channel(&channel_ta, accs.payer, accs.channel, &signers)?;
+        sweep_finalized_residual(
+            &channel,
+            &channel_token_account,
+            &mint,
+            &token_program,
+            &treasury_token_account,
+            decimals,
+            &signers,
+        )?;
+        close_finalized_channel(
+            &mut channel,
+            &channel_token_account,
+            &token_program,
+            &mut payer,
+            &signers,
+        )?;
     }
 
     Ok(())
@@ -252,18 +297,22 @@ pub fn process(
 
 /// Transfers the newly settled pool to explicit recipients and the payee's
 /// implicit remainder share. Flooring residual remains in the escrow ATA until
-/// `FINALIZED`, when it is swept to treasury just before close. Recipient
-/// ATAs are validated inline; tx atomicity reverts prior transfers on failure.
+/// `FINALIZED`, when it is swept to treasury just before close.
+///
+/// All recipient and fixed token accounts have already been validated, so this
+/// helper is only responsible for payout math and signed token CPIs.
 #[allow(clippy::too_many_arguments)]
-fn transfer_pool<'mint>(
-    channel_ta: &ValidatedTokenAccount<'mint, '_>,
-    payee_ta: &ValidatedTokenAccount<'mint, '_>,
-    recipient_views: &[AccountView],
+fn transfer_pool(
+    recipients: &RecipientTokenAccountsView<'_, Checked>,
+    channel: &ChannelAccountView<'_, Checked>,
+    channel_token_account: &ChannelTokenAccountView<'_, Checked>,
+    mint: &MintAccountView<'_, Checked>,
+    token_program: &TokenProgramAccountView<'_, Checked>,
+    payee_token_account: &PayeeTokenAccountView<'_, Checked>,
     entries: &[DistributionEntry],
     payee_bps: u32,
     pool: u64,
-    authority: &AccountView,
-    mint: &'mint ValidatedMint<'_>,
+    decimals: u8,
     signers: &[Signer<'_, '_>],
 ) -> ProgramResult {
     if pool == 0 {
@@ -271,17 +320,18 @@ fn transfer_pool<'mint>(
     }
 
     let mut sum_paid: u64 = 0;
-    for (entry, recipient_view) in entries.iter().zip(recipient_views.iter()) {
+    for (entry, recipient_token_account) in entries.iter().zip(recipients.iter()) {
         let amount = floor_bps_share(pool, entry.bps() as u32)?;
-        let recipient_ta = recipient_view
-            .validate_as_token_account(&entry.recipient, mint)
-            .map_err(|e| match e {
-                PaymentChannelsError::AddressMismatch => {
-                    PaymentChannelsError::InvalidRecipientAccount
-                }
-                other => other,
-            })?;
-        channel_ta.transfer_signed_to(&recipient_ta, authority, amount, signers)?;
+        transfer_checked_signed(
+            channel_token_account,
+            mint,
+            &AnyTokenAccountsView::<Checked>::from(recipient_token_account),
+            channel,
+            amount,
+            decimals,
+            token_program,
+            signers,
+        )?;
         sum_paid = sum_paid
             .checked_add(amount)
             .expect("invariant: Σ floor(pool · bpsᵢ / 10_000) ≤ pool ≤ u64::MAX");
@@ -289,7 +339,16 @@ fn transfer_pool<'mint>(
 
     let payee_share = if payee_bps != 0 {
         let share = floor_bps_share(pool, payee_bps)?;
-        channel_ta.transfer_signed_to(payee_ta, authority, share, signers)?;
+        transfer_checked_signed(
+            channel_token_account,
+            mint,
+            &payee_token_account.as_any(),
+            channel,
+            share,
+            decimals,
+            token_program,
+            signers,
+        )?;
         share
     } else {
         0
@@ -307,28 +366,45 @@ fn transfer_pool<'mint>(
 
 /// Sweeps all tokens left in the finalized escrow to treasury after recipient
 /// payouts and any payer refund have completed.
-fn sweep_finalized_residual<'mint>(
-    channel_ta: &ValidatedTokenAccount<'mint, '_>,
-    treasury_ta: &ValidatedTokenAccount<'mint, '_>,
-    authority: &AccountView,
+fn sweep_finalized_residual(
+    channel: &ChannelAccountView<'_, Checked>,
+    channel_token_account: &ChannelTokenAccountView<'_, Checked>,
+    mint: &MintAccountView<'_, Checked>,
+    token_program: &TokenProgramAccountView<'_, Checked>,
+    treasury_token_account: &TreasuryTokenAccountView<'_, Checked>,
+    decimals: u8,
     signers: &[Signer<'_, '_>],
 ) -> ProgramResult {
-    let residual = channel_ta
-        .amount()
-        .map_err(|_| PaymentChannelsError::InvalidChannelTokenAccount)?;
-    channel_ta.transfer_signed_to(treasury_ta, authority, residual, signers)
+    let residual = token_program.amount(&channel_token_account.as_any())?;
+    transfer_checked_signed(
+        channel_token_account,
+        mint,
+        &treasury_token_account.as_any(),
+        channel,
+        residual,
+        decimals,
+        token_program,
+        signers,
+    )
 }
 
 /// Closes the finalized channel's escrow token account and tombstones the
 /// channel PDA, sending both rent balances to the payer SOL account.
-fn close_finalized_channel<'mint>(
-    channel_ta: &ValidatedTokenAccount<'mint, '_>,
-    payer: &mut AccountView,
-    channel: &mut AccountView,
+fn close_finalized_channel(
+    channel: &mut ChannelAccountView<'_, Checked>,
+    channel_token_account: &ChannelTokenAccountView<'_, Checked>,
+    token_program: &TokenProgramAccountView<'_, Checked>,
+    payer: &mut PayerAccountView<'_, Checked>,
     signers: &[Signer<'_, '_>],
 ) -> ProgramResult {
     // Close the escrow SPL account; rent flows to payer SOL account.
-    channel_ta.close_signed_to(payer, channel, signers)?;
+    CloseAccount {
+        account: channel_token_account,
+        destination: payer,
+        authority: channel,
+        token_program: token_program.address(),
+    }
+    .invoke_signed(signers)?;
 
     // Tombstone the Channel PDA: move rent lamports to payer, then close.
     let rent = channel.lamports();

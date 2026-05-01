@@ -2,8 +2,6 @@
 
 #![allow(clippy::result_large_err)]
 
-use std::str::FromStr;
-
 use litesvm::LiteSVM;
 use payment_channels::ed25519;
 use payment_channels::{PaymentChannelsError, VOUCHER_PAYLOAD_SIZE};
@@ -18,15 +16,10 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 
 mod common;
-use common::{PROGRAM_ID, ProgramLoader, expect_custom_err};
-
-fn instructions_sysvar_id() -> Pubkey {
-    Pubkey::from_str("Sysvar1nstructions1111111111111111111111111").unwrap()
-}
-
-fn ed25519_program_id() -> Pubkey {
-    Pubkey::new_from_array(*ed25519::PROGRAM_ID.as_array())
-}
+use common::{
+    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, compute_budget_ix, ed25519_program_id,
+    expect_custom_err,
+};
 
 /// Seed a `Channel` PDA (208-byte `#[repr(C, packed)]` layout) owned by the
 /// program. Only the fields `settle` reads are non-zero.
@@ -111,7 +104,7 @@ fn build_ed25519_ix(
 fn build_settle_ix(channel: &Pubkey, voucher: VoucherArgs) -> Instruction {
     Settle {
         channel: *channel,
-        instructions_sysvar: instructions_sysvar_id(),
+        instructions_sysvar: INSTRUCTIONS_SYSVAR,
     }
     .instruction(SettleInstructionArgs {
         settle_args: SettleArgs { voucher },
@@ -123,24 +116,6 @@ fn read_settled(svm: &LiteSVM, channel: &Pubkey) -> u64 {
     let mut buf = [0u8; 8];
     buf.copy_from_slice(&acct.data[20..28]);
     u64::from_le_bytes(buf)
-}
-
-fn compute_budget_program_id() -> Pubkey {
-    Pubkey::from_str("ComputeBudget111111111111111111111111111111").unwrap()
-}
-
-/// `ComputeBudgetInstruction::SetComputeUnitLimit(u32)` — variant tag 2
-/// followed by the limit as little-endian `u32`. Used as a stand-in for
-/// a non-Ed25519 preceding ix.
-fn build_compute_budget_limit_ix(limit: u32) -> Instruction {
-    let mut data = Vec::with_capacity(5);
-    data.push(0x02);
-    data.extend_from_slice(&limit.to_le_bytes());
-    Instruction {
-        program_id: compute_budget_program_id(),
-        accounts: Vec::new(),
-        data,
-    }
 }
 
 #[test]
@@ -569,7 +544,7 @@ fn settle_preceding_compute_budget_ix_rejects() {
     // Preceding ix resolves cleanly, but its program id is not the Ed25519
     // precompile — exercises the program-id branch of
     // `MissingEd25519Verification`.
-    let preceding_ix = build_compute_budget_limit_ix(200_000);
+    let preceding_ix = compute_budget_ix(200_000);
     let settle_ix = build_settle_ix(&channel, voucher);
 
     let tx = Transaction::new_signed_with_payer(

@@ -1,41 +1,13 @@
-use pinocchio::Address;
+use pinocchio::{ProgramResult, cpi::Signer};
+use pinocchio_token_2022::instructions::TransferChecked;
 
-use crate::errors::PaymentChannelsError;
-
-/// Token program supported by this crate. The unknown-program rejection
-/// lives only in [`TokenProgramKind::try_from_address`]; downstream
-/// dispatch matches exhaustively.
-#[derive(Clone, Copy, Eq, PartialEq, Debug)]
-pub(crate) enum TokenProgramKind {
-    SplToken,
-    Token2022,
-}
-
-impl TokenProgramKind {
-    pub(crate) fn try_from_address(addr: &Address) -> Result<Self, PaymentChannelsError> {
-        match *addr {
-            pinocchio_token::ID => Ok(Self::SplToken),
-            pinocchio_token_2022::ID => Ok(Self::Token2022),
-            _ => Err(PaymentChannelsError::InvalidTokenProgram),
-        }
-    }
-
-    /// On-chain program ID, threaded into pinocchio CPI builders without a copy.
-    #[inline]
-    pub(crate) const fn id(self) -> &'static Address {
-        match self {
-            Self::SplToken => &pinocchio_token::ID,
-            Self::Token2022 => &pinocchio_token_2022::ID,
-        }
-    }
-
-    /// `true` only for Token-2022; gates the TLV trailer scan and mint
-    /// padding-zero check.
-    #[inline]
-    pub(crate) const fn has_extensions(self) -> bool {
-        matches!(self, Self::Token2022)
-    }
-}
+use crate::{
+    errors::PaymentChannelsError,
+    helpers::view::{
+        AnyTokenAccountsView, ChannelAccountView, ChannelTokenAccountView, Checked,
+        MintAccountView, TokenProgramAccountView,
+    },
+};
 
 pub(crate) mod base_layout {
     use pinocchio_token_2022::state::{Account as TokenAccount, Mint as TokenMint};
@@ -218,6 +190,34 @@ pub(crate) fn scan_tlv_extensions(
         }
     }
     Ok(())
+}
+
+/// Invokes a signed `TransferChecked` CPI from a channel-owned token account.
+#[allow(clippy::too_many_arguments)]
+pub fn transfer_checked_signed(
+    from: &ChannelTokenAccountView<'_, Checked>,
+    mint: &MintAccountView<'_, Checked>,
+    to: &AnyTokenAccountsView<'_, Checked>,
+    authority: &ChannelAccountView<'_, Checked>,
+    amount: u64,
+    decimals: u8,
+    token_program: &TokenProgramAccountView<'_, Checked>,
+    signers: &[Signer<'_, '_>],
+) -> ProgramResult {
+    if amount == 0 {
+        return Ok(());
+    }
+
+    TransferChecked {
+        from,
+        mint,
+        to,
+        authority,
+        amount,
+        decimals,
+        token_program: token_program.address(),
+    }
+    .invoke_signed(signers)
 }
 
 #[cfg(test)]

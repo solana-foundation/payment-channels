@@ -5,13 +5,14 @@ pub mod distribution;
 pub mod ed25519;
 pub mod hash;
 pub mod token;
+pub mod view;
 pub mod voucher;
 
-pub(crate) use account::{AccountValidator, ValidatedMint, ValidatedTokenAccount};
+pub use account::AccountValidator;
 pub use distribution::{
     DistributionEntry, DistributionRecipients, MAX_DISTRIBUTION_RECIPIENTS, floor_bps_share,
 };
-pub(crate) use token::TokenProgramKind;
+pub use token::transfer_checked_signed;
 
 use crate::state::channel::CHANNEL_SEED;
 use pinocchio::cpi::Seed;
