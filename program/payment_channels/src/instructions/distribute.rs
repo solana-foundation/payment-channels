@@ -1,3 +1,11 @@
+use crate::constants::TREASURY_OWNER;
+use crate::errors::PaymentChannelsError;
+use crate::helpers::{AccountValidator, TokenProgramKind, ValidatedMint, ValidatedTokenAccount};
+use crate::instructions::helpers::{
+    DistributionEntry, DistributionRecipients, channel_signer_seeds, floor_bps_share,
+};
+use crate::state::channel::{Channel, ChannelStatus};
+use crate::state::{Transmutable, load};
 #[cfg(feature = "idl")]
 use codama::CodamaType;
 use core::mem::size_of;
@@ -7,16 +15,6 @@ use pinocchio::{
     error::ProgramError,
     sysvars::{Sysvar, clock::Clock},
 };
-use pinocchio_token_2022::instructions::CloseAccount;
-
-use crate::constants::TREASURY_OWNER;
-use crate::errors::PaymentChannelsError;
-use crate::helpers::{AccountValidator, TokenProgramKind, ValidatedMint, ValidatedTokenAccount};
-use crate::instructions::helpers::{
-    DistributionEntry, DistributionRecipients, channel_signer_seeds, floor_bps_share,
-};
-use crate::state::channel::{Channel, ChannelStatus};
-use crate::state::{Transmutable, load};
 
 /// Instruction discriminator byte for `distribute`.
 pub const DISCRIMINATOR: u8 = 7;
@@ -246,13 +244,7 @@ pub fn process(
             channel_ta.transfer_signed_to(&payer_ta, accs.channel, deposit - settled, &signers)?;
         }
         sweep_finalized_residual(&channel_ta, &treasury_ta, accs.channel, &signers)?;
-        close_finalized_channel(
-            channel_ta.view(),
-            accs.payer,
-            accs.channel,
-            mint.program_id(),
-            &signers,
-        )?;
+        close_finalized_channel(&channel_ta, accs.payer, accs.channel, &signers)?;
     }
 
     Ok(())
@@ -329,21 +321,14 @@ fn sweep_finalized_residual<'mint>(
 
 /// Closes the finalized channel's escrow token account and tombstones the
 /// channel PDA, sending both rent balances to the payer SOL account.
-fn close_finalized_channel(
-    channel_token_account: &AccountView,
+fn close_finalized_channel<'mint>(
+    channel_ta: &ValidatedTokenAccount<'mint, '_>,
     payer: &mut AccountView,
     channel: &mut AccountView,
-    token_program: &Address,
     signers: &[Signer<'_, '_>],
 ) -> ProgramResult {
     // Close the escrow SPL account; rent flows to payer SOL account.
-    CloseAccount {
-        account: channel_token_account,
-        destination: payer,
-        authority: channel,
-        token_program,
-    }
-    .invoke_signed(signers)?;
+    channel_ta.close_signed_to(payer, channel, signers)?;
 
     // Tombstone the Channel PDA: move rent lamports to payer, then close.
     let rent = channel.lamports();

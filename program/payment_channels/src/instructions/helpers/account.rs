@@ -1,5 +1,5 @@
 use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer};
-use pinocchio_token_2022::instructions::TransferChecked;
+use pinocchio_token_2022::instructions::{CloseAccount, TransferChecked};
 
 use crate::{
     PaymentChannelsError,
@@ -9,7 +9,9 @@ use crate::{
     },
 };
 
-/// Token-program validation entry points on [`AccountView`].
+/// Token-program validation entry points on [`AccountView`]. Returns
+/// [`PaymentChannelsError`]; the consuming `process` function `?`-converts
+/// to [`pinocchio::error::ProgramError`] at the instruction boundary.
 pub(crate) trait AccountValidator {
     /// Parses an SPL Token or Token-2022 mint. Token-2022 mints accept
     /// only transfer-amount-neutral extensions (metadata/group pointers
@@ -30,7 +32,9 @@ pub(crate) trait AccountValidator {
 
     /// Asserts the address is the canonical ATA for `(owner, program, mint)`
     /// without reading account state. Used at `open` (account not yet
-    /// allocated) and `top_up` (escrow address proof only).
+    /// allocated) where this cheap defense-in-depth check runs *before* the
+    /// mint is parsed. Post-mint-parse callers should prefer the inherent
+    /// method on [`ValidatedMint`].
     fn verify_ata_address(
         &self,
         owner: &Address,
@@ -45,12 +49,9 @@ impl AccountValidator for AccountView {
         program: TokenProgramKind,
     ) -> Result<ValidatedMint<'a>, PaymentChannelsError> {
         let decimals = match program {
-            // pinocchio_token enforces owner == SPL Token + exact length.
             TokenProgramKind::SplToken => pinocchio_token::state::Mint::from_account_view(self)
                 .map_err(|_| PaymentChannelsError::MintAccountMismatch)?
                 .decimals(),
-            // pinocchio_token_2022 enforces owner == Token-2022 and (when
-            // extensions are present) the AccountType discriminator byte.
             TokenProgramKind::Token2022 => {
                 pinocchio_token_2022::state::Mint::from_account_view(self)
                     .map_err(|_| PaymentChannelsError::MintAccountMismatch)?
@@ -129,7 +130,6 @@ impl AccountValidator for AccountView {
                 (*acc.mint(), *acc.owner(), initialized)
             }
         };
-
         if &acc_mint != mint_address || &acc_owner != owner || !initialized {
             return Err(PaymentChannelsError::AddressMismatch);
         }
@@ -205,12 +205,8 @@ pub(crate) struct ValidatedTokenAccount<'mint, 'a> {
 }
 
 impl<'mint, 'a> ValidatedTokenAccount<'mint, 'a> {
-    #[inline]
-    pub(crate) fn view(&self) -> &'a AccountView {
-        self.view
-    }
-
-    /// Raw token amount.
+    /// Raw token amount. Possessing `&self` is the proof that the underlying
+    /// account is owner/mint/initialized-validated for `mint.program`.
     pub(crate) fn amount(&self) -> Result<u64, PaymentChannelsError> {
         match self.mint.program {
             TokenProgramKind::SplToken => Ok(pinocchio_token::state::Account::from_account_view(
@@ -246,6 +242,24 @@ impl<'mint, 'a> ValidatedTokenAccount<'mint, 'a> {
             authority,
             amount,
             decimals: self.mint.decimals,
+            token_program: self.mint.program.id(),
+        }
+        .invoke_signed(signers)
+    }
+
+    /// Signed `CloseAccount` CPI: closes this account, sweeping its rent
+    /// lamports to `destination`. The account must be empty (zero token
+    /// balance); callers typically transfer the residual just before close.
+    pub(crate) fn close_signed_to(
+        &self,
+        destination: &AccountView,
+        authority: &AccountView,
+        signers: &[Signer<'_, '_>],
+    ) -> ProgramResult {
+        CloseAccount {
+            account: self.view,
+            destination,
+            authority,
             token_program: self.mint.program.id(),
         }
         .invoke_signed(signers)

@@ -196,6 +196,10 @@ pub fn process(
     }
 
     let program = TokenProgramKind::try_from_address(accs.token_program.address())?;
+
+    // Defense-in-depth: address check runs before mint parsing so a wrong
+    // escrow ATA surfaces as `EscrowAddressMismatch` even when the mint
+    // account is also bogus.
     accs.channel_token_account
         .verify_ata_address(&channel_address, program, accs.mint.address())
         .map_err(|_| PaymentChannelsError::EscrowAddressMismatch)?;
