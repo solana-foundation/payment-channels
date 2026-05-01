@@ -141,13 +141,11 @@ impl<'a> Iterator for ExtensionTlv<'a> {
             // A trailing slice shorter than a `type` field can only be
             // legitimate if it's all zero (terminator pad). A stray nonzero
             // byte is a wire-format violation.
-            let any_nonzero = self.remaining.iter().any(|b| *b != 0);
-            self.remaining = &[];
-            return if any_nonzero {
-                Some(Err(PaymentChannelsError::MalformedTokenAccountData))
-            } else {
-                None
-            };
+            if self.remaining.iter().any(|b| *b != 0) {
+                self.remaining = &[];
+                return Some(Err(PaymentChannelsError::MalformedTokenAccountData));
+            }
+            return None;
         }
 
         let raw_type = u16::from_le_bytes([self.remaining[0], self.remaining[1]]);
