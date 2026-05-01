@@ -101,7 +101,7 @@ impl AccountValidator for AccountView {
                 .try_borrow()
                 .map_err(|_| PaymentChannelsError::MalformedTokenAccountData)?;
             if data.len() >= tlv::START {
-                scan_tlv_extensions(&data[tlv::START..], &TokenAccountExtensionPolicy)?;
+                scan_tlv_extensions::<TokenAccountExtensionPolicy>(&data[tlv::START..])?;
             }
         }
 
@@ -137,7 +137,7 @@ impl AccountValidator for AccountView {
                 {
                     return Err(PaymentChannelsError::MalformedTokenAccountData);
                 }
-                scan_tlv_extensions(&data[tlv::START..], &MintExtensionPolicy)?;
+                scan_tlv_extensions::<MintExtensionPolicy>(&data[tlv::START..])?;
             }
         }
 

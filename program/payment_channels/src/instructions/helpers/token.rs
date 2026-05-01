@@ -92,17 +92,19 @@ impl TryFrom<u16> for ExtensionType {
 }
 
 /// Whitelist of TLV extension types accepted for a given account kind.
+/// Stateless: implementors are zero-sized type tags driven via turbofish on
+/// [`scan_tlv_extensions`].
 pub(crate) trait ExtensionPolicy {
-    fn allows(&self, ext: ExtensionType) -> bool;
+    fn allows(kind: ExtensionType) -> bool;
 }
 
 pub(crate) struct MintExtensionPolicy;
 pub(crate) struct TokenAccountExtensionPolicy;
 
 impl ExtensionPolicy for MintExtensionPolicy {
-    fn allows(&self, ext: ExtensionType) -> bool {
+    fn allows(kind: ExtensionType) -> bool {
         matches!(
-            ext,
+            kind,
             ExtensionType::MetadataPointer
                 | ExtensionType::TokenMetadata
                 | ExtensionType::GroupPointer
@@ -114,8 +116,8 @@ impl ExtensionPolicy for MintExtensionPolicy {
 }
 
 impl ExtensionPolicy for TokenAccountExtensionPolicy {
-    fn allows(&self, ext: ExtensionType) -> bool {
-        matches!(ext, ExtensionType::ImmutableOwner)
+    fn allows(kind: ExtensionType) -> bool {
+        matches!(kind, ExtensionType::ImmutableOwner)
     }
 }
 
@@ -136,7 +138,16 @@ impl<'a> Iterator for ExtensionTlv<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining.len() < tlv::TYPE_LEN {
-            return None;
+            // A trailing slice shorter than a `type` field can only be
+            // legitimate if it's all zero (terminator pad). A stray nonzero
+            // byte is a wire-format violation.
+            let any_nonzero = self.remaining.iter().any(|b| *b != 0);
+            self.remaining = &[];
+            return if any_nonzero {
+                Some(Err(PaymentChannelsError::MalformedTokenAccountData))
+            } else {
+                None
+            };
         }
 
         let raw_type = u16::from_le_bytes([self.remaining[0], self.remaining[1]]);
@@ -179,13 +190,12 @@ impl<'a> Iterator for ExtensionTlv<'a> {
 }
 
 /// Walks the Token-2022 TLV trailer and rejects any type not whitelisted by
-/// `policy`. Extension uniqueness is enforced by the upstream initializer.
-pub(crate) fn scan_tlv_extensions(
+/// `P`. Extension uniqueness is enforced by the upstream initializer.
+pub(crate) fn scan_tlv_extensions<P: ExtensionPolicy>(
     trailer: &[u8],
-    policy: &impl ExtensionPolicy,
 ) -> Result<(), PaymentChannelsError> {
     for kind in ExtensionTlv::new(trailer) {
-        if !policy.allows(kind?) {
+        if !P::allows(kind?) {
             return Err(PaymentChannelsError::UnsupportedTokenExtensions);
         }
     }
@@ -278,28 +288,6 @@ mod tlv_tests {
 
     #[test]
     fn mint_policy_allows_metadata_and_group_extensions() {
-        let p = MintExtensionPolicy;
-        for ext in [
-            ExtensionType::MetadataPointer,
-            ExtensionType::TokenMetadata,
-            ExtensionType::GroupPointer,
-            ExtensionType::TokenGroup,
-            ExtensionType::GroupMemberPointer,
-            ExtensionType::TokenGroupMember,
-        ] {
-            assert!(p.allows(ext), "mint policy should allow {ext:?}");
-        }
-    }
-
-    #[test]
-    fn mint_policy_rejects_immutable_owner() {
-        assert!(!MintExtensionPolicy.allows(ExtensionType::ImmutableOwner));
-    }
-
-    #[test]
-    fn token_account_policy_allows_only_immutable_owner() {
-        let p = TokenAccountExtensionPolicy;
-        assert!(p.allows(ExtensionType::ImmutableOwner));
         for ext in [
             ExtensionType::MetadataPointer,
             ExtensionType::TokenMetadata,
@@ -309,7 +297,32 @@ mod tlv_tests {
             ExtensionType::TokenGroupMember,
         ] {
             assert!(
-                !p.allows(ext),
+                MintExtensionPolicy::allows(ext),
+                "mint policy should allow {ext:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn mint_policy_rejects_immutable_owner() {
+        assert!(!MintExtensionPolicy::allows(ExtensionType::ImmutableOwner));
+    }
+
+    #[test]
+    fn token_account_policy_allows_only_immutable_owner() {
+        assert!(TokenAccountExtensionPolicy::allows(
+            ExtensionType::ImmutableOwner
+        ));
+        for ext in [
+            ExtensionType::MetadataPointer,
+            ExtensionType::TokenMetadata,
+            ExtensionType::GroupPointer,
+            ExtensionType::TokenGroup,
+            ExtensionType::GroupMemberPointer,
+            ExtensionType::TokenGroupMember,
+        ] {
+            assert!(
+                !TokenAccountExtensionPolicy::allows(ext),
                 "token-account policy must not allow {ext:?}"
             );
         }
@@ -325,14 +338,14 @@ mod tlv_tests {
 
     #[test]
     fn scan_accepts_empty_trailer() {
-        assert!(scan_tlv_extensions(&[], &MintExtensionPolicy).is_ok());
-        assert!(scan_tlv_extensions(&[], &TokenAccountExtensionPolicy).is_ok());
+        assert!(scan_tlv_extensions::<MintExtensionPolicy>(&[]).is_ok());
+        assert!(scan_tlv_extensions::<TokenAccountExtensionPolicy>(&[]).is_ok());
     }
 
     #[test]
     fn scan_accepts_single_whitelisted_mint_extension() {
         let bytes = header(ExtensionType::MetadataPointer as u16, 0);
-        assert!(scan_tlv_extensions(&bytes, &MintExtensionPolicy).is_ok());
+        assert!(scan_tlv_extensions::<MintExtensionPolicy>(&bytes).is_ok());
     }
 
     #[test]
@@ -342,7 +355,7 @@ mod tlv_tests {
         let bytes: [u8; 11] = [
             h1[0], h1[1], h1[2], h1[3], 0xAA, 0xBB, h2[0], h2[1], h2[2], h2[3], 0xCC,
         ];
-        assert!(scan_tlv_extensions(&bytes, &MintExtensionPolicy).is_ok());
+        assert!(scan_tlv_extensions::<MintExtensionPolicy>(&bytes).is_ok());
     }
 
     #[test]
@@ -350,7 +363,7 @@ mod tlv_tests {
         let h1 = header(UNINITIALIZED, 0);
         let h2 = header(0xFFFF, 0);
         let bytes: [u8; 8] = [h1[0], h1[1], h1[2], h1[3], h2[0], h2[1], h2[2], h2[3]];
-        assert!(scan_tlv_extensions(&bytes, &MintExtensionPolicy).is_ok());
+        assert!(scan_tlv_extensions::<MintExtensionPolicy>(&bytes).is_ok());
     }
 
     #[test]
@@ -360,27 +373,31 @@ mod tlv_tests {
         let h = header(ExtensionType::MetadataPointer as u16, 0);
         let mut bytes = [0u8; 4 + 64];
         bytes[..4].copy_from_slice(&h);
-        assert!(scan_tlv_extensions(&bytes, &MintExtensionPolicy).is_ok());
+        assert!(scan_tlv_extensions::<MintExtensionPolicy>(&bytes).is_ok());
     }
 
     #[test]
     fn scan_rejects_truncated_header() {
         let bytes = [0x12, 0x00, 0x01];
         expect_err(
-            scan_tlv_extensions(&bytes, &MintExtensionPolicy),
+            scan_tlv_extensions::<MintExtensionPolicy>(&bytes),
             PaymentChannelsError::MalformedTokenAccountData,
         );
     }
 
     #[test]
     fn scan_accepts_single_trailing_zero_byte() {
-        // Below the 2-byte type field; mirrors upstream's graceful tail.
-        assert!(scan_tlv_extensions(&[0x00], &MintExtensionPolicy).is_ok());
+        // Below the 2-byte type field; the all-zero terminator pad is benign.
+        assert!(scan_tlv_extensions::<MintExtensionPolicy>(&[0x00]).is_ok());
     }
 
     #[test]
-    fn scan_accepts_single_trailing_nonzero_byte() {
-        assert!(scan_tlv_extensions(&[0xFF], &MintExtensionPolicy).is_ok());
+    fn scan_rejects_single_trailing_nonzero_byte() {
+        // Below the 2-byte type field but nonzero — wire-format violation.
+        expect_err(
+            scan_tlv_extensions::<MintExtensionPolicy>(&[0xFF]),
+            PaymentChannelsError::MalformedTokenAccountData,
+        );
     }
 
     #[test]
@@ -388,7 +405,7 @@ mod tlv_tests {
         // type=METADATA_POINTER (whitelisted) but no length bytes follow.
         let bytes = [0x12, 0x00];
         expect_err(
-            scan_tlv_extensions(&bytes, &MintExtensionPolicy),
+            scan_tlv_extensions::<MintExtensionPolicy>(&bytes),
             PaymentChannelsError::MalformedTokenAccountData,
         );
     }
@@ -398,7 +415,7 @@ mod tlv_tests {
         // type=TransferFeeConfig (1) — must be rejected before the length check.
         let bytes = [0x01, 0x00];
         expect_err(
-            scan_tlv_extensions(&bytes, &MintExtensionPolicy),
+            scan_tlv_extensions::<MintExtensionPolicy>(&bytes),
             PaymentChannelsError::UnsupportedTokenExtensions,
         );
     }
@@ -407,7 +424,7 @@ mod tlv_tests {
     fn scan_accepts_value_len_reaching_buffer_end() {
         let h = header(ExtensionType::MetadataPointer as u16, 4);
         let bytes: [u8; 8] = [h[0], h[1], h[2], h[3], 0xAA, 0xBB, 0xCC, 0xDD];
-        assert!(scan_tlv_extensions(&bytes, &MintExtensionPolicy).is_ok());
+        assert!(scan_tlv_extensions::<MintExtensionPolicy>(&bytes).is_ok());
     }
 
     #[test]
@@ -416,7 +433,7 @@ mod tlv_tests {
         let h = header(ExtensionType::MetadataPointer as u16, 8);
         let bytes: [u8; 8] = [h[0], h[1], h[2], h[3], 0, 0, 0, 0];
         expect_err(
-            scan_tlv_extensions(&bytes, &MintExtensionPolicy),
+            scan_tlv_extensions::<MintExtensionPolicy>(&bytes),
             PaymentChannelsError::MalformedTokenAccountData,
         );
     }
@@ -425,7 +442,7 @@ mod tlv_tests {
     fn scan_rejects_non_whitelisted_type() {
         let bytes = header(0xFFFF, 0);
         expect_err(
-            scan_tlv_extensions(&bytes, &MintExtensionPolicy),
+            scan_tlv_extensions::<MintExtensionPolicy>(&bytes),
             PaymentChannelsError::UnsupportedTokenExtensions,
         );
     }
@@ -434,7 +451,7 @@ mod tlv_tests {
     fn scan_rejects_mint_only_id_on_token_account() {
         let bytes = header(ExtensionType::MetadataPointer as u16, 0);
         expect_err(
-            scan_tlv_extensions(&bytes, &TokenAccountExtensionPolicy),
+            scan_tlv_extensions::<TokenAccountExtensionPolicy>(&bytes),
             PaymentChannelsError::UnsupportedTokenExtensions,
         );
     }
