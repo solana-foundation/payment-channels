@@ -11,7 +11,6 @@ use borsh::BorshSerialize;
 #[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Eq, PartialEq)]
 pub struct ClosedChannel {
     pub discriminator: u8,
-    pub reserved: [u8; 7],
 }
 
 impl ClosedChannel {

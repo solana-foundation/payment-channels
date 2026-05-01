@@ -13,8 +13,6 @@ import {
   decodeAccount,
   fetchEncodedAccount,
   fetchEncodedAccounts,
-  getArrayDecoder,
-  getArrayEncoder,
   getStructDecoder,
   getStructEncoder,
   getU8Decoder,
@@ -31,24 +29,18 @@ import {
   type MaybeEncodedAccount,
 } from "@solana/kit";
 
-export type ClosedChannel = { discriminator: number; reserved: Array<number> };
+export type ClosedChannel = { discriminator: number };
 
 export type ClosedChannelArgs = ClosedChannel;
 
 /** Gets the encoder for {@link ClosedChannelArgs} account data. */
 export function getClosedChannelEncoder(): FixedSizeEncoder<ClosedChannelArgs> {
-  return getStructEncoder([
-    ["discriminator", getU8Encoder()],
-    ["reserved", getArrayEncoder(getU8Encoder(), { size: 7 })],
-  ]);
+  return getStructEncoder([["discriminator", getU8Encoder()]]);
 }
 
 /** Gets the decoder for {@link ClosedChannel} account data. */
 export function getClosedChannelDecoder(): FixedSizeDecoder<ClosedChannel> {
-  return getStructDecoder([
-    ["discriminator", getU8Decoder()],
-    ["reserved", getArrayDecoder(getU8Decoder(), { size: 7 })],
-  ]);
+  return getStructDecoder([["discriminator", getU8Decoder()]]);
 }
 
 /** Gets the codec for {@link ClosedChannel} account data. */

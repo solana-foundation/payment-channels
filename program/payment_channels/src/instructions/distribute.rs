@@ -402,7 +402,7 @@ fn tombstone_finalized_channel(
     .invoke_signed(signers)?;
 
     // Shrink the Channel PDA data from `Channel::LEN` (216) to
-    // `ClosedChannel::LEN` (8). `Channel::from_account_mut` was already
+    // `ClosedChannel::LEN` (1). `Channel::from_account_mut` was already
     // dropped earlier in `process`, so no active borrow blocks the resize.
     accs.channel.resize(ClosedChannel::LEN)?;
 

@@ -136,7 +136,7 @@ sequenceDiagram
     P-->>S: OK
 
     S->>P: submit `distribute` ix (preimage)
-    P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients (per on-chain splits)<br/>transfer (deposit − settled) → payer<br/>sweep residual → treasury<br/>realloc to 8 bytes<br/>state = tombstoned
+    P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients (per on-chain splits)<br/>transfer (deposit − settled) → payer<br/>sweep residual → treasury<br/>realloc to 1 byte<br/>state = tombstoned
     P-->>S: OK
 ```
 
@@ -156,7 +156,7 @@ sequenceDiagram
         P-->>S: OK
 
         S->>P: submit `distribute` ix (preimage)
-        P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients (per on-chain splits)<br/>transfer (deposit − settled) → payer<br/>sweep residual → treasury<br/>realloc to 8 bytes<br/>state = tombstoned
+        P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients (per on-chain splits)<br/>transfer (deposit − settled) → payer<br/>sweep residual → treasury<br/>realloc to 1 byte<br/>state = tombstoned
         P-->>S: OK
         S->>C: 200 + receipt { txHash, refunded }
     else Forced — server unresponsive
@@ -169,7 +169,7 @@ sequenceDiagram
         P->>P: freeze watermark<br/>state = FINALIZED
 
         A->>P: submit `distribute` ix (preimage)
-        P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients (per on-chain splits)<br/>(if payerWithdrawnAt == 0) transfer (deposit − settled) → payer<br/>sweep residual → treasury<br/>realloc to 8 bytes<br/>state = tombstoned
+        P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients (per on-chain splits)<br/>(if payerWithdrawnAt == 0) transfer (deposit − settled) → payer<br/>sweep residual → treasury<br/>realloc to 1 byte<br/>state = tombstoned
     end
 ```
 

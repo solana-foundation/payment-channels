@@ -91,25 +91,23 @@ fn read_paid_out(svm: &LiteSVM, channel: &Pubkey) -> u64 {
     u64::from_le_bytes(buf)
 }
 
-/// Rent-exempt lamports for the 8-byte tombstone, computed via the same
+/// Rent-exempt lamports for the 1-byte tombstone, computed via the same
 /// canonical formula `Rent::try_minimum_balance` runs on-chain.
 fn tombstone_rent_lamports() -> u64 {
-    solana_rent::Rent::default().minimum_balance(8)
+    solana_rent::Rent::default().minimum_balance(1)
 }
 
 /// Assert the tombstone shape of a channel PDA after FINALIZED `distribute`:
-/// program-owned, 8-byte data, byte 0 == `ClosedChannel` discriminator,
-/// remaining 7 bytes zero-filled, rent-exempt at 8 bytes.
+/// program-owned, 1-byte data == `ClosedChannel` discriminator, rent-exempt.
 fn assert_tombstone(svm: &LiteSVM, channel: &Pubkey) {
     let acct = svm.get_account(channel).expect("tombstone exists");
     assert_eq!(acct.owner, PROGRAM_ID, "tombstone stays program-owned");
-    assert_eq!(acct.data.len(), 8, "tombstone shrinks to 8 bytes");
+    assert_eq!(acct.data.len(), 1, "tombstone shrinks to 1 byte");
     assert_eq!(acct.data[0], 2, "discriminator = ClosedChannel");
-    assert_eq!(&acct.data[1..8], &[0u8; 7], "reserved bytes zero-filled");
     assert_eq!(
         acct.lamports,
         tombstone_rent_lamports(),
-        "tombstone rent-exempt at 8 bytes",
+        "tombstone rent-exempt at 1 byte",
     );
 }
 
