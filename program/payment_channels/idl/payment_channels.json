@@ -154,6 +154,40 @@
         },
         "kind": "accountNode",
         "name": "channel"
+      },
+      {
+        "data": {
+          "fields": [
+            {
+              "kind": "structFieldTypeNode",
+              "name": "discriminator",
+              "type": {
+                "endian": "le",
+                "format": "u8",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "reserved",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 7
+                },
+                "item": {
+                  "endian": "le",
+                  "format": "u8",
+                  "kind": "numberTypeNode"
+                },
+                "kind": "arrayTypeNode"
+              }
+            }
+          ],
+          "kind": "structTypeNode"
+        },
+        "kind": "accountNode",
+        "name": "closedChannel"
       }
     ],
     "definedTypes": [
@@ -431,6 +465,11 @@
               "discriminator": 1,
               "kind": "enumEmptyVariantTypeNode",
               "name": "channel"
+            },
+            {
+              "discriminator": 2,
+              "kind": "enumEmptyVariantTypeNode",
+              "name": "closedChannel"
             }
           ]
         }

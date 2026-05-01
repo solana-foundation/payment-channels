@@ -3471,6 +3471,7 @@ dependencies = [
  "solana-message",
  "solana-program-error",
  "solana-pubkey 3.0.0",
+ "solana-rent 3.1.0",
  "solana-signer",
  "solana-transaction",
  "solana-transaction-error",

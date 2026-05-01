@@ -2,10 +2,10 @@
 use codama::CodamaType;
 use core::mem::size_of;
 use pinocchio::{
-    AccountView, Address, ProgramResult,
+    AccountView, Address, ProgramResult, Resize,
     cpi::Signer,
     error::ProgramError,
-    sysvars::{Sysvar, clock::Clock},
+    sysvars::{Sysvar, clock::Clock, rent::Rent},
 };
 use pinocchio_token_2022::instructions::CloseAccount;
 
@@ -16,6 +16,7 @@ use crate::instructions::helpers::{
     token_account_amount, transfer_checked_signed, validate_ata_token_account, validate_mint,
 };
 use crate::state::channel::{Channel, ChannelStatus};
+use crate::state::closed_channel::ClosedChannel;
 use crate::state::{Transmutable, load};
 
 /// Instruction discriminator byte for `distribute`.
@@ -47,7 +48,10 @@ unsafe impl Transmutable for DistributeArgs {
 /// `DistributeArgs::recipients`; clients append them as remaining accounts.
 pub struct DistributeAccounts<'a> {
     /// Channel PDA whose accounting state is advanced and, on FINALIZED,
-    /// tombstoned after all token movement is complete.
+    /// tombstoned in place at [`AccountDiscriminator::ClosedChannel`] after
+    /// all token movement is complete. The address stays alive forever and
+    /// is never recycled, blocking voucher replay against a re-initialized
+    /// channel at the same seeds.
     pub channel: &'a mut AccountView,
     /// Original payer wallet. Receives SOL rent on FINALIZED cleanup and must
     /// match [`Channel::payer`](crate::Channel::payer).
@@ -114,8 +118,10 @@ impl<'a> TryFrom<&'a mut [AccountView]> for DistributeAccounts<'a> {
 /// residual stays in escrow. From `FINALIZED`, residual is swept to treasury.
 /// On `FINALIZED`, also refunds the payer the unspent
 /// [`deposit`](Channel::deposit) `−` [`settled`](Channel::settled) headroom
-/// (if not already withdrawn) and tombstones both the escrow ATA and the
-/// Channel PDA.
+/// (if not already withdrawn), closes the escrow ATA, and tombstones the
+/// Channel PDA in place via discriminator realloc to
+/// [`ClosedChannel`](crate::ClosedChannel) — refunding the rent delta to the
+/// payer while keeping the address program-owned forever.
 pub fn process(
     _program_id: &Address,
     accounts: &mut [AccountView],
@@ -278,7 +284,7 @@ pub fn process(
             )?;
         }
         sweep_finalized_residual(&mut accs, decimals, &tp, &signers)?;
-        close_finalized_channel(&mut accs, &tp, &signers)?;
+        tombstone_finalized_channel(&mut accs, &tp, &signers)?;
     }
 
     Ok(())
@@ -375,8 +381,13 @@ fn sweep_finalized_residual(
 }
 
 /// Closes the finalized channel's escrow token account and tombstones the
-/// channel PDA, sending both rent balances to the payer SOL account.
-fn close_finalized_channel(
+/// Channel PDA in place: shrinks the data buffer to
+/// [`ClosedChannel::LEN`], writes the [`AccountDiscriminator::ClosedChannel`]
+/// payload, and refunds the freed rent delta to the payer. The PDA stays
+/// alive forever — program-owned, non-empty — so the system program rejects
+/// any future `CreateAccount` against the same seeds, blocking voucher
+/// replay against a re-initialized channel.
+fn tombstone_finalized_channel(
     accs: &mut DistributeAccounts<'_>,
     token_program: &Address,
     signers: &[Signer<'_, '_>],
@@ -390,14 +401,32 @@ fn close_finalized_channel(
     }
     .invoke_signed(signers)?;
 
-    // Tombstone the Channel PDA: move rent lamports to payer, then close.
-    let rent = accs.channel.lamports();
+    // Shrink the Channel PDA data from `Channel::LEN` (216) to
+    // `ClosedChannel::LEN` (8). `Channel::from_account_mut` was already
+    // dropped earlier in `process`, so no active borrow blocks the resize.
+    accs.channel.resize(ClosedChannel::LEN)?;
+
+    // Overwrite the now-truncated buffer with the tombstone header.
+    {
+        let mut data = accs.channel.try_borrow_mut()?;
+        ClosedChannel::write_into(&mut data)?;
+    }
+
+    // Rebalance lamports to the new rent-exempt minimum and refund the
+    // delta to the payer. The PDA must remain rent-exempt so the runtime
+    // never garbage-collects it, which is what keeps the address reserved.
+    let rent = Rent::get()?;
+    let new_min = rent.try_minimum_balance(ClosedChannel::LEN)?;
+    let current = accs.channel.lamports();
+    let delta = current
+        .checked_sub(new_min)
+        .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
     let new_payer_bal = accs
         .payer
         .lamports()
-        .checked_add(rent)
+        .checked_add(delta)
         .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+    accs.channel.set_lamports(new_min);
     accs.payer.set_lamports(new_payer_bal);
-    accs.channel.set_lamports(0);
-    accs.channel.close()
+    Ok(())
 }

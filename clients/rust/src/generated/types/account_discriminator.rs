@@ -23,4 +23,5 @@ use num_derive::FromPrimitive;
 )]
 pub enum AccountDiscriminator {
     Channel,
+    ClosedChannel,
 }
