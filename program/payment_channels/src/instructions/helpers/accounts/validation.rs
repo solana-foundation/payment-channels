@@ -9,12 +9,13 @@ use crate::{
 };
 
 pub trait AccountValidator {
-    /// Validates that `self` is an associated token account created via seeds (`owner`, `token_program`, `mint`.
+    /// Validates that `self` is an associated token account created via seeds (`owner`, `token_program`, `mint`).
     /// Does not check any safety pre-conditions, or if the account is `Initialized`.
     fn validate_as_ata_unchecked(
         &self,
         owner: &Address,
-        token_ctx: &TokenContext,
+        token_program: &Address,
+        mint: &Address,
     ) -> Result<(), PaymentChannelsError>;
 
     /// Validates that `self` is an associated token account owned by `token_program`, holds
@@ -31,14 +32,11 @@ impl AccountValidator for AccountView {
     fn validate_as_ata_unchecked(
         &self,
         owner: &Address,
-        token_ctx: &TokenContext,
+        token_program: &Address,
+        mint: &Address,
     ) -> Result<(), PaymentChannelsError> {
         let (expected_address, _) = Address::find_program_address(
-            &[
-                owner.as_ref(),
-                token_ctx.token_program.address().as_ref(),
-                token_ctx.mint.address().as_ref(),
-            ],
+            &[owner.as_ref(), token_program.as_ref(), mint.as_ref()],
             &pinocchio_associated_token_account::ID,
         );
         if self.address() != &expected_address {

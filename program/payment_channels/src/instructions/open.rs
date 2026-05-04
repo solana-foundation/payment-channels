@@ -7,6 +7,7 @@ use pinocchio_system::instructions::CreateAccount;
 use pinocchio_token_2022::instructions::TransferChecked;
 
 use crate::errors::PaymentChannelsError;
+use crate::helpers::accounts::validation::AccountValidator;
 use crate::helpers::accounts::view::ChannelAccountView;
 use crate::helpers::accounts::view::ChannelContext;
 use crate::helpers::accounts::view::ChannelTokenAccountView;
@@ -205,12 +206,24 @@ pub fn process(
     }
 
     let channel = accs.channel.check()?;
+
+    accs.channel_token_account
+        .validate_as_ata_unchecked(
+            &channel_address,
+            accs.token_program.address(),
+            accs.mint.address(),
+        )
+        .map_err(|_| PaymentChannelsError::EscrowAddressMismatch)?;
+
     let token_ctx = TokenContext::new(accs.mint, accs.token_program)?;
     let mut channel_ctx =
         ChannelContext::new_uninit(channel, accs.channel_token_account, token_ctx)
             .map_err(|_| PaymentChannelsError::EscrowAddressMismatch)?;
-    let payer_ctx =
-        PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)?;
+    let payer_ctx = PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)
+        .map_err(|e| match e {
+            PaymentChannelsError::AddressMismatch => PaymentChannelsError::InvalidPayerTokenAccount,
+            other => other,
+        })?;
 
     let payee = accs.payee.check()?;
 
