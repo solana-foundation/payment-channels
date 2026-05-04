@@ -1,13 +1,4 @@
-use pinocchio::{ProgramResult, cpi::Signer};
-use pinocchio_token_2022::instructions::TransferChecked;
-
-use crate::{
-    errors::PaymentChannelsError,
-    helpers::view::{
-        AnyTokenAccountsView, ChannelAccountView, ChannelTokenAccountView, Checked,
-        MintAccountView, TokenProgramAccountView,
-    },
-};
+use crate::errors::PaymentChannelsError;
 
 pub(crate) mod base_layout {
     use pinocchio_token_2022::state::{Account as TokenAccount, Mint as TokenMint};
@@ -93,34 +84,6 @@ pub(crate) fn scan_tlv_extensions(
     }
 
     Ok(())
-}
-
-/// Invokes a signed `TransferChecked` CPI from a channel-owned token account.
-#[allow(clippy::too_many_arguments)]
-pub fn transfer_checked_signed(
-    from: &ChannelTokenAccountView<'_, Checked>,
-    mint: &MintAccountView<'_, Checked>,
-    to: &AnyTokenAccountsView<'_, Checked>,
-    authority: &ChannelAccountView<'_, Checked>,
-    amount: u64,
-    decimals: u8,
-    token_program: &TokenProgramAccountView<'_, Checked>,
-    signers: &[Signer<'_, '_>],
-) -> ProgramResult {
-    if amount == 0 {
-        return Ok(());
-    }
-
-    TransferChecked {
-        from,
-        mint,
-        to,
-        authority,
-        amount,
-        decimals,
-        token_program: token_program.address(),
-    }
-    .invoke_signed(signers)
 }
 
 /// Whitelist of Token-2022 extension type ids that are safe for this program:
