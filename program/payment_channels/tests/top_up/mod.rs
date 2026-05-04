@@ -8,7 +8,7 @@ use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
-use crate::common::{PROGRAM_ID, ProgramLoader};
+use crate::common::{PROGRAM_ID, ProgramLoader, SPL_TOKEN};
 
 pub(super) const DEPOSIT: u64 = 1_000_000;
 
@@ -25,7 +25,8 @@ pub(super) struct TopUpRun {
     pub mint: Pubkey,
     /// Channel token account pubkey passed as account 3. Defaults to a random pubkey.
     pub channel_ata: Pubkey,
-    /// Token program pubkey passed as account 5. Defaults to a random pubkey.
+    /// Token program pubkey passed as account 5. Defaults to SPL Token;
+    /// override only when targeting the unknown-program dispatch arm.
     pub token_program: Pubkey,
     pub amount: u64,
 }
@@ -38,7 +39,7 @@ impl TopUpRun {
             channel_blob,
             mint: Pubkey::new_unique(),
             channel_ata: Pubkey::new_unique(),
-            token_program: Pubkey::new_unique(),
+            token_program: SPL_TOKEN,
             amount,
         }
     }

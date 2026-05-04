@@ -10,7 +10,7 @@ use crate::{
     helpers::{
         DistributionEntry,
         accounts::validation::AccountValidator,
-        token::{base_layout, scan_tlv_extensions, tlv},
+        token::{MintExtensionPolicy, base_layout, scan_tlv_extensions, tlv},
     },
 };
 
@@ -262,7 +262,7 @@ impl<'a> TokenContext<'a> {
                 if !all_zero {
                     return Err(PaymentChannelsError::MalformedTokenAccountData);
                 }
-                scan_tlv_extensions(&data[tlv::START..], true)?;
+                scan_tlv_extensions::<MintExtensionPolicy>(&data[tlv::START..])?;
             }
         }
 

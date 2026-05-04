@@ -444,7 +444,7 @@ fn top_up_unsigned_payer_rejects() {
             AccountMeta::new(Pubkey::new_unique(), false),
             AccountMeta::new(Pubkey::new_unique(), false),
             AccountMeta::new_readonly(Pubkey::new_unique(), false),
-            AccountMeta::new_readonly(Pubkey::new_unique(), false),
+            AccountMeta::new_readonly(SPL_TOKEN, false),
         ],
         data,
     };

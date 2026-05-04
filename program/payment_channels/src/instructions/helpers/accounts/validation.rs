@@ -4,7 +4,7 @@ use crate::{
     PaymentChannelsError,
     helpers::{
         accounts::view::TokenContext,
-        token::{base_layout, scan_tlv_extensions, tlv},
+        token::{TokenAccountExtensionPolicy, base_layout, scan_tlv_extensions, tlv},
     },
 };
 
@@ -96,7 +96,7 @@ impl AccountValidator for AccountView {
                 // Token-account base layout already aligns with the AccountType
                 // discriminator offset, so there's no padding to police — go
                 // straight to the whitelisted TLV walk.
-                scan_tlv_extensions(&data[tlv::START..], false)?;
+                scan_tlv_extensions::<TokenAccountExtensionPolicy>(&data[tlv::START..])?;
             }
         }
 

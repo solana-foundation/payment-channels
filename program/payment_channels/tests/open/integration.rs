@@ -13,11 +13,11 @@ use super::{
     open_ix_with_token_program, setup_funded_svm, setup_funded_svm_with_token_program,
 };
 use crate::common::token_2022::{
-    EXT_CPI_GUARD, EXT_GROUP_MEMBER_POINTER, EXT_GROUP_POINTER, EXT_IMMUTABLE_OWNER,
-    EXT_MEMO_TRANSFER, EXT_METADATA_POINTER, EXT_MINT_CLOSE_AUTHORITY, EXT_TOKEN_GROUP,
-    EXT_TOKEN_GROUP_MEMBER, EXT_TOKEN_METADATA, EXT_TRANSFER_FEE_CONFIG, EXT_TRANSFER_HOOK,
-    POINTER_EXTENSION_LEN, TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN,
-    add_account_extension, add_mint_extension,
+    EXT_CPI_GUARD, EXT_GROUP_MEMBER_POINTER, EXT_GROUP_POINTER, EXT_MEMO_TRANSFER,
+    EXT_METADATA_POINTER, EXT_MINT_CLOSE_AUTHORITY, EXT_TOKEN_GROUP, EXT_TOKEN_GROUP_MEMBER,
+    EXT_TOKEN_METADATA, EXT_TRANSFER_FEE_CONFIG, EXT_TRANSFER_HOOK, POINTER_EXTENSION_LEN,
+    TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN, add_account_extension,
+    add_mint_extension,
 };
 use crate::common::{ProgramLoader, SPL_TOKEN, expect_custom_err, token_balance};
 
@@ -288,7 +288,7 @@ fn non_ata_payer_token_account_rejected() {
 }
 
 #[test]
-fn token_2022_allowed_mint_and_immutable_owner_payer_account_extensions_succeed() {
+fn token_2022_allowed_mint_extensions_succeed() {
     let mut svm = LiteSVM::load_program();
 
     let payee = Pubkey::new_unique();
@@ -305,7 +305,6 @@ fn token_2022_allowed_mint_and_immutable_owner_payer_account_extensions_succeed(
     ] {
         add_mint_extension(&mut svm, &mint, extension_type, value_len);
     }
-    add_account_extension(&mut svm, &payer_token_account, EXT_IMMUTABLE_OWNER, 0);
 
     let (channel, channel_token_account) = derive_pdas_with_token_program(
         &payer.pubkey(),
