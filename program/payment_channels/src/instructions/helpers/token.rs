@@ -131,59 +131,57 @@ impl<'a> ExtensionTlv<'a> {
     pub(crate) fn new(trailer: &'a [u8]) -> Self {
         Self { remaining: trailer }
     }
+
+    fn advance_one(&mut self) -> Result<Option<ExtensionType>, PaymentChannelsError> {
+        if self.remaining.len() < tlv::TYPE_LEN {
+            // A trailing slice shorter than a `type` field can only be
+            // legitimate if it's all zero (terminator pad). A stray nonzero
+            // byte is a wire-format violation.
+            if self.remaining.iter().any(|&b| b != 0) {
+                return Err(PaymentChannelsError::MalformedTokenAccountData);
+            }
+            return Ok(None);
+        }
+
+        let raw_type = u16::from_le_bytes([self.remaining[0], self.remaining[1]]);
+        if raw_type == UNINITIALIZED {
+            return Ok(None);
+        }
+
+        // Type whitelist is checked before the header-length probe so a
+        // forbidden 2-byte tail surfaces as `UnsupportedTokenExtensions`
+        // rather than `MalformedTokenAccountData`.
+        let kind = ExtensionType::try_from(raw_type)?;
+
+        if self.remaining.len() < tlv::HEADER_LEN {
+            return Err(PaymentChannelsError::MalformedTokenAccountData);
+        }
+        let value_len = u16::from_le_bytes([self.remaining[2], self.remaining[3]]) as usize;
+        let next_offset = tlv::HEADER_LEN
+            .checked_add(value_len)
+            .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+        if next_offset > self.remaining.len() {
+            return Err(PaymentChannelsError::MalformedTokenAccountData);
+        }
+
+        self.remaining = &self.remaining[next_offset..];
+        Ok(Some(kind))
+    }
 }
 
 impl<'a> Iterator for ExtensionTlv<'a> {
     type Item = Result<ExtensionType, PaymentChannelsError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.remaining.len() < tlv::TYPE_LEN {
-            // A trailing slice shorter than a `type` field can only be
-            // legitimate if it's all zero (terminator pad). A stray nonzero
-            // byte is a wire-format violation.
-            if self.remaining.iter().any(|b| *b != 0) {
-                self.remaining = &[];
-                return Some(Err(PaymentChannelsError::MalformedTokenAccountData));
-            }
-            return None;
-        }
-
-        let raw_type = u16::from_le_bytes([self.remaining[0], self.remaining[1]]);
-        if raw_type == UNINITIALIZED {
-            return None;
-        }
-
-        // Type whitelist is checked before the header-length probe so a
-        // forbidden 2-byte tail surfaces as `UnsupportedTokenExtensions`
-        // rather than `MalformedTokenAccountData`.
-        let kind = match ExtensionType::try_from(raw_type) {
-            Ok(k) => k,
+        match self.advance_one() {
+            Ok(Some(kind)) => Some(Ok(kind)),
+            Ok(None) => None,
             Err(e) => {
+                // Sticky-fail: future calls land on the all-zero short-tail path and end.
                 self.remaining = &[];
-                return Some(Err(e));
+                Some(Err(e))
             }
-        };
-
-        if self.remaining.len() < tlv::HEADER_LEN {
-            self.remaining = &[];
-            return Some(Err(PaymentChannelsError::MalformedTokenAccountData));
         }
-
-        let value_len = u16::from_le_bytes([self.remaining[2], self.remaining[3]]) as usize;
-        let next_offset = match tlv::HEADER_LEN.checked_add(value_len) {
-            Some(n) => n,
-            None => {
-                self.remaining = &[];
-                return Some(Err(PaymentChannelsError::ArithmeticOverflow));
-            }
-        };
-        if next_offset > self.remaining.len() {
-            self.remaining = &[];
-            return Some(Err(PaymentChannelsError::MalformedTokenAccountData));
-        }
-
-        self.remaining = &self.remaining[next_offset..];
-        Some(Ok(kind))
     }
 }
 

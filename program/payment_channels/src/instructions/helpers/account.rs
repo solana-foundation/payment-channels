@@ -64,13 +64,7 @@ impl AccountValidator for AccountView {
         token_program: &Address,
         mint: &Address,
     ) -> Result<(), PaymentChannelsError> {
-        let (expected_address, _) = Address::find_program_address(
-            &[owner.as_ref(), token_program.as_ref(), mint.as_ref()],
-            &pinocchio_associated_token_account::ID,
-        );
-        if self.address() != &expected_address {
-            return Err(PaymentChannelsError::AddressMismatch);
-        }
+        self.validate_as_ata_unchecked(owner, token_program, mint)?;
 
         let (acc_mint, acc_owner, initialized) = if *token_program == pinocchio_token::ID {
             let acc = pinocchio_token::state::Account::from_account_view(self)
@@ -109,38 +103,36 @@ impl AccountValidator for AccountView {
     }
 
     fn validate_as_mint(&self, token_program: &Address) -> Result<u8, PaymentChannelsError> {
-        let decimals = if *token_program == pinocchio_token::ID {
+        match *token_program {
             // pinocchio_token enforces owner == SPL classic + exact length.
-            pinocchio_token::state::Mint::from_account_view(self)
+            pinocchio_token::ID => Ok(pinocchio_token::state::Mint::from_account_view(self)
                 .map_err(|_| PaymentChannelsError::MintAccountMismatch)?
-                .decimals()
-        } else if *token_program == pinocchio_token_2022::ID {
-            pinocchio_token_2022::state::Mint::from_account_view(self)
-                .map_err(|_| PaymentChannelsError::MintAccountMismatch)?
-                .decimals()
-        } else {
-            return Err(PaymentChannelsError::InvalidTokenProgram);
-        };
+                .decimals()),
+            pinocchio_token_2022::ID => {
+                let decimals = pinocchio_token_2022::state::Mint::from_account_view(self)
+                    .map_err(|_| PaymentChannelsError::MintAccountMismatch)?
+                    .decimals();
 
-        if *token_program == pinocchio_token_2022::ID {
-            let data = self
-                .try_borrow()
-                .map_err(|_| PaymentChannelsError::MintAccountMismatch)?;
-            if data.len() >= tlv::START {
-                // Upstream's `validate_account_type` checks the discriminator at
-                // `Account::BASE_LEN` but doesn't enforce that the gap between
-                // the mint base region and that offset is zero — guard against
-                // smuggled bytes here, then walk the whitelisted TLV trailer.
-                if data[base_layout::MINT_LEN..tlv::ACCOUNT_TYPE_OFFSET]
-                    .iter()
-                    .any(|b| *b != 0)
-                {
-                    return Err(PaymentChannelsError::MalformedTokenAccountData);
+                let data = self
+                    .try_borrow()
+                    .map_err(|_| PaymentChannelsError::MintAccountMismatch)?;
+                if data.len() >= tlv::START {
+                    // Upstream's `validate_account_type` checks the discriminator at
+                    // `Account::BASE_LEN` but doesn't enforce that the gap between
+                    // the mint base region and that offset is zero — guard against
+                    // smuggled bytes here, then walk the whitelisted TLV trailer.
+                    if data[base_layout::MINT_LEN..tlv::ACCOUNT_TYPE_OFFSET]
+                        .iter()
+                        .any(|&b| b != 0)
+                    {
+                        return Err(PaymentChannelsError::MalformedTokenAccountData);
+                    }
+                    scan_tlv_extensions::<MintExtensionPolicy>(&data[tlv::START..])?;
                 }
-                scan_tlv_extensions::<MintExtensionPolicy>(&data[tlv::START..])?;
-            }
-        }
 
-        Ok(decimals)
+                Ok(decimals)
+            }
+            _ => Err(PaymentChannelsError::InvalidTokenProgram),
+        }
     }
 }
