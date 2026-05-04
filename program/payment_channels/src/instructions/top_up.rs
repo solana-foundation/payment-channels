@@ -5,7 +5,10 @@ use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 use pinocchio_token_2022::instructions::TransferChecked;
 
 use crate::errors::PaymentChannelsError;
-use crate::helpers::AccountValidator;
+use crate::helpers::accounts::view::{
+    ChannelAccountView, ChannelContext, ChannelTokenAccountView, MintAccountView, PayerAccountView,
+    PayerContext, PayerTokenAccountView, TokenContext, TokenProgramAccountView,
+};
 use crate::state::channel::ChannelStatus;
 use crate::state::{Channel, Transmutable, load};
 
@@ -45,14 +48,14 @@ unsafe impl Transmutable for TopUpArgs {
 
 pub struct TopUpAccounts<'a> {
     /// Must equal [`Channel::payer`](crate::Channel::payer) and be a signer.
-    pub payer: &'a AccountView,
+    pub payer: PayerAccountView<'a>,
     /// [`deposit`](crate::Channel::deposit) grows by [`TopUpArgs::amount`].
-    pub channel: &'a mut AccountView,
-    pub payer_token_account: &'a mut AccountView,
+    pub channel: ChannelAccountView<'a>,
+    pub payer_token_account: PayerTokenAccountView<'a>,
     /// Escrow ATA owned by the channel PDA.
-    pub channel_token_account: &'a mut AccountView,
-    pub mint: &'a AccountView,
-    pub token_program: &'a AccountView,
+    pub channel_token_account: ChannelTokenAccountView<'a>,
+    pub mint: MintAccountView<'a>,
+    pub token_program: TokenProgramAccountView<'a>,
 }
 
 impl<'a> TryFrom<&'a mut [AccountView]> for TopUpAccounts<'a> {
@@ -71,12 +74,12 @@ impl<'a> TryFrom<&'a mut [AccountView]> for TopUpAccounts<'a> {
             return Err(ProgramError::NotEnoughAccountKeys);
         };
         Ok(Self {
-            payer,
-            channel,
-            payer_token_account,
-            channel_token_account,
-            mint,
-            token_program,
+            payer: payer.into(),
+            channel: channel.into(),
+            payer_token_account: payer_token_account.into(),
+            channel_token_account: channel_token_account.into(),
+            mint: mint.into(),
+            token_program: token_program.into(),
         })
     }
 }
@@ -100,52 +103,47 @@ pub fn process(
         return Err(PaymentChannelsError::DepositMustBeNonZero.into());
     }
 
-    // Capture before the mutable borrow of channel below.
-    let channel_address = *accs.channel.address();
-    let token_program = accs.token_program.address();
+    let channel = accs.channel.check()?;
 
-    let decimals = {
-        let mut ch = Channel::from_account_mut(accs.channel)?;
-
+    {
+        let ch = Channel::from_account(&channel)?;
         if ch.status != ChannelStatus::Open as u8 {
             return Err(PaymentChannelsError::InvalidChannelStatus.into());
         }
-
         if accs.payer.address() != &ch.payer {
             return Err(PaymentChannelsError::UnauthorizedPayer.into());
         }
-
         if accs.mint.address() != &ch.mint {
             return Err(PaymentChannelsError::MintAccountMismatch.into());
         }
+    }
 
-        let decimals = accs.mint.validate_as_mint(token_program)?;
+    let token_ctx = TokenContext::new(accs.mint, accs.token_program)?;
+    let mut channel_ctx = ChannelContext::new(channel, accs.channel_token_account, token_ctx)
+        .map_err(|_| PaymentChannelsError::EscrowAddressMismatch)?;
+    let payer_ctx = PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)
+        .map_err(|e| match e {
+            PaymentChannelsError::AddressMismatch => PaymentChannelsError::InvalidPayerTokenAccount,
+            other => other,
+        })?;
 
-        // Re-derive the canonical escrow ATA using the mint recorded at open.
-        // Without this a caller could pass any token account, increment
-        // ch.deposit, and leave the actual escrow underfunded.
-
-        accs.channel_token_account
-            .validate_as_ata_unchecked(&channel_address, token_program, &ch.mint)
-            .map_err(|_| PaymentChannelsError::EscrowAddressMismatch)?;
-
+    {
+        let mut ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
         let new_deposit = ch
             .deposit()
             .checked_add(amount)
             .ok_or(ProgramError::ArithmeticOverflow)?;
         ch.set_deposit(new_deposit);
-
-        decimals
-    };
+    }
 
     TransferChecked {
-        from: accs.payer_token_account,
-        mint: accs.mint,
-        to: accs.channel_token_account,
-        authority: accs.payer,
+        from: &payer_ctx.payer_token_account,
+        mint: &channel_ctx.token_ctx.mint,
+        to: &channel_ctx.channel_token_account,
+        authority: &payer_ctx.payer,
         amount,
-        decimals,
-        token_program,
+        decimals: channel_ctx.token_ctx.decimals,
+        token_program: channel_ctx.token_ctx.token_program.address(),
     }
     .invoke()?;
 
