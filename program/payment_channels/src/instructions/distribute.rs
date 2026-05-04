@@ -11,9 +11,10 @@ use pinocchio_token_2022::instructions::CloseAccount;
 
 use crate::constants::TREASURY_OWNER;
 use crate::errors::PaymentChannelsError;
+use crate::helpers::AccountValidator;
 use crate::instructions::helpers::{
     DistributionEntry, DistributionRecipients, channel_signer_seeds, floor_bps_share,
-    token_account_amount, transfer_checked_signed, validate_ata_token_account, validate_mint,
+    token_account_amount, transfer_checked_signed,
 };
 use crate::state::channel::{Channel, ChannelStatus};
 use crate::state::closed_channel::ClosedChannel;
@@ -153,39 +154,23 @@ pub fn process(
 
     // Token program + extension-aware Mint layout.
     let tp = *accs.token_program.address();
-    let decimals = validate_mint(accs.mint, &tp)?;
+    let decimals = accs.mint.validate_as_mint(&tp)?;
 
     let salt = ch.salt();
 
     // Validate the fixed token accounts first.
-    validate_ata_token_account(
-        accs.channel_token_account,
-        &channel_address,
-        &ch.mint,
-        &tp,
-        PaymentChannelsError::InvalidChannelTokenAccount,
-    )?;
-    validate_ata_token_account(
-        accs.payer_token_account,
-        &ch.payer,
-        &ch.mint,
-        &tp,
-        PaymentChannelsError::InvalidPayerTokenAccount,
-    )?;
-    validate_ata_token_account(
-        accs.payee_token_account,
-        &ch.payee,
-        &ch.mint,
-        &tp,
-        PaymentChannelsError::InvalidPayeeTokenAccount,
-    )?;
-    validate_ata_token_account(
-        accs.treasury_token_account,
-        &TREASURY_OWNER,
-        &ch.mint,
-        &tp,
-        PaymentChannelsError::TreasuryAddressMismatch,
-    )?;
+    accs.channel_token_account
+        .validate_as_ata_checked(&channel_address, &tp, &ch.mint)
+        .map_err(|_| PaymentChannelsError::InvalidChannelTokenAccount)?;
+    accs.payer_token_account
+        .validate_as_ata_checked(&ch.payer, &tp, &ch.mint)
+        .map_err(|_| PaymentChannelsError::InvalidPayerTokenAccount)?;
+    accs.payee_token_account
+        .validate_as_ata_checked(&ch.payee, &tp, &ch.mint)
+        .map_err(|_| PaymentChannelsError::InvalidPayeeTokenAccount)?;
+    accs.treasury_token_account
+        .validate_as_ata_checked(&TREASURY_OWNER, &tp, &ch.mint)
+        .map_err(|_| PaymentChannelsError::TreasuryAddressMismatch)?;
 
     // Hash equality is the sole plan-level gate: a matching digest proves
     // the revealed plan is byte-identical to the one open committed, which
@@ -206,13 +191,14 @@ pub fn process(
         .iter()
         .zip(accs.recipient_token_accounts.iter())
     {
-        validate_ata_token_account(
-            recipient_token_account,
-            &entry.recipient,
-            &ch.mint,
-            &tp,
-            PaymentChannelsError::InvalidRecipientAccount,
-        )?;
+        recipient_token_account
+            .validate_as_ata_checked(&entry.recipient, &tp, &ch.mint)
+            .map_err(|e| match e {
+                PaymentChannelsError::AddressMismatch => {
+                    PaymentChannelsError::InvalidRecipientAccount
+                }
+                other => other,
+            })?;
     }
 
     // Pool = settled − paid_out.

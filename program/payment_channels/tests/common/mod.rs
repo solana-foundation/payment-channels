@@ -9,7 +9,7 @@ use mollusk_svm::Mollusk;
 use payment_channels::PaymentChannelsError;
 use payment_channels::state::Channel;
 use payment_channels::state::channel::ChannelStatus;
-use solana_instruction::error::InstructionError;
+use solana_instruction::{Instruction, error::InstructionError};
 use solana_pubkey::{Pubkey, pubkey};
 use solana_transaction_error::TransactionError;
 
@@ -21,6 +21,38 @@ pub const TOKEN_2022: Pubkey = pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPx
 pub const ATA_PROGRAM: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 pub const SYSTEM_PROGRAM: Pubkey = pubkey!("11111111111111111111111111111111");
 pub const SYSVAR_RENT: Pubkey = pubkey!("SysvarRent111111111111111111111111111111111");
+pub const INSTRUCTIONS_SYSVAR: Pubkey = pubkey!("Sysvar1nstructions1111111111111111111111111");
+
+pub fn ed25519_program_id() -> Pubkey {
+    Pubkey::new_from_array(*payment_channels::ed25519::PROGRAM_ID.as_array())
+}
+
+pub fn event_authority() -> Pubkey {
+    Pubkey::find_program_address(
+        &[payment_channels::event_engine::EVENT_AUTHORITY_SEED],
+        &PROGRAM_ID,
+    )
+    .0
+}
+
+pub fn token_balance(svm: &LiteSVM, account: &Pubkey) -> u64 {
+    let acct = svm.get_account(account).expect("token account exists");
+    u64::from_le_bytes(acct.data[64..72].try_into().unwrap())
+}
+
+/// `ComputeBudgetInstruction::SetComputeUnitLimit(u32)` — variant tag 2
+/// followed by the limit as little-endian `u32`. Used as a stand-in for
+/// a non-Ed25519 preceding ix.
+pub fn compute_budget_ix(units: u32) -> Instruction {
+    let mut data = Vec::with_capacity(5);
+    data.push(0x02);
+    data.extend_from_slice(&units.to_le_bytes());
+    Instruction {
+        program_id: pubkey!("ComputeBudget111111111111111111111111111111"),
+        accounts: Vec::new(),
+        data,
+    }
+}
 
 fn program_binary_path() -> String {
     std::env::var("PAYMENT_CHANNELS_SO")
@@ -93,7 +125,12 @@ pub fn expect_instruction_err(
 pub struct ChannelBuilder {
     status: ChannelStatus,
     deposit: u64,
+    settled: u64,
+    closure_started_at: i64,
+    grace_period: u32,
     payer: Pubkey,
+    payee: Pubkey,
+    authorized_signer: Pubkey,
     mint: Pubkey,
 }
 
@@ -102,7 +139,12 @@ impl ChannelBuilder {
         Self {
             status: ChannelStatus::Open,
             deposit: 0,
+            settled: 0,
+            closure_started_at: 0,
+            grace_period: 0,
             payer: Pubkey::default(),
+            payee: Pubkey::default(),
+            authorized_signer: Pubkey::default(),
             mint: Pubkey::default(),
         }
     }
@@ -117,8 +159,33 @@ impl ChannelBuilder {
         self
     }
 
+    pub fn settled(mut self, settled: u64) -> Self {
+        self.settled = settled;
+        self
+    }
+
+    pub fn closure_started_at(mut self, v: i64) -> Self {
+        self.closure_started_at = v;
+        self
+    }
+
+    pub fn grace_period(mut self, v: u32) -> Self {
+        self.grace_period = v;
+        self
+    }
+
     pub fn payer(mut self, payer: Pubkey) -> Self {
         self.payer = payer;
+        self
+    }
+
+    pub fn payee(mut self, payee: Pubkey) -> Self {
+        self.payee = payee;
+        self
+    }
+
+    pub fn authorized_signer(mut self, authorized_signer: Pubkey) -> Self {
+        self.authorized_signer = authorized_signer;
         self
     }
 
@@ -133,7 +200,12 @@ impl ChannelBuilder {
         data[1] = 1; // CURRENT_CHANNEL_VERSION
         data[3] = self.status as u8;
         data[12..20].copy_from_slice(&self.deposit.to_le_bytes());
+        data[20..28].copy_from_slice(&self.settled.to_le_bytes());
+        data[36..44].copy_from_slice(&self.closure_started_at.to_le_bytes());
+        data[52..56].copy_from_slice(&self.grace_period.to_le_bytes());
         data[88..120].copy_from_slice(&self.payer.to_bytes());
+        data[120..152].copy_from_slice(&self.payee.to_bytes());
+        data[152..184].copy_from_slice(&self.authorized_signer.to_bytes());
         data[184..216].copy_from_slice(&self.mint.to_bytes());
         data
     }

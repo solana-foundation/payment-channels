@@ -50,8 +50,11 @@ export const PAYMENT_CHANNELS_ERROR__DUPLICATE_RECIPIENT = 0x20; // 32
 export const PAYMENT_CHANNELS_ERROR__RECIPIENT_ACCOUNT_COUNT_MISMATCH = 0x21; // 33
 export const PAYMENT_CHANNELS_ERROR__UNAUTHORIZED_PAYER = 0x22; // 34
 export const PAYMENT_CHANNELS_ERROR__MALFORMED_TOKEN_ACCOUNT_DATA = 0x23; // 35
+export const PAYMENT_CHANNELS_ERROR__UNAUTHORIZED_PAYEE = 0x24; // 36
+export const PAYMENT_CHANNELS_ERROR__ADDRESS_MISMATCH = 0x25; // 37
 
 export type PaymentChannelsError =
+  | typeof PAYMENT_CHANNELS_ERROR__ADDRESS_MISMATCH
   | typeof PAYMENT_CHANNELS_ERROR__ARITHMETIC_OVERFLOW
   | typeof PAYMENT_CHANNELS_ERROR__CHANNEL_ADDRESS_MISMATCH
   | typeof PAYMENT_CHANNELS_ERROR__CHANNEL_NOT_DISTRIBUTABLE
@@ -79,6 +82,7 @@ export type PaymentChannelsError =
   | typeof PAYMENT_CHANNELS_ERROR__PAYER_PAYEE_MUST_DIFFER
   | typeof PAYMENT_CHANNELS_ERROR__RECIPIENT_ACCOUNT_COUNT_MISMATCH
   | typeof PAYMENT_CHANNELS_ERROR__TREASURY_ADDRESS_MISMATCH
+  | typeof PAYMENT_CHANNELS_ERROR__UNAUTHORIZED_PAYEE
   | typeof PAYMENT_CHANNELS_ERROR__UNAUTHORIZED_PAYER
   | typeof PAYMENT_CHANNELS_ERROR__UNSUPPORTED_CHANNEL_VERSION
   | typeof PAYMENT_CHANNELS_ERROR__UNSUPPORTED_TOKEN_EXTENSIONS
@@ -94,6 +98,7 @@ let paymentChannelsErrorMessages:
   | undefined;
 if (process.env["NODE_ENV"] !== "production") {
   paymentChannelsErrorMessages = {
+    [PAYMENT_CHANNELS_ERROR__ADDRESS_MISMATCH]: `Account address mismatch`,
     [PAYMENT_CHANNELS_ERROR__ARITHMETIC_OVERFLOW]: `Arithmetic overflow`,
     [PAYMENT_CHANNELS_ERROR__CHANNEL_ADDRESS_MISMATCH]: `Channel account does not match derived PDA`,
     [PAYMENT_CHANNELS_ERROR__CHANNEL_NOT_DISTRIBUTABLE]: `Channel is not in OPEN or FINALIZED`,
@@ -121,6 +126,7 @@ if (process.env["NODE_ENV"] !== "production") {
     [PAYMENT_CHANNELS_ERROR__PAYER_PAYEE_MUST_DIFFER]: `Payer and payee must be different accounts`,
     [PAYMENT_CHANNELS_ERROR__RECIPIENT_ACCOUNT_COUNT_MISMATCH]: `Recipient ATA tail length does not match the committed plan's entry count`,
     [PAYMENT_CHANNELS_ERROR__TREASURY_ADDRESS_MISMATCH]: `Treasury token account is not ATA(TREASURY_OWNER, mint, token_program)`,
+    [PAYMENT_CHANNELS_ERROR__UNAUTHORIZED_PAYEE]: `Caller is not the channel payee`,
     [PAYMENT_CHANNELS_ERROR__UNAUTHORIZED_PAYER]: `Caller is not the channel payer`,
     [PAYMENT_CHANNELS_ERROR__UNSUPPORTED_CHANNEL_VERSION]: `Unsupported channel version`,
     [PAYMENT_CHANNELS_ERROR__UNSUPPORTED_TOKEN_EXTENSIONS]: `Token-2022 mint or token account uses unsupported extensions for exact distribution`,

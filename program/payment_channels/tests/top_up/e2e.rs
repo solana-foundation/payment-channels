@@ -5,7 +5,6 @@
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 use payment_channels::PaymentChannelsError;
-use payment_channels::event_engine::EVENT_AUTHORITY_SEED;
 use payment_channels::instructions::open::{
     DISCRIMINATOR as OPEN_DISCRIMINATOR, MAX_DISTRIBUTION_RECIPIENTS,
 };
@@ -23,12 +22,8 @@ use solana_transaction_error::TransactionError;
 use crate::common::token_2022::{EXT_TRANSFER_FEE_CONFIG, add_mint_extension};
 use crate::common::{
     ATA_PROGRAM, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM, SYSVAR_RENT, TOKEN_2022,
-    expect_custom_err,
+    event_authority, expect_custom_err, token_balance,
 };
-
-fn event_authority() -> Pubkey {
-    Pubkey::find_program_address(&[EVENT_AUTHORITY_SEED], &PROGRAM_ID).0
-}
 
 /// Inject a 216-byte Channel at `channel` owned by `PROGRAM_ID`.
 fn seed_channel(svm: &mut LiteSVM, channel: &Pubkey, status: u8, deposit: u64, payer: &Pubkey) {
@@ -54,11 +49,6 @@ fn seed_channel(svm: &mut LiteSVM, channel: &Pubkey, status: u8, deposit: u64, p
 fn read_deposit(svm: &LiteSVM, channel: &Pubkey) -> u64 {
     let acct = svm.get_account(channel).expect("channel exists");
     u64::from_le_bytes(acct.data[12..20].try_into().unwrap())
-}
-
-fn read_token_balance(svm: &LiteSVM, ata: &Pubkey) -> u64 {
-    let acct = svm.get_account(ata).expect("token account exists");
-    u64::from_le_bytes(acct.data[64..72].try_into().unwrap())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -189,8 +179,8 @@ fn top_up_increases_deposit() {
         &SPL_TOKEN,
     );
 
-    assert_eq!(read_token_balance(&svm, &payer_ata), top_up_amount);
-    assert_eq!(read_token_balance(&svm, &channel_ata), deposit);
+    assert_eq!(token_balance(&svm, &payer_ata), top_up_amount);
+    assert_eq!(token_balance(&svm, &channel_ata), deposit);
     assert_eq!(read_deposit(&svm, &channel), deposit);
 
     let ix = build_top_up_ix(
@@ -211,11 +201,8 @@ fn top_up_increases_deposit() {
     svm.send_transaction(tx).expect("top_up ok");
 
     assert_eq!(read_deposit(&svm, &channel), deposit + top_up_amount);
-    assert_eq!(read_token_balance(&svm, &payer_ata), 0);
-    assert_eq!(
-        read_token_balance(&svm, &channel_ata),
-        deposit + top_up_amount
-    );
+    assert_eq!(token_balance(&svm, &payer_ata), 0);
+    assert_eq!(token_balance(&svm, &channel_ata), deposit + top_up_amount);
 }
 
 #[test]
@@ -511,8 +498,8 @@ fn top_up_increases_deposit_token_2022() {
         &TOKEN_2022,
     );
 
-    assert_eq!(read_token_balance(&svm, &payer_ata), top_up_amount);
-    assert_eq!(read_token_balance(&svm, &channel_ata), deposit);
+    assert_eq!(token_balance(&svm, &payer_ata), top_up_amount);
+    assert_eq!(token_balance(&svm, &channel_ata), deposit);
     assert_eq!(read_deposit(&svm, &channel), deposit);
 
     let ix = build_top_up_ix(
@@ -533,11 +520,8 @@ fn top_up_increases_deposit_token_2022() {
     svm.send_transaction(tx).expect("top_up ok");
 
     assert_eq!(read_deposit(&svm, &channel), deposit + top_up_amount);
-    assert_eq!(read_token_balance(&svm, &payer_ata), 0);
-    assert_eq!(
-        read_token_balance(&svm, &channel_ata),
-        deposit + top_up_amount
-    );
+    assert_eq!(token_balance(&svm, &payer_ata), 0);
+    assert_eq!(token_balance(&svm, &channel_ata), deposit + top_up_amount);
 }
 
 #[test]
@@ -595,11 +579,8 @@ fn top_up_token_2022_nonzero_decimals_succeeds() {
     svm.send_transaction(tx).expect("top_up ok");
 
     assert_eq!(read_deposit(&svm, &channel), deposit + top_up_amount);
-    assert_eq!(read_token_balance(&svm, &payer_ata), 0);
-    assert_eq!(
-        read_token_balance(&svm, &channel_ata),
-        deposit + top_up_amount
-    );
+    assert_eq!(token_balance(&svm, &payer_ata), 0);
+    assert_eq!(token_balance(&svm, &channel_ata), deposit + top_up_amount);
 }
 
 #[test]
@@ -640,8 +621,8 @@ fn top_up_unsupported_token_2022_mint_extension_rejects_without_state_changes() 
     );
 
     assert_eq!(read_deposit(&svm, &channel), deposit);
-    assert_eq!(read_token_balance(&svm, &payer_ata), top_up_amount);
-    assert_eq!(read_token_balance(&svm, &channel_ata), deposit);
+    assert_eq!(token_balance(&svm, &payer_ata), top_up_amount);
+    assert_eq!(token_balance(&svm, &channel_ata), deposit);
 
     add_mint_extension(&mut svm, &mint, EXT_TRANSFER_FEE_CONFIG, 108);
 
@@ -666,8 +647,8 @@ fn top_up_unsupported_token_2022_mint_extension_rejects_without_state_changes() 
     );
 
     assert_eq!(read_deposit(&svm, &channel), deposit);
-    assert_eq!(read_token_balance(&svm, &payer_ata), top_up_amount);
-    assert_eq!(read_token_balance(&svm, &channel_ata), deposit);
+    assert_eq!(token_balance(&svm, &payer_ata), top_up_amount);
+    assert_eq!(token_balance(&svm, &channel_ata), deposit);
 }
 
 #[test]

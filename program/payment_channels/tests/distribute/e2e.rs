@@ -5,14 +5,11 @@
 
 #![allow(clippy::result_large_err)]
 
-use std::str::FromStr;
-
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 use payment_channels::PaymentChannelsError;
 use payment_channels::VOUCHER_PAYLOAD_SIZE;
 use payment_channels::ed25519;
-use payment_channels::event_engine::event_authority_pda;
 use payment_channels::instructions::open::DISCRIMINATOR as OPEN_DISCRIMINATOR;
 use payment_channels_client::instructions::{Settle, SettleInstructionArgs};
 use payment_channels_client::types::{DistributionRecipients, SettleArgs, VoucherArgs};
@@ -36,44 +33,13 @@ use crate::common::token_2022::{
     add_account_extension, add_mint_extension,
 };
 use crate::common::{
-    ATA_PROGRAM, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM, SYSVAR_RENT,
-    expect_custom_err, expect_instruction_err,
+    ATA_PROGRAM, INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM,
+    SYSVAR_RENT, compute_budget_ix, ed25519_program_id, event_authority, expect_custom_err,
+    expect_instruction_err, token_balance,
 };
 
 const GRACE_PERIOD: u32 = 3600;
 const DEFAULT_SALT: u64 = 0x1234_5678_9abc_def0;
-
-fn instructions_sysvar_id() -> Pubkey {
-    Pubkey::from_str("Sysvar1nstructions1111111111111111111111111").unwrap()
-}
-
-fn ed25519_program_id() -> Pubkey {
-    Pubkey::new_from_array(*ed25519::PROGRAM_ID.as_array())
-}
-
-fn event_authority() -> Pubkey {
-    Pubkey::new_from_array(*event_authority_pda::ID.as_array())
-}
-
-fn compute_budget_ix(units: u32) -> Instruction {
-    let mut data = Vec::with_capacity(5);
-    data.push(0x02);
-    data.extend_from_slice(&units.to_le_bytes());
-    Instruction {
-        program_id: Pubkey::from_str("ComputeBudget111111111111111111111111111111").unwrap(),
-        accounts: Vec::new(),
-        data,
-    }
-}
-
-fn token_balance(svm: &LiteSVM, token_account: &Pubkey) -> u64 {
-    let acct = svm
-        .get_account(token_account)
-        .expect("token account exists");
-    let mut buf = [0u8; 8];
-    buf.copy_from_slice(&acct.data[64..72]);
-    u64::from_le_bytes(buf)
-}
 
 fn set_token_balance(svm: &mut LiteSVM, token_account: &Pubkey, amount: u64) {
     let mut acct = svm
@@ -358,7 +324,7 @@ fn build_ed25519_ix(
 fn build_settle_ix(channel: &Pubkey, voucher: VoucherArgs) -> Instruction {
     Settle {
         channel: *channel,
-        instructions_sysvar: instructions_sysvar_id(),
+        instructions_sysvar: INSTRUCTIONS_SYSVAR,
     }
     .instruction(SettleInstructionArgs {
         settle_args: SettleArgs { voucher },
@@ -1207,7 +1173,10 @@ fn settle_on_tombstoned_channel_rejects() {
         &[&s.fee_payer],
         blockhash,
     );
-    expect_instruction_err(s.svm.send_transaction(tx), InstructionError::InvalidAccountData);
+    expect_instruction_err(
+        s.svm.send_transaction(tx),
+        InstructionError::InvalidAccountData,
+    );
     assert_tombstone(&s.svm, &s.channel);
 }
 
@@ -1283,11 +1252,7 @@ fn reopen_at_same_seeds_rejects_same_tx() {
         &[&s.payer_keypair],
         blockhash,
     );
-    let err = s
-        .svm
-        .send_transaction(tx)
-        .expect_err("tx should fail")
-        .err;
+    let err = s.svm.send_transaction(tx).expect_err("tx should fail").err;
     // Lock down both the failing ix index (open is at index 2 — after
     // compute-budget at 0 and distribute at 1) and the variant. A regression
     // that shifts the failure to a different ix or a different system error
