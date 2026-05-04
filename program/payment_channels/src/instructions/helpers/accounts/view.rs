@@ -138,7 +138,7 @@ impl<'a> TreasuryTokenAccountView<'a, Unchecked> {
         token_ctx: &TokenContext<'a>,
     ) -> Result<TreasuryTokenAccountView<'a, Checked>, PaymentChannelsError> {
         self.inner
-            .validate_as_ata_checked(&TREASURY_OWNER, &token_ctx)?;
+            .validate_as_ata_checked(&TREASURY_OWNER, token_ctx)?;
 
         Ok(TreasuryTokenAccountView {
             inner: self.inner,
@@ -153,7 +153,7 @@ impl<'a> PayeeTokenAccountView<'a, Unchecked> {
         payee: &Address,
         token_ctx: &TokenContext<'a>,
     ) -> Result<PayeeTokenAccountView<'a, Checked>, PaymentChannelsError> {
-        self.inner.validate_as_ata_checked(payee, &token_ctx)?;
+        self.inner.validate_as_ata_checked(payee, token_ctx)?;
 
         Ok(PayeeTokenAccountView {
             inner: self.inner,
@@ -304,6 +304,25 @@ impl<'a> ChannelContext<'a> {
         })
     }
 
+    /// For use in `open` where the escrow ATA has not been created yet —
+    /// validates the derived address only, skipping token account data parsing.
+    pub fn new_uninit(
+        channel: ChannelAccountView<'a, Checked>,
+        channel_token_account: ChannelTokenAccountView<'a, Unchecked>,
+        token_ctx: TokenContext<'a>,
+    ) -> Result<Self, PaymentChannelsError> {
+        channel_token_account.validate_as_ata_unchecked(channel.address(), &token_ctx)?;
+
+        Ok(Self {
+            channel,
+            channel_token_account: ChannelTokenAccountView {
+                inner: channel_token_account.inner,
+                _s: Default::default(),
+            },
+            token_ctx,
+        })
+    }
+
     /// Invokes a signed `TransferChecked` CPI from a channel-owned token account.
     pub fn transfer_checked_signed(
         &self,
@@ -339,7 +358,7 @@ impl<'a> PayerContext<'a> {
         payer_token_account: PayerTokenAccountView<'a, Unchecked>,
         token_ctx: &TokenContext<'a>,
     ) -> Result<Self, PaymentChannelsError> {
-        payer_token_account.validate_as_ata_checked(payer.address(), &token_ctx)?;
+        payer_token_account.validate_as_ata_checked(payer.address(), token_ctx)?;
 
         Ok(Self {
             payer: PayerAccountView {

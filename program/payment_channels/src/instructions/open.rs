@@ -206,8 +206,9 @@ pub fn process(
 
     let channel = accs.channel.check()?;
     let token_ctx = TokenContext::new(accs.mint, accs.token_program)?;
-    let mut channel_ctx = ChannelContext::new(channel, accs.channel_token_account, token_ctx)
-        .map_err(|_| PaymentChannelsError::InvalidChannelTokenAccount)?;
+    let mut channel_ctx =
+        ChannelContext::new_uninit(channel, accs.channel_token_account, token_ctx)
+            .map_err(|_| PaymentChannelsError::EscrowAddressMismatch)?;
     let payer_ctx =
         PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)?;
 
