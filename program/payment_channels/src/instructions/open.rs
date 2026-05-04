@@ -7,7 +7,16 @@ use pinocchio_system::instructions::CreateAccount;
 use pinocchio_token_2022::instructions::TransferChecked;
 
 use crate::errors::PaymentChannelsError;
-use crate::helpers::AccountValidator;
+use crate::helpers::accounts::view::ChannelAccountView;
+use crate::helpers::accounts::view::ChannelContext;
+use crate::helpers::accounts::view::ChannelTokenAccountView;
+use crate::helpers::accounts::view::MintAccountView;
+use crate::helpers::accounts::view::PayeeAccountView;
+use crate::helpers::accounts::view::PayerAccountView;
+use crate::helpers::accounts::view::PayerContext;
+use crate::helpers::accounts::view::PayerTokenAccountView;
+use crate::helpers::accounts::view::TokenContext;
+use crate::helpers::accounts::view::TokenProgramAccountView;
 use crate::state::Channel;
 
 use crate::event_engine::EventSerialize;
@@ -77,11 +86,11 @@ unsafe impl Transmutable for OpenArgs {
 /// [`Self::authorized_signer`] are PDA seed inputs.
 pub struct OpenAccounts<'a> {
     /// Funds the deposit and the PDA rent.
-    pub payer: &'a AccountView,
+    pub payer: PayerAccountView<'a>,
     /// Bound into [`Channel::payee`](crate::Channel::payee).
-    pub payee: &'a AccountView,
+    pub payee: PayeeAccountView<'a>,
     /// Token mint for the channel's escrow.
-    pub mint: &'a AccountView,
+    pub mint: MintAccountView<'a>,
     /// Bound as
     /// [`Channel::authorized_signer`](crate::Channel::authorized_signer)
     /// (voucher author).
@@ -89,13 +98,13 @@ pub struct OpenAccounts<'a> {
     /// Channel PDA. Must equal `Channel::find_pda(payer, payee, mint,
     /// authorized_signer, salt)` — derive client-side and pass as writable.
     /// Verified on-chain against the derived address before allocation.
-    pub channel: &'a mut AccountView,
-    pub payer_token_account: &'a mut AccountView,
+    pub channel: ChannelAccountView<'a>,
+    pub payer_token_account: PayerTokenAccountView<'a>,
     /// Escrow ATA owned by the channel PDA. Must equal the associated token
     /// address for `(channel, token_program, mint)` — derive client-side
     /// and pass as writable. Verified on-chain before the ATA is created.
-    pub channel_token_account: &'a mut AccountView,
-    pub token_program: &'a AccountView,
+    pub channel_token_account: ChannelTokenAccountView<'a>,
+    pub token_program: TokenProgramAccountView<'a>,
     pub system_program: &'a AccountView,
     pub rent: &'a AccountView,
     /// Associated Token Account program; required by the runtime for the
@@ -130,14 +139,14 @@ impl<'a> TryFrom<&'a mut [AccountView]> for OpenAccounts<'a> {
             return Err(ProgramError::NotEnoughAccountKeys);
         };
         Ok(Self {
-            payer,
-            payee,
-            mint,
+            payer: payer.into(),
+            payee: payee.into(),
+            mint: mint.into(),
             authorized_signer,
-            channel,
-            payer_token_account,
-            channel_token_account,
-            token_program,
+            channel: channel.into(),
+            payer_token_account: payer_token_account.into(),
+            channel_token_account: channel_token_account.into(),
+            token_program: token_program.into(),
             system_program,
             rent,
             associated_token_program,
@@ -195,27 +204,24 @@ pub fn process(
         return Err(PaymentChannelsError::ChannelAddressMismatch.into());
     }
 
-    let token_program = accs.token_program.address();
-    accs.channel_token_account
-        .validate_as_ata_unchecked(&channel_address, token_program, accs.mint.address())
-        .map_err(|_| PaymentChannelsError::EscrowAddressMismatch)?;
+    let channel = accs.channel.check()?;
+    let token_ctx = TokenContext::new(accs.mint, accs.token_program)?;
+    let mut channel_ctx =
+        ChannelContext::new_uninit(channel, accs.channel_token_account, token_ctx)
+            .map_err(|_| PaymentChannelsError::EscrowAddressMismatch)?;
+    let payer_ctx =
+        PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)?;
 
-    let decimals = accs.mint.validate_as_mint(token_program)?;
-    accs.payer_token_account
-        .validate_as_ata_checked(accs.payer.address(), token_program, accs.mint.address())
-        .map_err(|e| match e {
-            PaymentChannelsError::AddressMismatch => PaymentChannelsError::InvalidPayerTokenAccount,
-            other => other,
-        })?;
+    let payee = accs.payee.check()?;
 
     // Allocate the channel PDA. The runtime verifies the seeds match
     // accs.channel.address(); mismatched account → CPI failure.
     let salt_bytes = args.salt().to_le_bytes();
     let bump_byte = [bump];
     let seeds = channel_signer_seeds(
-        accs.payer.address().as_ref(),
-        accs.payee.address().as_ref(),
-        accs.mint.address().as_ref(),
+        payer_ctx.payer.address().as_ref(),
+        payee.address().as_ref(),
+        channel_ctx.token_ctx.mint.address().as_ref(),
         accs.authorized_signer.address().as_ref(),
         &salt_bytes,
         &bump_byte,
@@ -223,8 +229,8 @@ pub fn process(
     let channel_signer = Signer::from(&seeds);
 
     CreateAccount::with_minimum_balance(
-        accs.payer,
-        accs.channel,
+        &payer_ctx.payer,
+        &channel_ctx.channel,
         Channel::LEN as u64,
         &crate::ID,
         Some(accs.rent),
@@ -233,42 +239,42 @@ pub fn process(
 
     // Create the escrow ATA owned by the channel PDA.
     CreateAta {
-        funding_account: accs.payer,
-        account: accs.channel_token_account,
-        wallet: accs.channel,
-        mint: accs.mint,
+        funding_account: &payer_ctx.payer,
+        account: &channel_ctx.channel_token_account,
+        wallet: &channel_ctx.channel,
+        mint: &channel_ctx.token_ctx.mint,
         system_program: accs.system_program,
-        token_program: accs.token_program,
+        token_program: &channel_ctx.token_ctx.token_program,
     }
     .invoke()?;
 
     // Transfer the deposit from payer to escrow.
     TransferChecked {
-        from: accs.payer_token_account,
-        mint: accs.mint,
-        to: accs.channel_token_account,
-        authority: accs.payer,
+        from: &payer_ctx.payer_token_account,
+        mint: &channel_ctx.token_ctx.mint,
+        to: &channel_ctx.channel_token_account,
+        authority: &payer_ctx.payer,
         amount: deposit,
-        decimals,
-        token_program,
+        decimals: channel_ctx.token_ctx.decimals,
+        token_program: channel_ctx.token_ctx.token_program.address(),
     }
     .invoke()?;
 
     Channel::init_at(
-        &mut accs.channel.try_borrow_mut()?,
+        &mut channel_ctx.channel.try_borrow_mut()?,
         bump,
         args.salt(),
         deposit,
         args.grace_period(),
         distribution_hash,
-        *accs.payer.address(),
-        *accs.payee.address(),
+        *payer_ctx.payer.address(),
+        *payee.address(),
         *accs.authorized_signer.address(),
-        *accs.mint.address(),
+        *channel_ctx.token_ctx.mint.address(),
     )?;
 
     let event = Opened {
-        channel: *accs.channel.address(),
+        channel: *channel_ctx.channel.address(),
     };
     let bytes = event.to_bytes_fixed::<{ Opened::WIRE_LEN }>();
     emit_event(
