@@ -111,31 +111,6 @@ impl<'a> PayeeAccountView<'a, Unchecked> {
     }
 }
 
-impl<'a> ChannelTokenAccountView<'a, Unchecked> {
-    pub fn check(
-        self,
-        channel_address: &Address,
-        token_ctx: &TokenContext,
-    ) -> Result<ChannelTokenAccountView<'a, Checked>, PaymentChannelsError> {
-        self.inner
-            .validate_as_ata_checked(channel_address, &token_ctx)?;
-
-        Ok(ChannelTokenAccountView {
-            inner: self.inner,
-            _s: Default::default(),
-        })
-    }
-}
-
-impl<'a> TokenProgramAccountView<'a, Unchecked> {
-    pub fn check(self) -> Result<TokenProgramAccountView<'a, Checked>, PaymentChannelsError> {
-        Ok(TokenProgramAccountView {
-            inner: self.inner,
-            _s: Default::default(),
-        })
-    }
-}
-
 impl<'a> TokenProgramAccountView<'a, Checked> {
     pub fn amount(
         &self,
@@ -166,21 +141,6 @@ impl<'a> TreasuryTokenAccountView<'a, Unchecked> {
             .validate_as_ata_checked(&TREASURY_OWNER, &token_ctx)?;
 
         Ok(TreasuryTokenAccountView {
-            inner: self.inner,
-            _s: Default::default(),
-        })
-    }
-}
-
-impl<'a> PayerTokenAccountView<'a, Unchecked> {
-    pub fn check(
-        self,
-        payer: &Address,
-        token_ctx: &TokenContext<'a>,
-    ) -> Result<PayerTokenAccountView<'a, Checked>, PaymentChannelsError> {
-        self.inner.validate_as_ata_checked(payer, &token_ctx)?;
-
-        Ok(PayerTokenAccountView {
             inner: self.inner,
             _s: Default::default(),
         })
