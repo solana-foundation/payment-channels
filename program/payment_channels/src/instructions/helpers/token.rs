@@ -1,6 +1,3 @@
-use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer};
-use pinocchio_token_2022::instructions::TransferChecked;
-
 use crate::errors::PaymentChannelsError;
 
 pub(crate) mod base_layout {
@@ -52,27 +49,6 @@ mod extension_id {
     pub(crate) const TOKEN_GROUP_MEMBER: u16 = 23;
 }
 
-/// Returns the raw token amount from an already-validated token account.
-pub fn token_account_amount(
-    account: &AccountView,
-    token_program: &Address,
-    account_error: PaymentChannelsError,
-) -> Result<u64, PaymentChannelsError> {
-    if *token_program == pinocchio_token::ID {
-        Ok(pinocchio_token::state::Account::from_account_view(account)
-            .map_err(|_| account_error)?
-            .amount())
-    } else if *token_program == pinocchio_token_2022::ID {
-        Ok(
-            pinocchio_token_2022::state::Account::from_account_view(account)
-                .map_err(|_| account_error)?
-                .amount(),
-        )
-    } else {
-        Err(PaymentChannelsError::InvalidTokenProgram)
-    }
-}
-
 /// Walks the Token-2022 TLV trailer and rejects any extension type not
 /// whitelisted for the given account kind. Stops at the first uninitialized
 /// or all-zero region, which marks unused TLV space.
@@ -108,34 +84,6 @@ pub(crate) fn scan_tlv_extensions(
     }
 
     Ok(())
-}
-
-/// Invokes a signed `TransferChecked` CPI from a channel-owned token account.
-#[allow(clippy::too_many_arguments)]
-pub fn transfer_checked_signed(
-    from: &AccountView,
-    mint: &AccountView,
-    to: &AccountView,
-    authority: &AccountView,
-    amount: u64,
-    decimals: u8,
-    token_program: &Address,
-    signers: &[Signer<'_, '_>],
-) -> ProgramResult {
-    if amount == 0 {
-        return Ok(());
-    }
-
-    TransferChecked {
-        from,
-        mint,
-        to,
-        authority,
-        amount,
-        decimals,
-        token_program,
-    }
-    .invoke_signed(signers)
 }
 
 /// Whitelist of Token-2022 extension type ids that are safe for this program:
