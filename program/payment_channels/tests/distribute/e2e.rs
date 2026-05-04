@@ -1189,7 +1189,9 @@ fn finalized_then_tombstoned() -> Scenario {
         owner: Pubkey::new_unique(),
         bps: 5000,
     }];
-    let (deposit, settled, paid_out) = pool(200_000, 0, 150_000);
+    let deposit = 200_000;
+    let settled = 150_000;
+    let paid_out = 0;
     let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_FINALIZED);
     s.send(s.distribute_ix()).expect("distribute ok");
     assert_tombstone(&s.svm, &s.channel);
@@ -1274,7 +1276,9 @@ fn reopen_at_same_seeds_rejects_same_tx() {
         owner: Pubkey::new_unique(),
         bps: 5000,
     }];
-    let (deposit, settled, paid_out) = pool(200_000, 0, 150_000);
+    let deposit = 200_000;
+    let settled = 150_000;
+    let paid_out = 0;
     let mut s = Scenario::build(splits.clone(), deposit, settled, paid_out, STATUS_FINALIZED);
 
     let distribute_ix = s.distribute_ix();
