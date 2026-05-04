@@ -104,34 +104,37 @@ pub fn process(
     }
 
     let channel = accs.channel.check()?;
-    let token_ctx = TokenContext::new(accs.mint, accs.token_program)
-        .map_err(|_| PaymentChannelsError::EscrowAddressMismatch)?;
-    let mut channel_ctx = ChannelContext::new(channel, accs.channel_token_account, token_ctx)
-        .map_err(|_| PaymentChannelsError::InvalidChannelTokenAccount)?;
-    let payer_ctx =
-        PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)?;
 
     {
-        let mut ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
-
+        let ch = Channel::from_account(&channel)?;
         if ch.status != ChannelStatus::Open as u8 {
             return Err(PaymentChannelsError::InvalidChannelStatus.into());
         }
-
-        if payer_ctx.payer.address() != &ch.payer {
+        if accs.payer.address() != &ch.payer {
             return Err(PaymentChannelsError::UnauthorizedPayer.into());
         }
-
-        if channel_ctx.token_ctx.mint.address() != &ch.mint {
+        if accs.mint.address() != &ch.mint {
             return Err(PaymentChannelsError::MintAccountMismatch.into());
         }
+    }
 
+    let token_ctx = TokenContext::new(accs.mint, accs.token_program)?;
+    let mut channel_ctx = ChannelContext::new(channel, accs.channel_token_account, token_ctx)
+        .map_err(|_| PaymentChannelsError::EscrowAddressMismatch)?;
+    let payer_ctx = PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)
+        .map_err(|e| match e {
+            PaymentChannelsError::AddressMismatch => PaymentChannelsError::InvalidPayerTokenAccount,
+            other => other,
+        })?;
+
+    {
+        let mut ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
         let new_deposit = ch
             .deposit()
             .checked_add(amount)
             .ok_or(ProgramError::ArithmeticOverflow)?;
         ch.set_deposit(new_deposit);
-    };
+    }
 
     TransferChecked {
         from: &payer_ctx.payer_token_account,

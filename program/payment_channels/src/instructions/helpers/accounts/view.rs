@@ -311,7 +311,11 @@ impl<'a> ChannelContext<'a> {
         channel_token_account: ChannelTokenAccountView<'a, Unchecked>,
         token_ctx: TokenContext<'a>,
     ) -> Result<Self, PaymentChannelsError> {
-        channel_token_account.validate_as_ata_unchecked(channel.address(), &token_ctx)?;
+        channel_token_account.validate_as_ata_unchecked(
+            channel.address(),
+            token_ctx.token_program.address(),
+            token_ctx.mint.address(),
+        )?;
 
         Ok(Self {
             channel,
