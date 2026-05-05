@@ -3,6 +3,7 @@
 #![allow(clippy::result_large_err)]
 
 use litesvm::LiteSVM;
+use payment_channels::PaymentChannelsError;
 use payment_channels::state::channel::ChannelStatus;
 use payment_channels_client::instructions::Finalize;
 use solana_account::Account;
@@ -12,7 +13,11 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-use crate::common::{PROGRAM_ID, ProgramLoader};
+use crate::common::{PROGRAM_ID, ProgramLoader, expect_custom_err};
+
+const CLOSURE_STARTED_AT: i64 = 1_000_000;
+const GRACE_PERIOD: u32 = 3_600;
+const DEADLINE: i64 = CLOSURE_STARTED_AT + GRACE_PERIOD as i64; // 1_003_600
 
 fn seed_channel(
     svm: &mut LiteSVM,
@@ -40,40 +45,93 @@ fn seed_channel(
     .expect("set_account");
 }
 
+fn set_clock(svm: &mut LiteSVM, unix_timestamp: i64) {
+    let mut clock = svm.get_sysvar::<Clock>();
+    clock.unix_timestamp = unix_timestamp;
+    svm.set_sysvar::<Clock>(&clock);
+}
+
+fn send_finalize(
+    svm: &mut LiteSVM,
+    channel: &Pubkey,
+    fee_payer: &Keypair,
+) -> Result<litesvm::types::TransactionMetadata, litesvm::types::FailedTransactionMetadata> {
+    let ix = Finalize { channel: *channel }.instruction();
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&fee_payer.pubkey()),
+        &[fee_payer],
+        svm.latest_blockhash(),
+    );
+    svm.send_transaction(tx)
+}
+
 fn read_channel(svm: &LiteSVM, channel: &Pubkey) -> Vec<u8> {
     svm.get_account(channel).expect("channel exists").data
 }
 
 #[test]
-fn finalize_post_grace_transitions_and_clears_timestamp() {
+fn mid_grace_rejects() {
     let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 1_000_000_000).unwrap();
 
     let channel = Pubkey::new_unique();
-    let closure_started_at: i64 = 1;
-    let grace_period: u32 = 100;
     seed_channel(
         &mut svm,
         &channel,
         ChannelStatus::Closing,
-        closure_started_at,
-        grace_period,
+        CLOSURE_STARTED_AT,
+        GRACE_PERIOD,
     );
+    set_clock(&mut svm, DEADLINE - 1); // one second before deadline
 
-    // Advance clock past the deadline (1 + 100 = 101).
-    let mut clock = svm.get_sysvar::<Clock>();
-    clock.unix_timestamp = 101;
-    svm.set_sysvar::<Clock>(&clock);
-
-    let ix = Finalize { channel }.instruction();
-    let tx = Transaction::new_signed_with_payer(
-        &[ix],
-        Some(&fee_payer.pubkey()),
-        &[&fee_payer],
-        svm.latest_blockhash(),
+    expect_custom_err(
+        send_finalize(&mut svm, &channel, &fee_payer),
+        PaymentChannelsError::InvalidChannelStatus,
     );
-    svm.send_transaction(tx).expect("finalize ok");
+}
+
+#[test]
+fn at_exact_deadline_succeeds() {
+    let mut svm = LiteSVM::load_program();
+    let fee_payer = Keypair::new();
+    svm.airdrop(&fee_payer.pubkey(), 1_000_000_000).unwrap();
+
+    let channel = Pubkey::new_unique();
+    seed_channel(
+        &mut svm,
+        &channel,
+        ChannelStatus::Closing,
+        CLOSURE_STARTED_AT,
+        GRACE_PERIOD,
+    );
+    set_clock(&mut svm, DEADLINE); // now == deadline
+
+    send_finalize(&mut svm, &channel, &fee_payer).expect("finalize at deadline ok");
+
+    let data = read_channel(&svm, &channel);
+    assert_eq!(data[3], ChannelStatus::Finalized as u8);
+    assert_eq!(i64::from_le_bytes(data[36..44].try_into().unwrap()), 0i64);
+}
+
+#[test]
+fn post_grace_transitions_and_clears_timestamp() {
+    let mut svm = LiteSVM::load_program();
+    let fee_payer = Keypair::new();
+    svm.airdrop(&fee_payer.pubkey(), 1_000_000_000).unwrap();
+
+    let channel = Pubkey::new_unique();
+    seed_channel(
+        &mut svm,
+        &channel,
+        ChannelStatus::Closing,
+        CLOSURE_STARTED_AT,
+        GRACE_PERIOD,
+    );
+    set_clock(&mut svm, DEADLINE + 1); // one second past deadline
+
+    send_finalize(&mut svm, &channel, &fee_payer).expect("finalize ok");
 
     let data = read_channel(&svm, &channel);
     assert_eq!(data[3], ChannelStatus::Finalized as u8);
