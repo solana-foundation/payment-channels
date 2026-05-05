@@ -127,6 +127,7 @@ pub struct ChannelBuilder {
     deposit: u64,
     settled: u64,
     closure_started_at: i64,
+    payer_withdrawn_at: i64,
     grace_period: u32,
     payer: Pubkey,
     payee: Pubkey,
@@ -141,6 +142,7 @@ impl ChannelBuilder {
             deposit: 0,
             settled: 0,
             closure_started_at: 0,
+            payer_withdrawn_at: 0,
             grace_period: 0,
             payer: Pubkey::default(),
             payee: Pubkey::default(),
@@ -166,6 +168,11 @@ impl ChannelBuilder {
 
     pub fn closure_started_at(mut self, v: i64) -> Self {
         self.closure_started_at = v;
+        self
+    }
+
+    pub fn payer_withdrawn_at(mut self, v: i64) -> Self {
+        self.payer_withdrawn_at = v;
         self
     }
 
@@ -202,6 +209,7 @@ impl ChannelBuilder {
         data[12..20].copy_from_slice(&self.deposit.to_le_bytes());
         data[20..28].copy_from_slice(&self.settled.to_le_bytes());
         data[36..44].copy_from_slice(&self.closure_started_at.to_le_bytes());
+        data[44..52].copy_from_slice(&self.payer_withdrawn_at.to_le_bytes());
         data[52..56].copy_from_slice(&self.grace_period.to_le_bytes());
         data[88..120].copy_from_slice(&self.payer.to_bytes());
         data[120..152].copy_from_slice(&self.payee.to_bytes());
