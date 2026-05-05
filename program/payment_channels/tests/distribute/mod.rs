@@ -18,7 +18,7 @@ use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
-use crate::common::{PROGRAM_ID, ProgramLoader, TOKEN_2022};
+use crate::common::{PROGRAM_ID, ProgramLoader, SPL_TOKEN, TOKEN_2022};
 
 pub(super) const STATUS_OPEN: u8 = 0;
 pub(super) const STATUS_FINALIZED: u8 = 1;
@@ -130,7 +130,7 @@ impl DistributeRun {
             payee_ata: Pubkey::new_unique(),
             treasury_ata: Pubkey::new_unique(),
             mint: Pubkey::new_unique(),
-            token_program: Pubkey::new_unique(),
+            token_program: SPL_TOKEN,
             recipient_atas: splits.iter().map(|_| Pubkey::new_unique()).collect(),
             recipients: build_recipients(splits),
         }

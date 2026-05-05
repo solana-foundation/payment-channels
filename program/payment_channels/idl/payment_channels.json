@@ -154,6 +154,24 @@
         },
         "kind": "accountNode",
         "name": "channel"
+      },
+      {
+        "data": {
+          "fields": [
+            {
+              "kind": "structFieldTypeNode",
+              "name": "discriminator",
+              "type": {
+                "endian": "le",
+                "format": "u8",
+                "kind": "numberTypeNode"
+              }
+            }
+          ],
+          "kind": "structTypeNode"
+        },
+        "kind": "accountNode",
+        "name": "closedChannel"
       }
     ],
     "definedTypes": [
@@ -431,6 +449,11 @@
               "discriminator": 1,
               "kind": "enumEmptyVariantTypeNode",
               "name": "channel"
+            },
+            {
+              "discriminator": 2,
+              "kind": "enumEmptyVariantTypeNode",
+              "name": "closedChannel"
             }
           ]
         }

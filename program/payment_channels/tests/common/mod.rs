@@ -104,6 +104,23 @@ pub fn expect_custom_err(
     }
 }
 
+/// Assert a LiteSVM transaction result failed with the expected builtin
+/// `InstructionError` variant. Sibling to [`expect_custom_err`] for failure
+/// modes that surface as builtin variants (e.g., `InvalidAccountData`,
+/// `MissingRequiredSignature`) rather than `Custom(code)`.
+pub fn expect_instruction_err(
+    res: Result<litesvm::types::TransactionMetadata, litesvm::types::FailedTransactionMetadata>,
+    expected: InstructionError,
+) {
+    let err = res.expect_err("tx should fail");
+    match err.err {
+        TransactionError::InstructionError(_, ix_err) => {
+            assert_eq!(ix_err, expected, "wrong InstructionError variant");
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
 /// Builds a [`Channel`] account blob for use in Mollusk integration tests.
 pub struct ChannelBuilder {
     status: ChannelStatus,
