@@ -5,19 +5,12 @@
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 use payment_channels_client::instructions::WithdrawPayer;
-use solana_clock::Clock;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-use crate::common::{ProgramLoader, SPL_TOKEN, open_channel, token_balance};
-
-fn set_clock(svm: &mut LiteSVM, unix_timestamp: i64) {
-    let mut clock = svm.get_sysvar::<Clock>();
-    clock.unix_timestamp = unix_timestamp;
-    svm.set_sysvar::<Clock>(&clock);
-}
+use crate::common::{ProgramLoader, SPL_TOKEN, open_channel, set_clock, token_balance};
 
 /// Patch an existing channel account to FINALIZED status with the given settled amount.
 fn patch_channel_finalized(svm: &mut LiteSVM, channel: &Pubkey, settled: u64) {

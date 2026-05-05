@@ -35,7 +35,7 @@ use crate::common::token_2022::{
 use crate::common::{
     ATA_PROGRAM, INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM,
     SYSVAR_RENT, compute_budget_ix, ed25519_program_id, event_authority, expect_custom_err,
-    expect_instruction_err, token_balance,
+    expect_instruction_err, set_clock, token_balance,
 };
 
 const GRACE_PERIOD: u32 = 3600;
@@ -697,6 +697,9 @@ fn distribute_after_withdraw_payer_skips_payer_refund() {
         STATUS_FINALIZED,
         SPL_TOKEN,
     );
+
+    // Advance the clock so withdraw_payer stamps a non-zero payer_withdrawn_at.
+    set_clock(&mut s.svm, 1_000_000);
 
     // Payer claims their deposit − settled refund first.
     let withdraw_ix = WithdrawPayer {

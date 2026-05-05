@@ -12,6 +12,7 @@ use payment_channels::instructions::open::{
 };
 use payment_channels::state::Channel;
 use payment_channels::state::channel::ChannelStatus;
+use solana_clock::Clock;
 use solana_instruction::{AccountMeta, Instruction, error::InstructionError};
 use solana_keypair::Keypair;
 use solana_pubkey::{Pubkey, pubkey};
@@ -44,6 +45,12 @@ pub fn event_authority() -> Pubkey {
 pub fn token_balance(svm: &LiteSVM, account: &Pubkey) -> u64 {
     let acct = svm.get_account(account).expect("token account exists");
     u64::from_le_bytes(acct.data[64..72].try_into().unwrap())
+}
+
+pub fn set_clock(svm: &mut LiteSVM, unix_timestamp: i64) {
+    let mut clock = svm.get_sysvar::<Clock>();
+    clock.unix_timestamp = unix_timestamp;
+    svm.set_sysvar::<Clock>(&clock);
 }
 
 /// Opens a payment channel with a single 100% distribution recipient and
