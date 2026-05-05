@@ -6,11 +6,6 @@
 //!
 
 use crate::generated::types::DistributionEntry;
-use borsh::BorshDeserialize;
-use borsh::BorshSerialize;
+use spl_collections::U8PrefixedVec;
 
-#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Eq, PartialEq)]
-pub struct DistributionRecipients {
-    pub count: u8,
-    pub entries: [DistributionEntry; 32],
-}
+pub type DistributionRecipients = U8PrefixedVec<DistributionEntry>;

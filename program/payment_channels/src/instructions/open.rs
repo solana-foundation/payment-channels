@@ -1,6 +1,3 @@
-#[cfg(feature = "idl")]
-use codama::CodamaType;
-use core::mem::size_of;
 use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer, error::ProgramError};
 use pinocchio_associated_token_account::instructions::Create as CreateAta;
 use pinocchio_system::instructions::CreateAccount;
@@ -25,7 +22,6 @@ use crate::event_engine::emit_event;
 use crate::events::Opened;
 pub use crate::instructions::helpers::MAX_DISTRIBUTION_RECIPIENTS;
 use crate::instructions::helpers::{DistributionRecipients, channel_signer_seeds};
-use crate::state::{Transmutable, load};
 
 /// Instruction discriminator byte for `open`.
 pub const DISCRIMINATOR: u8 = 1;
@@ -36,51 +32,75 @@ pub const DISCRIMINATOR: u8 = 1;
 /// [`distribute`](crate::instructions::distribute) later verifies a matching
 /// preimage before paying out splits.
 ///
-/// Wire layout: `salt(8) | deposit(8) | grace_period(4) | count(1) | entries(32×34)`.
-#[repr(C)]
+/// Wire layout: `salt(8) | deposit(8) | grace_period(4) | recipients`.
+/// `recipients` is the u8-prefixed dynamic preimage patched into the IDL by
+/// `build.rs`.
 #[derive(Debug, Clone, Copy)]
-#[cfg_attr(feature = "idl", derive(CodamaType))]
-pub struct OpenArgs {
-    /// PDA disambiguator; stored in [`Channel::salt`](crate::Channel::salt).
-    /// Enables concurrent channels for the same
-    /// `(payer, payee, mint, authorized_signer)` tuple.
-    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+pub struct OpenArgs<'a> {
+    /// PDA disambiguator stored in [`Channel::salt`](crate::Channel::salt).
     salt: [u8; 8],
-    /// Initial escrow; the immutable ceiling on
-    /// [`Channel::settled`](crate::Channel::settled) (raised later only by
-    /// `topUp`).
-    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    /// Initial escrow and ceiling for [`Channel::settled`](crate::Channel::settled).
     deposit: [u8; 8],
-    /// Grace duration (seconds). Governs the `CLOSING → FINALIZED`
-    /// unlock for permissionless `finalize`.
-    #[cfg_attr(feature = "idl", codama(type = number(u32)))]
+    /// Grace duration, in seconds.
     grace_period: [u8; 4],
-    pub recipients: DistributionRecipients,
+    /// Distribution preimage committed into the channel.
+    pub recipients: DistributionRecipients<'a>,
 }
 
-impl OpenArgs {
+impl<'a> OpenArgs<'a> {
+    const SALT_LEN: usize = core::mem::size_of::<u64>();
+    const DEPOSIT_LEN: usize = core::mem::size_of::<u64>();
+    const GRACE_PERIOD_LEN: usize = core::mem::size_of::<u32>();
+    const RECIPIENT_COUNT_LEN: usize = core::mem::size_of::<u8>();
+
+    /// Bytes before the dynamic recipient preimage.
+    const FIXED_HEADER_LEN: usize = Self::SALT_LEN + Self::DEPOSIT_LEN + Self::GRACE_PERIOD_LEN;
+    /// Smallest valid `open` payload: fixed header plus recipient count byte.
+    const MIN_LEN: usize = Self::FIXED_HEADER_LEN + Self::RECIPIENT_COUNT_LEN;
+
+    /// PDA disambiguator stored in [`Channel::salt`](crate::Channel::salt).
     #[inline(always)]
     pub fn salt(&self) -> u64 {
         u64::from_le_bytes(self.salt)
     }
 
+    /// Initial token amount transferred into escrow at `open`.
     #[inline(always)]
     pub fn deposit(&self) -> u64 {
         u64::from_le_bytes(self.deposit)
     }
 
+    /// Grace duration, in seconds.
     #[inline(always)]
     pub fn grace_period(&self) -> u32 {
         u32::from_le_bytes(self.grace_period)
     }
 
-    pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
-        unsafe { load::<Self>(data) }.map_err(|_| ProgramError::InvalidInstructionData)
+    /// Parses the dynamic `open` payload from instruction data.
+    pub fn load(data: &'a [u8]) -> Result<Self, ProgramError> {
+        if data.len() < Self::MIN_LEN {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+        let (salt, rest) = data.split_at(Self::SALT_LEN);
+        let (deposit, rest) = rest.split_at(Self::DEPOSIT_LEN);
+        let (grace_period, recipients_bytes) = rest.split_at(Self::GRACE_PERIOD_LEN);
+        let salt = salt
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
+        let deposit = deposit
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
+        let grace_period = grace_period
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
+        let recipients = DistributionRecipients::load(recipients_bytes)?;
+        Ok(Self {
+            salt,
+            deposit,
+            grace_period,
+            recipients,
+        })
     }
-}
-
-unsafe impl Transmutable for OpenArgs {
-    const LEN: usize = size_of::<Self>();
 }
 
 /// [`Self::payer`], [`Self::payee`], [`Self::mint`],
@@ -162,7 +182,7 @@ impl<'a> TryFrom<&'a mut [AccountView]> for OpenAccounts<'a> {
 pub fn process(
     program_id: &Address,
     accounts: &mut [AccountView],
-    args: &OpenArgs,
+    args: &OpenArgs<'_>,
 ) -> ProgramResult {
     let accs = OpenAccounts::try_from(accounts)?;
 
@@ -173,8 +193,6 @@ pub fn process(
     if accs.payer.address() == accs.payee.address() {
         return Err(PaymentChannelsError::PayerPayeeMustDiffer.into());
     }
-
-    let validated = args.recipients.validate()?;
 
     let deposit = args.deposit();
     if deposit == 0 {
@@ -189,7 +207,8 @@ pub fn process(
         args.salt(),
     );
 
-    if validated
+    if args
+        .recipients
         .entries
         .iter()
         .any(|entry| entry.recipient == channel_address)

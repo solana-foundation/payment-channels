@@ -38,7 +38,7 @@ fn process_instruction(
     instruction_data: &[u8],
 ) -> ProgramResult {
     match PaymentChannelsInstruction::from_bytes(instruction_data)? {
-        PaymentChannelsInstruction::Open(args) => open::process(program_id, accounts, args),
+        PaymentChannelsInstruction::Open(args) => open::process(program_id, accounts, &args),
         PaymentChannelsInstruction::Settle(args) => settle::process(program_id, accounts, args),
         PaymentChannelsInstruction::TopUp(args) => top_up::process(program_id, accounts, args),
         PaymentChannelsInstruction::SettleAndFinalize(args) => {
@@ -47,7 +47,7 @@ fn process_instruction(
         PaymentChannelsInstruction::RequestClose => request_close::process(program_id, accounts),
         PaymentChannelsInstruction::Finalize => finalize::process(program_id, accounts),
         PaymentChannelsInstruction::Distribute(args) => {
-            distribute::process(program_id, accounts, args)
+            distribute::process(program_id, accounts, &args)
         }
         PaymentChannelsInstruction::WithdrawPayer => withdraw_payer::process(program_id, accounts),
         PaymentChannelsInstruction::EmitEvent => emit_event::process(program_id, accounts),

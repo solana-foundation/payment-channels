@@ -10,9 +10,9 @@ import {
   combineCodec,
   getStructDecoder,
   getStructEncoder,
-  type FixedSizeCodec,
-  type FixedSizeDecoder,
-  type FixedSizeEncoder,
+  type Codec,
+  type Decoder,
+  type Encoder,
 } from "@solana/kit";
 import {
   getDistributionRecipientsDecoder,
@@ -25,15 +25,15 @@ export type DistributeArgs = { recipients: DistributionRecipients };
 
 export type DistributeArgsArgs = { recipients: DistributionRecipientsArgs };
 
-export function getDistributeArgsEncoder(): FixedSizeEncoder<DistributeArgsArgs> {
+export function getDistributeArgsEncoder(): Encoder<DistributeArgsArgs> {
   return getStructEncoder([["recipients", getDistributionRecipientsEncoder()]]);
 }
 
-export function getDistributeArgsDecoder(): FixedSizeDecoder<DistributeArgs> {
+export function getDistributeArgsDecoder(): Decoder<DistributeArgs> {
   return getStructDecoder([["recipients", getDistributionRecipientsDecoder()]]);
 }
 
-export function getDistributeArgsCodec(): FixedSizeCodec<
+export function getDistributeArgsCodec(): Codec<
   DistributeArgsArgs,
   DistributeArgs
 > {

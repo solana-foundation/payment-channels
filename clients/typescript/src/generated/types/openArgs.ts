@@ -14,9 +14,9 @@ import {
   getU32Encoder,
   getU64Decoder,
   getU64Encoder,
-  type FixedSizeCodec,
-  type FixedSizeDecoder,
-  type FixedSizeEncoder,
+  type Codec,
+  type Decoder,
+  type Encoder,
 } from "@solana/kit";
 import {
   getDistributionRecipientsDecoder,
@@ -39,7 +39,7 @@ export type OpenArgsArgs = {
   recipients: DistributionRecipientsArgs;
 };
 
-export function getOpenArgsEncoder(): FixedSizeEncoder<OpenArgsArgs> {
+export function getOpenArgsEncoder(): Encoder<OpenArgsArgs> {
   return getStructEncoder([
     ["salt", getU64Encoder()],
     ["deposit", getU64Encoder()],
@@ -48,7 +48,7 @@ export function getOpenArgsEncoder(): FixedSizeEncoder<OpenArgsArgs> {
   ]);
 }
 
-export function getOpenArgsDecoder(): FixedSizeDecoder<OpenArgs> {
+export function getOpenArgsDecoder(): Decoder<OpenArgs> {
   return getStructDecoder([
     ["salt", getU64Decoder()],
     ["deposit", getU64Decoder()],
@@ -57,6 +57,6 @@ export function getOpenArgsDecoder(): FixedSizeDecoder<OpenArgs> {
   ]);
 }
 
-export function getOpenArgsCodec(): FixedSizeCodec<OpenArgsArgs, OpenArgs> {
+export function getOpenArgsCodec(): Codec<OpenArgsArgs, OpenArgs> {
   return combineCodec(getOpenArgsEncoder(), getOpenArgsDecoder());
 }

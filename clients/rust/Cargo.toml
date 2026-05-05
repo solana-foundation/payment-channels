@@ -26,6 +26,10 @@ solana-cpi = "^3"
   optional = true
   version = "^3.0"
 
+  [dependencies.spl-collections]
+  version = "^0.1"
+  features = ["borsh"]
+
   [dependencies.anchor-lang]
   optional = true
   version = "1"

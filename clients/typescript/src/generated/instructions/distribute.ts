@@ -17,9 +17,9 @@ import {
   transformEncoder,
   type AccountMeta,
   type Address,
-  type FixedSizeCodec,
-  type FixedSizeDecoder,
-  type FixedSizeEncoder,
+  type Codec,
+  type Decoder,
+  type Encoder,
   type Instruction,
   type InstructionWithAccounts,
   type InstructionWithData,
@@ -97,7 +97,7 @@ export type DistributeInstructionDataArgs = {
   distributeArgs: DistributeArgsArgs;
 };
 
-export function getDistributeInstructionDataEncoder(): FixedSizeEncoder<DistributeInstructionDataArgs> {
+export function getDistributeInstructionDataEncoder(): Encoder<DistributeInstructionDataArgs> {
   return transformEncoder(
     getStructEncoder([
       ["discriminator", getU8Encoder()],
@@ -107,14 +107,14 @@ export function getDistributeInstructionDataEncoder(): FixedSizeEncoder<Distribu
   );
 }
 
-export function getDistributeInstructionDataDecoder(): FixedSizeDecoder<DistributeInstructionData> {
+export function getDistributeInstructionDataDecoder(): Decoder<DistributeInstructionData> {
   return getStructDecoder([
     ["discriminator", getU8Decoder()],
     ["distributeArgs", getDistributeArgsDecoder()],
   ]);
 }
 
-export function getDistributeInstructionDataCodec(): FixedSizeCodec<
+export function getDistributeInstructionDataCodec(): Codec<
   DistributeInstructionDataArgs,
   DistributeInstructionData
 > {

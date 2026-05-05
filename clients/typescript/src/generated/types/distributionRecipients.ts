@@ -10,13 +10,11 @@ import {
   combineCodec,
   getArrayDecoder,
   getArrayEncoder,
-  getStructDecoder,
-  getStructEncoder,
   getU8Decoder,
   getU8Encoder,
-  type FixedSizeCodec,
-  type FixedSizeDecoder,
-  type FixedSizeEncoder,
+  type Codec,
+  type Decoder,
+  type Encoder,
 } from "@solana/kit";
 import {
   getDistributionEntryDecoder,
@@ -25,31 +23,23 @@ import {
   type DistributionEntryArgs,
 } from ".";
 
-export type DistributionRecipients = {
-  count: number;
-  entries: Array<DistributionEntry>;
-};
+export type DistributionRecipients = Array<DistributionEntry>;
 
-export type DistributionRecipientsArgs = {
-  count: number;
-  entries: Array<DistributionEntryArgs>;
-};
+export type DistributionRecipientsArgs = Array<DistributionEntryArgs>;
 
-export function getDistributionRecipientsEncoder(): FixedSizeEncoder<DistributionRecipientsArgs> {
-  return getStructEncoder([
-    ["count", getU8Encoder()],
-    ["entries", getArrayEncoder(getDistributionEntryEncoder(), { size: 32 })],
-  ]);
+export function getDistributionRecipientsEncoder(): Encoder<DistributionRecipientsArgs> {
+  return getArrayEncoder(getDistributionEntryEncoder(), {
+    size: getU8Encoder(),
+  });
 }
 
-export function getDistributionRecipientsDecoder(): FixedSizeDecoder<DistributionRecipients> {
-  return getStructDecoder([
-    ["count", getU8Decoder()],
-    ["entries", getArrayDecoder(getDistributionEntryDecoder(), { size: 32 })],
-  ]);
+export function getDistributionRecipientsDecoder(): Decoder<DistributionRecipients> {
+  return getArrayDecoder(getDistributionEntryDecoder(), {
+    size: getU8Decoder(),
+  });
 }
 
-export function getDistributionRecipientsCodec(): FixedSizeCodec<
+export function getDistributionRecipientsCodec(): Codec<
   DistributionRecipientsArgs,
   DistributionRecipients
 > {

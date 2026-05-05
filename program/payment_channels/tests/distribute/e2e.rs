@@ -10,6 +10,7 @@ use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 use payment_channels::PaymentChannelsError;
 use payment_channels::VOUCHER_PAYLOAD_SIZE;
 use payment_channels::ed25519;
+use payment_channels::instructions::distribute::DISCRIMINATOR;
 use payment_channels::instructions::open::DISCRIMINATOR as OPEN_DISCRIMINATOR;
 use payment_channels_client::instructions::{Settle, SettleInstructionArgs};
 use payment_channels_client::types::{DistributionRecipients, SettleArgs, VoucherArgs};
@@ -169,13 +170,9 @@ fn open_ix_data_for_splits(
     data.extend_from_slice(&deposit.to_le_bytes());
     data.extend_from_slice(&grace_period.to_le_bytes());
     data.push(splits.len() as u8);
-    for i in 0..MAX_DISTRIBUTION_RECIPIENTS {
-        if i < splits.len() {
-            data.extend_from_slice(splits[i].owner.as_ref());
-            data.extend_from_slice(&splits[i].bps.to_le_bytes());
-        } else {
-            data.extend_from_slice(&[0u8; 34]);
-        }
+    for s in splits {
+        data.extend_from_slice(s.owner.as_ref());
+        data.extend_from_slice(&s.bps.to_le_bytes());
     }
     data
 }
@@ -1009,21 +1006,27 @@ fn num_recipients_exceeds_max() {
     let settled = 100_000;
     let paid_out = 0;
     let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
-    let mut bad = s.recipients();
-    bad.count = 33;
-    let ix = build_distribute_ix(
-        &s.channel,
-        &s.payer,
-        &s.channel_ata,
-        &s.payer_ata,
-        &s.payee_ata,
-        &s.treasury_ata,
-        &s.mint,
-        &s.token_program,
-        &s.recipient_atas,
-        bad,
-    );
-    expect_custom_err(s.send(ix), PaymentChannelsError::InvalidDistributionHash);
+
+    // Manually encode instruction data with count=33 to bypass the generated
+    // U8PrefixedVec encoder. The count>32 check happens before account
+    // validation, so we can pass 0 recipient accounts.
+    let mut data = vec![DISCRIMINATOR, 33u8];
+    for _ in 0..33 {
+        data.extend_from_slice(&[0u8; 32]); // recipient
+        data.extend_from_slice(&1000u16.to_le_bytes()); // bps
+    }
+    let metas = vec![
+        AccountMeta::new(s.channel, false),
+        AccountMeta::new(s.payer, false),
+        AccountMeta::new(s.channel_ata, false),
+        AccountMeta::new(s.payer_ata, false),
+        AccountMeta::new(s.payee_ata, false),
+        AccountMeta::new(s.treasury_ata, false),
+        AccountMeta::new_readonly(s.mint, false),
+        AccountMeta::new_readonly(s.token_program, false),
+    ];
+    let ix = Instruction::new_with_bytes(PROGRAM_ID, &data, metas);
+    expect_custom_err(s.send(ix), PaymentChannelsError::InvalidRecipientCount);
 }
 
 #[test]

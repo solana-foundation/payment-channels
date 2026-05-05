@@ -193,23 +193,6 @@
       },
       {
         "kind": "definedTypeNode",
-        "name": "distributeArgs",
-        "type": {
-          "fields": [
-            {
-              "kind": "structFieldTypeNode",
-              "name": "recipients",
-              "type": {
-                "kind": "definedTypeLinkNode",
-                "name": "distributionRecipients"
-              }
-            }
-          ],
-          "kind": "structTypeNode"
-        }
-      },
-      {
-        "kind": "definedTypeNode",
         "name": "distributionEntry",
         "type": {
           "fields": [
@@ -227,83 +210,6 @@
                 "endian": "le",
                 "format": "u16",
                 "kind": "numberTypeNode"
-              }
-            }
-          ],
-          "kind": "structTypeNode"
-        }
-      },
-      {
-        "kind": "definedTypeNode",
-        "name": "distributionRecipients",
-        "type": {
-          "fields": [
-            {
-              "kind": "structFieldTypeNode",
-              "name": "count",
-              "type": {
-                "endian": "le",
-                "format": "u8",
-                "kind": "numberTypeNode"
-              }
-            },
-            {
-              "kind": "structFieldTypeNode",
-              "name": "entries",
-              "type": {
-                "count": {
-                  "kind": "fixedCountNode",
-                  "value": 32
-                },
-                "item": {
-                  "kind": "definedTypeLinkNode",
-                  "name": "distributionEntry"
-                },
-                "kind": "arrayTypeNode"
-              }
-            }
-          ],
-          "kind": "structTypeNode"
-        }
-      },
-      {
-        "kind": "definedTypeNode",
-        "name": "openArgs",
-        "type": {
-          "fields": [
-            {
-              "kind": "structFieldTypeNode",
-              "name": "salt",
-              "type": {
-                "endian": "le",
-                "format": "u64",
-                "kind": "numberTypeNode"
-              }
-            },
-            {
-              "kind": "structFieldTypeNode",
-              "name": "deposit",
-              "type": {
-                "endian": "le",
-                "format": "u64",
-                "kind": "numberTypeNode"
-              }
-            },
-            {
-              "kind": "structFieldTypeNode",
-              "name": "gracePeriod",
-              "type": {
-                "endian": "le",
-                "format": "u32",
-                "kind": "numberTypeNode"
-              }
-            },
-            {
-              "kind": "structFieldTypeNode",
-              "name": "recipients",
-              "type": {
-                "kind": "definedTypeLinkNode",
-                "name": "distributionRecipients"
               }
             }
           ],
@@ -456,6 +362,86 @@
               "name": "closedChannel"
             }
           ]
+        }
+      },
+      {
+        "kind": "definedTypeNode",
+        "name": "distributionRecipients",
+        "type": {
+          "count": {
+            "kind": "prefixedCountNode",
+            "prefix": {
+              "endian": "le",
+              "format": "u8",
+              "kind": "numberTypeNode"
+            }
+          },
+          "item": {
+            "kind": "definedTypeLinkNode",
+            "name": "distributionEntry"
+          },
+          "kind": "arrayTypeNode"
+        }
+      },
+      {
+        "kind": "definedTypeNode",
+        "name": "openArgs",
+        "type": {
+          "fields": [
+            {
+              "kind": "structFieldTypeNode",
+              "name": "salt",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "deposit",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "gracePeriod",
+              "type": {
+                "endian": "le",
+                "format": "u32",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "recipients",
+              "type": {
+                "kind": "definedTypeLinkNode",
+                "name": "distributionRecipients"
+              }
+            }
+          ],
+          "kind": "structTypeNode"
+        }
+      },
+      {
+        "kind": "definedTypeNode",
+        "name": "distributeArgs",
+        "type": {
+          "fields": [
+            {
+              "kind": "structFieldTypeNode",
+              "name": "recipients",
+              "type": {
+                "kind": "definedTypeLinkNode",
+                "name": "distributionRecipients"
+              }
+            }
+          ],
+          "kind": "structTypeNode"
         }
       }
     ],

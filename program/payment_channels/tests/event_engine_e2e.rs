@@ -44,7 +44,7 @@ fn fund(svm: &mut LiteSVM, pubkey: &Pubkey, lamports: u64) {
 
 #[test]
 fn open_emits_opened_event_with_anchor_compatible_wire_format() {
-    use payment_channels::instructions::open::{DISCRIMINATOR, MAX_DISTRIBUTION_RECIPIENTS};
+    use payment_channels::instructions::open::DISCRIMINATOR;
 
     let mut svm = LiteSVM::load_program();
     let payer = Keypair::new();
@@ -94,7 +94,6 @@ fn open_emits_opened_event_with_anchor_compatible_wire_format() {
     data.push(1u8); // num_recipients
     data.extend_from_slice(&[1u8; 32]); // recipient pubkey
     data.extend_from_slice(&5000u16.to_le_bytes()); // bps
-    data.extend_from_slice(&[0u8; (MAX_DISTRIBUTION_RECIPIENTS - 1) * 34]);
 
     let ix = Instruction::new_with_bytes(
         PROGRAM_ID,

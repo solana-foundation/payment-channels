@@ -85,6 +85,8 @@ unsafe impl Transmutable for VoucherArgs {
 pub(crate) enum PaymentChannelsInstruction<'a> {
     /// Payer-signed; creates the channel PDA, locks the deposit, and
     /// commits the distribution hash. `NONEXISTENT → OPEN`.
+    ///
+    /// Dynamic argument IDL shape is patched by `build.rs`.
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "payer", signer, writable)),
@@ -101,7 +103,7 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
         codama(account(name = "event_authority")),
         codama(account(name = "self_program"))
     )]
-    Open(#[cfg_attr(feature = "idl", codama(name = "open_args"))] &'a open::OpenArgs) = 1,
+    Open(open::OpenArgs<'a>) = 1,
 
     /// Permissionless crank: advances the on-chain
     /// [`settled`](crate::Channel::settled) watermark against a payer-signed
@@ -170,7 +172,9 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
     /// withdrawn) and tombstones the escrow ATA + the Channel PDA.
     ///
     /// Recipient token accounts are appended as remaining accounts in the
-    /// same order as the`DistributionEntry`s in the preimage.
+    /// same order as the `DistributionEntry`s in the preimage.
+    ///
+    /// Dynamic argument IDL shape is patched by `build.rs`.
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "channel", writable)),
@@ -182,10 +186,7 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
         codama(account(name = "mint")),
         codama(account(name = "token_program"))
     )]
-    Distribute(
-        #[cfg_attr(feature = "idl", codama(name = "distribute_args"))]
-        &'a distribute::DistributeArgs,
-    ) = 7,
+    Distribute(distribute::DistributeArgs<'a>) = 7,
 
     /// Payer-signed one-shot refund of [`deposit`](crate::Channel::deposit)
     /// `−` [`settled`](crate::Channel::settled) during `FINALIZED`;
@@ -248,14 +249,18 @@ mod tests {
 
     #[test]
     fn discriminators_match_variants() {
-        let open: open::OpenArgs = unsafe { core::mem::zeroed() };
         let settle: settle::SettleArgs = unsafe { core::mem::zeroed() };
         let top_up: top_up::TopUpArgs = unsafe { core::mem::zeroed() };
         let saf: settle_and_finalize::SettleAndFinalizeArgs = unsafe { core::mem::zeroed() };
-        let distribute: distribute::DistributeArgs = unsafe { core::mem::zeroed() };
+
+        // Open / Distribute contain borrowed references; build valid dummy
+        // args from borrowed slices instead of zeroed memory.
+        let open_data = [0u8; 20 + 1]; // header(20) + count(1)
+        let open = open::OpenArgs::load(&open_data).unwrap();
+        let distribute = distribute::DistributeArgs::load(&[0u8]).unwrap(); // count=0
 
         assert_eq!(
-            tag(&PaymentChannelsInstruction::Open(&open)),
+            tag(&PaymentChannelsInstruction::Open(open)),
             open::DISCRIMINATOR,
         );
         assert_eq!(
@@ -279,7 +284,7 @@ mod tests {
             finalize::DISCRIMINATOR,
         );
         assert_eq!(
-            tag(&PaymentChannelsInstruction::Distribute(&distribute)),
+            tag(&PaymentChannelsInstruction::Distribute(distribute)),
             distribute::DISCRIMINATOR,
         );
         assert_eq!(

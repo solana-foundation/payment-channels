@@ -3494,6 +3494,7 @@ dependencies = [
  "solana-cpi",
  "solana-instruction",
  "solana-program-error",
+ "spl-collections",
  "thiserror 2.0.18",
 ]
 
@@ -6640,6 +6641,15 @@ checksum = "e6433917b60441d68d99a17e121d9db0ea15a9a69c0e5afa34649cf5ba12612f"
 dependencies = [
  "solana-instruction",
  "solana-pubkey 3.0.0",
+]
+
+[[package]]
+name = "spl-collections"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32f0cbfc37c8bc4f36b42e54a4728fe8d43f9801c723cd4a9b541b6455438ea6"
+dependencies = [
+ "borsh",
 ]
 
 [[package]]
