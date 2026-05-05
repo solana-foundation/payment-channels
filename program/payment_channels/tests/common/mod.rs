@@ -7,10 +7,16 @@ pub mod token_2022;
 use litesvm::LiteSVM;
 use mollusk_svm::Mollusk;
 use payment_channels::PaymentChannelsError;
+use payment_channels::instructions::open::{
+    DISCRIMINATOR as OPEN_DISCRIMINATOR, MAX_DISTRIBUTION_RECIPIENTS,
+};
 use payment_channels::state::Channel;
 use payment_channels::state::channel::ChannelStatus;
-use solana_instruction::{Instruction, error::InstructionError};
+use solana_instruction::{AccountMeta, Instruction, error::InstructionError};
+use solana_keypair::Keypair;
 use solana_pubkey::{Pubkey, pubkey};
+use solana_signer::Signer;
+use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 
 /// Payment channels program ID.
@@ -38,6 +44,76 @@ pub fn event_authority() -> Pubkey {
 pub fn token_balance(svm: &LiteSVM, account: &Pubkey) -> u64 {
     let acct = svm.get_account(account).expect("token account exists");
     u64::from_le_bytes(acct.data[64..72].try_into().unwrap())
+}
+
+/// Opens a payment channel with a single 100% distribution recipient and
+/// returns `(channel_pda, channel_ata)`.
+#[allow(clippy::too_many_arguments)]
+pub fn open_channel(
+    svm: &mut LiteSVM,
+    payer: &Keypair,
+    payee: &Pubkey,
+    authorized_signer: &Pubkey,
+    salt: u64,
+    deposit: u64,
+    mint: &Pubkey,
+    payer_ata: &Pubkey,
+    token_program: &Pubkey,
+) -> (Pubkey, Pubkey) {
+    let (channel, _) = Pubkey::find_program_address(
+        &[
+            b"channel",
+            payer.pubkey().as_ref(),
+            payee.as_ref(),
+            mint.as_ref(),
+            authorized_signer.as_ref(),
+            &salt.to_le_bytes(),
+        ],
+        &PROGRAM_ID,
+    );
+    let (channel_ata, _) = Pubkey::find_program_address(
+        &[channel.as_ref(), token_program.as_ref(), mint.as_ref()],
+        &ATA_PROGRAM,
+    );
+    let event_auth = event_authority();
+
+    let mut data: Vec<u8> = vec![OPEN_DISCRIMINATOR];
+    data.extend_from_slice(&salt.to_le_bytes());
+    data.extend_from_slice(&deposit.to_le_bytes());
+    data.extend_from_slice(&3_600u32.to_le_bytes());
+    data.push(1u8);
+    data.extend_from_slice(&[1u8; 32]);
+    data.extend_from_slice(&5_000u16.to_le_bytes());
+    data.extend_from_slice(&[0u8; (MAX_DISTRIBUTION_RECIPIENTS - 1) * 34]);
+
+    let ix = Instruction::new_with_bytes(
+        PROGRAM_ID,
+        &data,
+        vec![
+            AccountMeta::new(payer.pubkey(), true),
+            AccountMeta::new_readonly(*payee, false),
+            AccountMeta::new_readonly(*mint, false),
+            AccountMeta::new_readonly(*authorized_signer, false),
+            AccountMeta::new(channel, false),
+            AccountMeta::new(*payer_ata, false),
+            AccountMeta::new(channel_ata, false),
+            AccountMeta::new_readonly(*token_program, false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM, false),
+            AccountMeta::new_readonly(SYSVAR_RENT, false),
+            AccountMeta::new_readonly(ATA_PROGRAM, false),
+            AccountMeta::new_readonly(event_auth, false),
+            AccountMeta::new_readonly(PROGRAM_ID, false),
+        ],
+    );
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&payer.pubkey()),
+        &[payer],
+        svm.latest_blockhash(),
+    );
+    svm.send_transaction(tx).expect("open ok");
+
+    (channel, channel_ata)
 }
 
 /// `ComputeBudgetInstruction::SetComputeUnitLimit(u32)` — variant tag 2
