@@ -687,6 +687,12 @@
         "kind": "errorNode",
         "message": "Account address mismatch",
         "name": "addressMismatch"
+      },
+      {
+        "code": 38,
+        "kind": "errorNode",
+        "message": "Payer refund has already been claimed",
+        "name": "payerAlreadyWithdrawn"
       }
     ],
     "events": [],

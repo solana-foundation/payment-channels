@@ -19,6 +19,7 @@ fn set_clock(svm: &mut LiteSVM, unix_timestamp: i64) {
     svm.set_sysvar::<Clock>(&clock);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn open_channel(
     svm: &mut LiteSVM,
     payer: &Keypair,

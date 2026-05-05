@@ -124,6 +124,9 @@ pub enum PaymentChannelsError {
     /// 37 - Account address mismatch
     #[error("Account address mismatch")]
     AddressMismatch = 0x25,
+    /// 38 - Payer refund has already been claimed
+    #[error("Payer refund has already been claimed")]
+    PayerAlreadyWithdrawn = 0x26,
 }
 
 impl From<PaymentChannelsError> for solana_program_error::ProgramError {
