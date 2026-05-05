@@ -5,9 +5,6 @@
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 use payment_channels::PaymentChannelsError;
-use payment_channels::instructions::open::{
-    DISCRIMINATOR as OPEN_DISCRIMINATOR, MAX_DISTRIBUTION_RECIPIENTS,
-};
 use payment_channels_client::instructions::{TopUp, TopUpInstructionArgs};
 use payment_channels_client::types::TopUpArgs;
 use solana_account::Account;
@@ -21,8 +18,8 @@ use solana_transaction_error::TransactionError;
 
 use crate::common::token_2022::{EXT_TRANSFER_FEE_CONFIG, add_mint_extension};
 use crate::common::{
-    ATA_PROGRAM, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM, SYSVAR_RENT, TOKEN_2022,
-    event_authority, expect_custom_err, token_balance,
+    PROGRAM_ID, ProgramLoader, SPL_TOKEN, TOKEN_2022, expect_custom_err, open_channel,
+    token_balance,
 };
 
 /// Inject a 216-byte Channel at `channel` owned by `PROGRAM_ID`.
@@ -49,74 +46,6 @@ fn seed_channel(svm: &mut LiteSVM, channel: &Pubkey, status: u8, deposit: u64, p
 fn read_deposit(svm: &LiteSVM, channel: &Pubkey) -> u64 {
     let acct = svm.get_account(channel).expect("channel exists");
     u64::from_le_bytes(acct.data[12..20].try_into().unwrap())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn open_channel(
-    svm: &mut LiteSVM,
-    payer: &Keypair,
-    payee: &Pubkey,
-    authorized_signer: &Pubkey,
-    salt: u64,
-    deposit: u64,
-    mint: &Pubkey,
-    payer_ata: &Pubkey,
-    token_program: &Pubkey,
-) -> (Pubkey, Pubkey) {
-    let (channel, _) = Pubkey::find_program_address(
-        &[
-            b"channel",
-            payer.pubkey().as_ref(),
-            payee.as_ref(),
-            mint.as_ref(),
-            authorized_signer.as_ref(),
-            &salt.to_le_bytes(),
-        ],
-        &PROGRAM_ID,
-    );
-    let (channel_ata, _) = Pubkey::find_program_address(
-        &[channel.as_ref(), token_program.as_ref(), mint.as_ref()],
-        &ATA_PROGRAM,
-    );
-    let event_auth = event_authority();
-
-    let mut data: Vec<u8> = vec![OPEN_DISCRIMINATOR];
-    data.extend_from_slice(&salt.to_le_bytes());
-    data.extend_from_slice(&deposit.to_le_bytes());
-    data.extend_from_slice(&3_600u32.to_le_bytes());
-    data.push(1u8);
-    data.extend_from_slice(&[1u8; 32]);
-    data.extend_from_slice(&5_000u16.to_le_bytes()); // bps
-    data.extend_from_slice(&[0u8; (MAX_DISTRIBUTION_RECIPIENTS - 1) * 34]);
-
-    let ix = Instruction::new_with_bytes(
-        PROGRAM_ID,
-        &data,
-        vec![
-            AccountMeta::new(payer.pubkey(), true),
-            AccountMeta::new_readonly(*payee, false),
-            AccountMeta::new_readonly(*mint, false),
-            AccountMeta::new_readonly(*authorized_signer, false),
-            AccountMeta::new(channel, false),
-            AccountMeta::new(*payer_ata, false),
-            AccountMeta::new(channel_ata, false),
-            AccountMeta::new_readonly(*token_program, false),
-            AccountMeta::new_readonly(SYSTEM_PROGRAM, false),
-            AccountMeta::new_readonly(SYSVAR_RENT, false),
-            AccountMeta::new_readonly(ATA_PROGRAM, false),
-            AccountMeta::new_readonly(event_auth, false),
-            AccountMeta::new_readonly(PROGRAM_ID, false),
-        ],
-    );
-    let tx = Transaction::new_signed_with_payer(
-        &[ix],
-        Some(&payer.pubkey()),
-        &[payer],
-        svm.latest_blockhash(),
-    );
-    svm.send_transaction(tx).expect("open ok");
-
-    (channel, channel_ata)
 }
 
 #[allow(clippy::too_many_arguments)]

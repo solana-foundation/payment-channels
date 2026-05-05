@@ -88,4 +88,6 @@ pub enum PaymentChannelsError {
     UnauthorizedPayee = 36,
     #[error("Account address mismatch")]
     AddressMismatch = 37,
+    #[error("Payer refund has already been claimed")]
+    PayerAlreadyWithdrawn = 38,
 }

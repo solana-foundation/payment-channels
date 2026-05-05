@@ -11,7 +11,7 @@ use payment_channels::PaymentChannelsError;
 use payment_channels::VOUCHER_PAYLOAD_SIZE;
 use payment_channels::ed25519;
 use payment_channels::instructions::open::DISCRIMINATOR as OPEN_DISCRIMINATOR;
-use payment_channels_client::instructions::{Settle, SettleInstructionArgs};
+use payment_channels_client::instructions::{Settle, SettleInstructionArgs, WithdrawPayer};
 use payment_channels_client::types::{DistributionRecipients, SettleArgs, VoucherArgs};
 use solana_instruction::error::InstructionError;
 use solana_instruction::{AccountMeta, Instruction};
@@ -35,7 +35,7 @@ use crate::common::token_2022::{
 use crate::common::{
     ATA_PROGRAM, INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM,
     SYSVAR_RENT, compute_budget_ix, ed25519_program_id, event_authority, expect_custom_err,
-    expect_instruction_err, token_balance,
+    expect_instruction_err, set_clock, token_balance,
 };
 
 const GRACE_PERIOD: u32 = 3600;
@@ -678,6 +678,56 @@ fn happy_path_finalized_tombstone_spl_token() {
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), 50_000);
+    assert_tombstone(&s.svm, &s.channel);
+}
+
+#[test]
+fn distribute_after_withdraw_payer_skips_payer_refund() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5000,
+    }];
+    let deposit = 200_000;
+    let settled = 150_000;
+    let mut s = Scenario::build_with_token_program(
+        splits,
+        deposit,
+        settled,
+        0,
+        STATUS_FINALIZED,
+        SPL_TOKEN,
+    );
+
+    // Advance the clock so withdraw_payer stamps a non-zero payer_withdrawn_at.
+    set_clock(&mut s.svm, 1_000_000);
+
+    // Payer claims their deposit − settled refund first.
+    let withdraw_ix = WithdrawPayer {
+        payer: s.payer_keypair.pubkey(),
+        channel: s.channel,
+        channel_token_account: s.channel_ata,
+        payer_token_account: s.payer_ata,
+        mint: s.mint,
+        token_program: s.token_program,
+    }
+    .instruction();
+    let tx = Transaction::new_signed_with_payer(
+        &[withdraw_ix],
+        Some(&s.payer_keypair.pubkey()),
+        &[&s.payer_keypair],
+        s.svm.latest_blockhash(),
+    );
+    s.svm.send_transaction(tx).expect("withdraw_payer ok");
+
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
+
+    // distribute should succeed and only pay out the settled pool —
+    // no second refund to payer.
+    s.send(s.distribute_ix()).expect("distribute ok");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
     assert_tombstone(&s.svm, &s.channel);
 }
 
