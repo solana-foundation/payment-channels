@@ -24,17 +24,14 @@ use crate::{
 /// Instruction discriminator byte for `distribute`.
 pub const DISCRIMINATOR: u8 = 7;
 
-/// Revealed distribution preimage committed at `open`.
-///
-/// Wire layout: `count(u32 LE) || entries(count × 34)`.
 #[derive(Debug, Clone, Copy)]
 pub struct DistributeArgs<'a> {
-    /// Dynamic recipient preimage; its hash must match the channel commitment.
+    /// Reveal of the plan committed at `open`. Rehashed on-chain; digest must
+    /// equal [`Channel::distribution_hash`](crate::Channel::distribution_hash).
     pub recipients: DistributionRecipients<'a>,
 }
 
 impl<'a> DistributeArgs<'a> {
-    /// Parses the dynamic `distribute` payload.
     pub fn load(data: &'a [u8]) -> Result<Self, ProgramError> {
         Ok(Self {
             recipients: DistributionRecipients::load(data)?,
@@ -173,13 +170,13 @@ pub fn process(
         .check(&channel_ctx.token_ctx)
         .map_err(|_| PaymentChannelsError::TreasuryAddressMismatch)?;
 
-    // Hash equality proves the revealed, already-loaded distribution is
-    // byte-identical to the valid plan committed by `open`.
     let digest = args.recipients.preimage_hash();
     if digest != ch.distribution_hash {
         return Err(PaymentChannelsError::InvalidDistributionHash.into());
     }
 
+    // Hash equality proves the revealed, already-loaded distribution is
+    // byte-identical to the valid plan committed by `open`.
     if accs.recipient_token_accounts.len() != args.recipients.entries.len() {
         return Err(PaymentChannelsError::RecipientAccountCountMismatch.into());
     }

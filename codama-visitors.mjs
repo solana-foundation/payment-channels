@@ -24,9 +24,6 @@ const OMIT_EMPTY_ARRAY_KEYS = new Set([
   'subInstructions',
 ]);
 
-/// Patch Codama-rs raw output for borrowed dynamic distribution args.
-/// Raw tuple enum fields are named `arg0`; generated clients need owned,
-/// public args named `openArgs` and `distributeArgs`.
 export const patchDynamicDistributionIdl = {
   visitRoot(root) {
     const program = expectProgram(root);
@@ -58,7 +55,6 @@ export const patchDynamicDistributionIdl = {
   },
 };
 
-/// Write the current root node after `before` visitors have patched it.
 export const writeCodamaIdl = (outputPath = IDL_PATH) => ({
   visitRoot(root) {
     const out = resolve(process.cwd(), outputPath);
@@ -68,7 +64,7 @@ export const writeCodamaIdl = (outputPath = IDL_PATH) => ({
   },
 });
 
-/// Idempotently add the event authority PDA so generated clients can autofill it.
+/// Derives the event authority PDA so generated clients can autofill it.
 export const addEventAuthorityPda = {
   visitRoot(root) {
     if (root?.kind !== 'rootNode' || root.program?.name !== 'paymentChannels') return root;
@@ -128,8 +124,6 @@ function expectArray(value, path) {
 }
 
 function stringifyCodamaIdl(root) {
-  // Codama normalizes imported JSON by adding default/empty fields. Strip
-  // those and sort keys so the committed IDL stays stable and low-noise.
   const idl = prune(root);
   if (idl.kind === 'rootNode' && !('additionalPrograms' in idl)) idl.additionalPrograms = [];
   return JSON.stringify(sortKeys(idl), null, 2);

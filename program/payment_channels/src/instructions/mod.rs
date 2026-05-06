@@ -85,8 +85,6 @@ unsafe impl Transmutable for VoucherArgs {
 pub(crate) enum PaymentChannelsInstruction<'a> {
     /// Payer-signed; creates the channel PDA, locks the deposit, and
     /// commits the distribution hash. `NONEXISTENT → OPEN`.
-    ///
-    /// Dynamic argument IDL shape is patched by Codama visitors.
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "payer", signer, writable)),
@@ -170,11 +168,8 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
     /// [`deposit`](crate::Channel::deposit) `−`
     /// [`settled`](crate::Channel::settled) headroom (if not already
     /// withdrawn) and tombstones the escrow ATA + the Channel PDA.
-    ///
     /// Recipient token accounts are appended as remaining accounts in the
-    /// same order as the `DistributionEntry`s in the preimage.
-    ///
-    /// Dynamic argument IDL shape is patched by Codama visitors.
+    /// same order as the`DistributionEntry`s in the preimage.
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "channel", writable)),
@@ -253,12 +248,10 @@ mod tests {
         let top_up: top_up::TopUpArgs = unsafe { core::mem::zeroed() };
         let saf: settle_and_finalize::SettleAndFinalizeArgs = unsafe { core::mem::zeroed() };
 
-        // Open / Distribute contain borrowed references; build valid dummy
-        // args from borrowed slices instead of zeroed memory.
-        let open_data = [0u8; 20 + 4]; // header(20) + count(u32)
+        let open_data = [0u8; 20 + 4];
         let open = open::OpenArgs::load(&open_data).unwrap();
         let distribute_data = 0u32.to_le_bytes();
-        let distribute = distribute::DistributeArgs::load(&distribute_data).unwrap(); // count=0
+        let distribute = distribute::DistributeArgs::load(&distribute_data).unwrap();
 
         assert_eq!(
             tag(&PaymentChannelsInstruction::Open(open)),

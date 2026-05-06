@@ -152,8 +152,6 @@ fn open_with_no_splits_succeeds() {
     assert_eq!(channel_data.len(), Channel::LEN);
     assert_eq!(channel_data[3], ChannelStatus::Open as u8);
 
-    // distribution_hash == blake3(count=0u32 LE) — locked at `open` from
-    // the canonical preimage with no entries.
     let expected: [u8; 32] = blake3::hash(&0u32.to_le_bytes()).into();
     assert_eq!(&channel_data[56..88], &expected, "distribution_hash");
 }

@@ -20,15 +20,12 @@ const BPS_DENOMINATOR: u32 = 10_000;
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct DistributionEntry {
-    /// Recipient owner address.
     pub recipient: Address,
-    /// Share in basis points, little-endian on wire.
     #[cfg_attr(feature = "idl", codama(type = number(u16)))]
     bps: [u8; 2],
 }
 
 impl DistributionEntry {
-    /// Creates an entry from host-order basis points.
     #[inline(always)]
     pub fn new(recipient: Address, bps: u16) -> Self {
         Self {
@@ -37,7 +34,6 @@ impl DistributionEntry {
         }
     }
 
-    /// Share in basis points as a host-order integer.
     #[inline(always)]
     pub fn bps(&self) -> u16 {
         u16::from_le_bytes(self.bps)
@@ -50,8 +46,6 @@ unsafe impl Transmutable for DistributionEntry {
 
 const _: () = assert!(size_of::<DistributionEntry>() == 34);
 const _: () = assert!(core::mem::align_of::<DistributionEntry>() == 1);
-
-// ---------- Distribution recipients ----------
 
 /// Borrowed zero-copy view of a validated canonical distribution preimage.
 ///
@@ -101,8 +95,6 @@ impl<'a> DistributionRecipients<'a> {
         let entries = if n == 0 {
             &[]
         } else {
-            // `DistributionEntry` is align-1, so validated instruction-data
-            // bytes can be reinterpreted as an entry slice.
             unsafe {
                 core::slice::from_raw_parts(entries_bytes.as_ptr().cast::<DistributionEntry>(), n)
             }

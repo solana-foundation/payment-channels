@@ -32,9 +32,7 @@ pub const DISCRIMINATOR: u8 = 1;
 /// [`distribute`](crate::instructions::distribute) later verifies a matching
 /// preimage before paying out splits.
 ///
-/// Wire layout: `salt(8) | deposit(8) | grace_period(4) | recipients`.
-/// `recipients` is the u32-prefixed dynamic preimage represented in the IDL
-/// by Codama visitors.
+/// Wire layout: `salt(8) | deposit(8) | grace_period(4) | count(u32 LE) | entries(count×34)`.
 #[derive(Debug, Clone, Copy)]
 pub struct OpenArgs<'a> {
     /// PDA disambiguator stored in [`Channel::salt`](crate::Channel::salt).
@@ -43,7 +41,6 @@ pub struct OpenArgs<'a> {
     deposit: [u8; 8],
     /// Grace duration, in seconds.
     grace_period: [u8; 4],
-    /// Distribution preimage committed into the channel.
     pub recipients: DistributionRecipients<'a>,
 }
 
@@ -53,30 +50,24 @@ impl<'a> OpenArgs<'a> {
     const GRACE_PERIOD_LEN: usize = core::mem::size_of::<u32>();
     const RECIPIENT_COUNT_LEN: usize = core::mem::size_of::<u32>();
 
-    /// Bytes before the dynamic recipient preimage.
     const FIXED_HEADER_LEN: usize = Self::SALT_LEN + Self::DEPOSIT_LEN + Self::GRACE_PERIOD_LEN;
-    /// Smallest valid `open` payload: fixed header plus recipient count prefix.
     const MIN_LEN: usize = Self::FIXED_HEADER_LEN + Self::RECIPIENT_COUNT_LEN;
 
-    /// PDA disambiguator stored in [`Channel::salt`](crate::Channel::salt).
     #[inline(always)]
     pub fn salt(&self) -> u64 {
         u64::from_le_bytes(self.salt)
     }
 
-    /// Initial token amount transferred into escrow at `open`.
     #[inline(always)]
     pub fn deposit(&self) -> u64 {
         u64::from_le_bytes(self.deposit)
     }
 
-    /// Grace duration, in seconds.
     #[inline(always)]
     pub fn grace_period(&self) -> u32 {
         u32::from_le_bytes(self.grace_period)
     }
 
-    /// Parses the dynamic `open` payload from instruction data.
     pub fn load(data: &'a [u8]) -> Result<Self, ProgramError> {
         if data.len() < Self::MIN_LEN {
             return Err(ProgramError::InvalidInstructionData);

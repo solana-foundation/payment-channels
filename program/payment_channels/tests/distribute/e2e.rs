@@ -1057,13 +1057,11 @@ fn num_recipients_exceeds_max() {
     let paid_out = 0;
     let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
 
-    // Manually encode instruction data with count=33. The count>32 check
-    // happens before account validation, so we can pass 0 recipient accounts.
     let mut data = vec![DISCRIMINATOR];
     data.extend_from_slice(&33u32.to_le_bytes());
     for _ in 0..33 {
-        data.extend_from_slice(&[0u8; 32]); // recipient
-        data.extend_from_slice(&1000u16.to_le_bytes()); // bps
+        data.extend_from_slice(&[0u8; 32]);
+        data.extend_from_slice(&1000u16.to_le_bytes());
     }
     let metas = vec![
         AccountMeta::new(s.channel, false),
