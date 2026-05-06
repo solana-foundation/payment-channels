@@ -101,7 +101,7 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
         codama(account(name = "event_authority")),
         codama(account(name = "self_program"))
     )]
-    Open(open::OpenArgs<'a>) = 1,
+    Open(#[cfg_attr(feature = "idl", codama(name = "open_args"))] open::OpenArgs<'a>) = 1,
 
     /// Permissionless crank: advances the on-chain
     /// [`settled`](crate::Channel::settled) watermark against a payer-signed
@@ -181,7 +181,10 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
         codama(account(name = "mint")),
         codama(account(name = "token_program"))
     )]
-    Distribute(distribute::DistributeArgs<'a>) = 7,
+    Distribute(
+        #[cfg_attr(feature = "idl", codama(name = "distribute_args"))]
+        distribute::DistributeArgs<'a>,
+    ) = 7,
 
     /// Payer-signed one-shot refund of [`deposit`](crate::Channel::deposit)
     /// `−` [`settled`](crate::Channel::settled) during `FINALIZED`;

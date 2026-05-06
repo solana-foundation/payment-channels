@@ -3,7 +3,6 @@ import { dirname, resolve } from 'node:path';
 import {
   argumentValueNode,
   arrayTypeNode,
-  constantPdaSeedNodeFromString,
   definedTypeLinkNode,
   definedTypeNode,
   instructionRemainingAccountsNode,
@@ -37,12 +36,14 @@ export const patchDynamicDistributionIdl = {
     const instructions = expectArray(program.instructions, 'program.instructions').map((ix) => {
       if (ix.name === 'open') {
         sawOpen = true;
-        return patchInstructionArg(ix, 'openArgs');
+        ensureInstructionArg(ix, 'openArgs');
+        return ix;
       }
       if (ix.name === 'distribute') {
         sawDistribute = true;
+        ensureInstructionArg(ix, 'distributeArgs');
         return {
-          ...patchInstructionArg(ix, 'distributeArgs'),
+          ...ix,
           remainingAccounts: recipientAtaTail(),
         };
       }
@@ -64,46 +65,22 @@ export const writeCodamaIdl = (outputPath = IDL_PATH) => ({
   },
 });
 
-/// Derives the event authority PDA so generated clients can autofill it.
-export const addEventAuthorityPda = {
-  visitRoot(root) {
-    if (root?.kind !== 'rootNode' || root.program?.name !== 'paymentChannels') return root;
-    const pdas = [...(root.program.pdas ?? [])];
-    if (!pdas.some((pda) => pda.name === 'eventAuthority')) {
-      pdas.push({
-        kind: 'pdaNode',
-        name: 'eventAuthority',
-        seeds: [constantPdaSeedNodeFromString('utf8', 'event_authority')],
-      });
-    }
-    return { ...root, program: { ...root.program, pdas } };
-  },
-};
-
-/// Default `eventAuthority` and `selfProgram` accounts on any ix that lists them.
+// Default `eventAuthority` and `selfProgram` accounts on any ix that lists them.
 export const setEventAuthorityAndSelfProgramDefaults = setInstructionAccountDefaultValuesVisitor([
   { account: 'eventAuthority', defaultValue: pdaValueNode('eventAuthority') },
   { account: 'selfProgram', defaultValue: programIdValueNode() },
 ]);
 
-function patchInstructionArg(ix, publicName) {
-  const patched = {
-    ...ix,
-    arguments: expectArray(ix.arguments, `${ix.name}.arguments`).map((arg) => ({ ...arg })),
-  };
-  let rewrites = 0;
-  for (const arg of patched.arguments) {
-    const linkedName = arg.type?.kind === 'definedTypeLinkNode' ? arg.type.name : undefined;
-    if ((arg.name === 'arg0' || arg.name === publicName) && linkedName === publicName) {
-      arg.name = publicName;
-      arg.type = link(publicName);
-      rewrites += 1;
-    }
+function ensureInstructionArg(ix, publicName) {
+  const matches = expectArray(ix.arguments, `${ix.name}.arguments`).filter(
+    (arg) =>
+      arg.name === publicName &&
+      arg.type?.kind === 'definedTypeLinkNode' &&
+      arg.type.name === publicName,
+  );
+  if (matches.length !== 1) {
+    throw new Error(`Codama IDL instruction ${ix.name} expected one ${publicName} argument`);
   }
-  if (rewrites !== 1) {
-    throw new Error(`Codama IDL instruction ${ix.name} rewrote ${rewrites} args for ${publicName}`);
-  }
-  return patched;
 }
 
 function upsertByName(nodes, node) {
