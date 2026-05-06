@@ -215,6 +215,7 @@ export function getDistributeInstruction<
   // Original args.
   const args = { ...input };
 
+  // Remaining accounts.
   const remainingAccounts: AccountMeta[] = args.recipientTokenAccounts.map(
     (address) => ({ address, role: AccountRole.WRITABLE }),
   );
