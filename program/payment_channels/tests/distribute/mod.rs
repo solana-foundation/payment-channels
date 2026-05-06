@@ -18,7 +18,7 @@ use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
-use crate::common::{PROGRAM_ID, ProgramLoader, SPL_TOKEN, TOKEN_2022};
+use crate::common::{PROGRAM_ID, ProgramLoader, SPL_TOKEN, TOKEN_2022, canonicalize_channel_blob};
 
 pub(super) const STATUS_OPEN: u8 = 0;
 pub(super) const STATUS_FINALIZED: u8 = 1;
@@ -121,8 +121,11 @@ impl DistributeRun {
     /// Construct with a channel blob + a single dummy split; override any
     /// field on the way to `run()`.
     pub fn new(channel_blob: Vec<u8>, payer: Pubkey, splits: &[Split]) -> Self {
+        let mut channel_blob = channel_blob;
+        let channel =
+            canonicalize_channel_blob(&mut channel_blob).unwrap_or_else(Pubkey::new_unique);
         Self {
-            channel: Pubkey::new_unique(),
+            channel,
             channel_blob,
             payer,
             channel_ata: Pubkey::new_unique(),
@@ -138,6 +141,12 @@ impl DistributeRun {
 
     pub fn run(self) -> ProgramResult {
         let mollusk = Mollusk::load_program();
+        let channel = self.channel;
+        let channel_blob = if self.channel_blob.is_empty() {
+            vec![0u8; Channel::LEN]
+        } else {
+            self.channel_blob
+        };
 
         // Borsh-encode the args manually so we don't pay the full
         // `payment_channels_client::Distribute` builder dance just to
@@ -150,7 +159,7 @@ impl DistributeRun {
         ix_data.extend_from_slice(&args_bytes);
 
         let mut metas = vec![
-            AccountMeta::new(self.channel, false),
+            AccountMeta::new(channel, false),
             AccountMeta::new(self.payer, false),
             AccountMeta::new(self.channel_ata, false),
             AccountMeta::new(self.payer_ata, false),
@@ -169,11 +178,7 @@ impl DistributeRun {
 
         let channel_account = Account {
             lamports: 10_000_000,
-            data: if self.channel_blob.is_empty() {
-                vec![0u8; Channel::LEN]
-            } else {
-                self.channel_blob
-            },
+            data: channel_blob,
             owner: PROGRAM_ID,
             executable: false,
             rent_epoch: 0,
@@ -187,7 +192,7 @@ impl DistributeRun {
             .accounts
             .iter()
             .map(|m| {
-                let acc = if m.pubkey == self.channel {
+                let acc = if m.pubkey == channel {
                     channel_account.clone()
                 } else {
                     dummy.clone()

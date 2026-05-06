@@ -117,6 +117,29 @@ fn wrong_mint_rejects() {
 }
 
 #[test]
+fn non_pda_channel_rejects_before_top_up() {
+    let payer = Pubkey::new_unique();
+    assert_eq!(
+        TopUpRun {
+            channel: Some(Pubkey::new_unique()),
+            ..TopUpRun::new(
+                payer,
+                ChannelBuilder::new()
+                    .status(ChannelStatus::Open)
+                    .deposit(DEPOSIT)
+                    .payer(payer)
+                    .build(),
+                DEPOSIT,
+            )
+        }
+        .run(),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::ChannelAddressMismatch as u32
+        )),
+    );
+}
+
+#[test]
 fn tombstoned_channel_rejects() {
     // After FINALIZED `distribute` tombstones the PDA, the channel data
     // shrinks to a 1-byte `ClosedChannel` payload (discriminator = 2).

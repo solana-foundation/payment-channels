@@ -7,7 +7,7 @@ use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
-use crate::common::{PROGRAM_ID, ProgramLoader};
+use crate::common::{PROGRAM_ID, ProgramLoader, canonicalize_channel_blob};
 
 /// Execution descriptor for a single `requestClose` Mollusk run.
 ///
@@ -36,7 +36,9 @@ impl RequestCloseRun {
 
     pub fn run_inspect(self) -> InstructionResult {
         let mollusk = Mollusk::load_program();
-        let channel_pubkey = Pubkey::new_unique();
+        let mut channel_blob = self.channel_blob;
+        let channel_pubkey =
+            canonicalize_channel_blob(&mut channel_blob).unwrap_or_else(Pubkey::new_unique);
 
         let ix = Instruction::new_with_bytes(
             PROGRAM_ID,
@@ -49,7 +51,7 @@ impl RequestCloseRun {
 
         let channel_account = Account {
             lamports: 10_000_000,
-            data: self.channel_blob,
+            data: channel_blob,
             owner: PROGRAM_ID,
             executable: false,
             rent_epoch: 0,

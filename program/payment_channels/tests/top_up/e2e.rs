@@ -18,20 +18,21 @@ use solana_transaction_error::TransactionError;
 
 use crate::common::token_2022::{EXT_TRANSFER_FEE_CONFIG, add_mint_extension};
 use crate::common::{
-    PROGRAM_ID, ProgramLoader, SPL_TOKEN, TOKEN_2022, expect_custom_err, open_channel,
-    token_balance,
+    PROGRAM_ID, ProgramLoader, SPL_TOKEN, TOKEN_2022, canonicalize_channel_blob, expect_custom_err,
+    open_channel, token_balance,
 };
 
-/// Inject a 216-byte Channel at `channel` owned by `PROGRAM_ID`.
-fn seed_channel(svm: &mut LiteSVM, channel: &Pubkey, status: u8, deposit: u64, payer: &Pubkey) {
+/// Inject a 216-byte Channel at its canonical PDA owned by `PROGRAM_ID`.
+fn seed_channel(svm: &mut LiteSVM, status: u8, deposit: u64, payer: &Pubkey) -> Pubkey {
     let mut data = vec![0u8; 216];
     data[0] = 1; // AccountDiscriminator::Channel
     data[1] = 1; // CURRENT_CHANNEL_VERSION
     data[3] = status;
     data[12..20].copy_from_slice(&deposit.to_le_bytes());
     data[88..120].copy_from_slice(&payer.to_bytes());
+    let channel = canonicalize_channel_blob(&mut data).expect("canonical channel blob");
     svm.set_account(
-        *channel,
+        channel,
         Account {
             lamports: 10_000_000,
             data,
@@ -41,6 +42,7 @@ fn seed_channel(svm: &mut LiteSVM, channel: &Pubkey, status: u8, deposit: u64, p
         },
     )
     .expect("set_account");
+    channel
 }
 
 fn read_deposit(svm: &LiteSVM, channel: &Pubkey) -> u64 {
@@ -140,8 +142,7 @@ fn top_up_zero_amount_rejects() {
     let payer = Keypair::new();
     svm.airdrop(&payer.pubkey(), 1_000_000_000).unwrap();
 
-    let channel = Pubkey::new_unique();
-    seed_channel(&mut svm, &channel, 0, 1_000_000, &payer.pubkey());
+    let channel = seed_channel(&mut svm, 0, 1_000_000, &payer.pubkey());
 
     let ix = build_top_up_ix(
         &payer.pubkey(),
@@ -170,14 +171,7 @@ fn top_up_non_open_status_rejects() {
     let payer = Keypair::new();
     svm.airdrop(&payer.pubkey(), 1_000_000_000).unwrap();
 
-    let channel = Pubkey::new_unique();
-    seed_channel(
-        &mut svm,
-        &channel,
-        1, /* Finalized */
-        1_000_000,
-        &payer.pubkey(),
-    );
+    let channel = seed_channel(&mut svm, 1 /* Finalized */, 1_000_000, &payer.pubkey());
 
     let ix = build_top_up_ix(
         &payer.pubkey(),
@@ -207,8 +201,7 @@ fn top_up_wrong_payer_rejects() {
     let bob = Keypair::new(); // unauthorized caller
     svm.airdrop(&bob.pubkey(), 1_000_000_000).unwrap();
 
-    let channel = Pubkey::new_unique();
-    seed_channel(&mut svm, &channel, 0, 1_000_000, &alice.pubkey());
+    let channel = seed_channel(&mut svm, 0, 1_000_000, &alice.pubkey());
 
     let ix = build_top_up_ix(
         &bob.pubkey(),
@@ -360,8 +353,7 @@ fn top_up_unsigned_payer_rejects() {
     let channel_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 1_000_000_000).unwrap();
 
-    let channel = Pubkey::new_unique();
-    seed_channel(&mut svm, &channel, 0, 1_000_000, &channel_payer.pubkey());
+    let channel = seed_channel(&mut svm, 0, 1_000_000, &channel_payer.pubkey());
 
     let mut data = vec![3u8]; // DISCRIMINATOR
     data.extend_from_slice(&50_000u64.to_le_bytes());

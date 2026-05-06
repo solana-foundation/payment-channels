@@ -17,20 +17,19 @@ use solana_transaction::Transaction;
 
 mod common;
 use common::{
-    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, compute_budget_ix, ed25519_program_id,
-    expect_custom_err,
+    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, canonicalize_channel_blob, compute_budget_ix,
+    ed25519_program_id, expect_custom_err,
 };
 
-/// Seed a `Channel` PDA (208-byte `#[repr(C, packed)]` layout) owned by the
+/// Seed a canonical `Channel` PDA (216-byte layout) owned by the
 /// program. Only the fields `settle` reads are non-zero.
 fn seed_channel(
     svm: &mut LiteSVM,
-    channel: &Pubkey,
     status: u8,
     deposit: u64,
     settled: u64,
     authorized_signer: &Pubkey,
-) {
+) -> Pubkey {
     let mut data = vec![0u8; 216];
     data[0] = 1; // AccountDiscriminator::Channel
     data[1] = 1; // CURRENT_CHANNEL_VERSION
@@ -39,9 +38,10 @@ fn seed_channel(
     data[12..20].copy_from_slice(&deposit.to_le_bytes());
     data[20..28].copy_from_slice(&settled.to_le_bytes());
     data[152..184].copy_from_slice(&authorized_signer.to_bytes());
+    let channel = canonicalize_channel_blob(&mut data).expect("canonical channel blob");
 
     svm.set_account(
-        *channel,
+        channel,
         Account {
             lamports: 10_000_000,
             data,
@@ -51,6 +51,7 @@ fn seed_channel(
         },
     )
     .expect("set_account");
+    channel
 }
 
 /// Borsh-serialize the client `VoucherArgs`. The on-chain struct's field
@@ -125,8 +126,7 @@ fn settle_advances_watermark_on_valid_voucher() {
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
     let signer = Keypair::new();
-    let channel = Pubkey::new_unique();
-    seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
+    let channel = seed_channel(&mut svm, 0, 1_000_000, 0, &signer.pubkey());
 
     let cumulative = 500_000u64;
     let voucher = VoucherArgs {
@@ -159,8 +159,7 @@ fn settle_batches_two_paired_ix_advance_watermark() {
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
     let signer = Keypair::new();
-    let channel = Pubkey::new_unique();
-    seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
+    let channel = seed_channel(&mut svm, 0, 1_000_000, 0, &signer.pubkey());
 
     let voucher_1 = VoucherArgs {
         channel_id: channel,
@@ -207,8 +206,7 @@ fn settle_without_preceding_ed25519_ix_rejects() {
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
     let signer = Keypair::new();
-    let channel = Pubkey::new_unique();
-    seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
+    let channel = seed_channel(&mut svm, 0, 1_000_000, 0, &signer.pubkey());
 
     let settle_ix = build_settle_ix(
         &channel,
@@ -238,9 +236,8 @@ fn settle_on_non_open_status_rejects() {
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
     let signer = Keypair::new();
-    let channel = Pubkey::new_unique();
     // status = 1 (Finalized)
-    seed_channel(&mut svm, &channel, 1, 1_000_000, 0, &signer.pubkey());
+    let channel = seed_channel(&mut svm, 1, 1_000_000, 0, &signer.pubkey());
 
     let cumulative = 500_000u64;
     let voucher = VoucherArgs {
@@ -274,8 +271,7 @@ fn settle_after_expiry_rejects() {
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
     let signer = Keypair::new();
-    let channel = Pubkey::new_unique();
-    seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
+    let channel = seed_channel(&mut svm, 0, 1_000_000, 0, &signer.pubkey());
 
     // Pin `now >= expires_at` by warping the Clock sysvar to the
     // voucher's TTL. `verify_voucher` rejects on `>=`, so equality
@@ -316,9 +312,8 @@ fn settle_voucher_channel_mismatch_rejects() {
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
     let signer = Keypair::new();
-    let channel_a = Pubkey::new_unique();
+    let channel_a = seed_channel(&mut svm, 0, 1_000_000, 0, &signer.pubkey());
     let channel_b = Pubkey::new_unique();
-    seed_channel(&mut svm, &channel_a, 0, 1_000_000, 0, &signer.pubkey());
 
     let voucher = VoucherArgs {
         channel_id: channel_b,
@@ -351,8 +346,7 @@ fn settle_voucher_over_deposit_rejects() {
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
     let signer = Keypair::new();
-    let channel = Pubkey::new_unique();
-    seed_channel(&mut svm, &channel, 0, 500_000, 0, &signer.pubkey());
+    let channel = seed_channel(&mut svm, 0, 500_000, 0, &signer.pubkey());
 
     let voucher = VoucherArgs {
         channel_id: channel,
@@ -385,8 +379,7 @@ fn settle_voucher_not_monotonic_rejects() {
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
     let signer = Keypair::new();
-    let channel = Pubkey::new_unique();
-    seed_channel(&mut svm, &channel, 0, 1_000_000, 500_000, &signer.pubkey());
+    let channel = seed_channel(&mut svm, 0, 1_000_000, 500_000, &signer.pubkey());
 
     let voucher = VoucherArgs {
         channel_id: channel,
@@ -419,8 +412,7 @@ fn settle_voucher_message_mismatch_rejects() {
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
     let signer = Keypair::new();
-    let channel = Pubkey::new_unique();
-    seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
+    let channel = seed_channel(&mut svm, 0, 1_000_000, 0, &signer.pubkey());
 
     // Sign one payload but submit a different `VoucherArgs`. Both cumulative
     // values pass cap/monotonicity, so only the message check can fire.
@@ -461,8 +453,7 @@ fn settle_voucher_signer_mismatch_rejects() {
 
     let authorized = Keypair::new();
     let impostor = Keypair::new();
-    let channel = Pubkey::new_unique();
-    seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &authorized.pubkey());
+    let channel = seed_channel(&mut svm, 0, 1_000_000, 0, &authorized.pubkey());
 
     let voucher = VoucherArgs {
         channel_id: channel,
@@ -495,8 +486,7 @@ fn settle_malformed_ed25519_ix_rejects() {
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
     let signer = Keypair::new();
-    let channel = Pubkey::new_unique();
-    seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
+    let channel = seed_channel(&mut svm, 0, 1_000_000, 0, &signer.pubkey());
 
     let voucher = VoucherArgs {
         channel_id: channel,
@@ -533,8 +523,7 @@ fn settle_preceding_compute_budget_ix_rejects() {
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
     let signer = Keypair::new();
-    let channel = Pubkey::new_unique();
-    seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
+    let channel = seed_channel(&mut svm, 0, 1_000_000, 0, &signer.pubkey());
 
     let voucher = VoucherArgs {
         channel_id: channel,
@@ -575,8 +564,7 @@ fn settle_with_invalid_signature_rejects_before_settle_runs() {
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
 
     let signer = Keypair::new();
-    let channel = Pubkey::new_unique();
-    seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
+    let channel = seed_channel(&mut svm, 0, 1_000_000, 0, &signer.pubkey());
 
     let voucher = VoucherArgs {
         channel_id: channel,

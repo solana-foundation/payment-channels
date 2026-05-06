@@ -13,7 +13,7 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-use crate::common::{PROGRAM_ID, ProgramLoader, expect_custom_err};
+use crate::common::{PROGRAM_ID, ProgramLoader, canonicalize_channel_blob, expect_custom_err};
 
 const CLOSURE_STARTED_AT: i64 = 1_000_000;
 const GRACE_PERIOD: u32 = 3_600;
@@ -21,19 +21,19 @@ const DEADLINE: i64 = CLOSURE_STARTED_AT + GRACE_PERIOD as i64; // 1_003_600
 
 fn seed_channel(
     svm: &mut LiteSVM,
-    channel: &Pubkey,
     status: ChannelStatus,
     closure_started_at: i64,
     grace_period: u32,
-) {
+) -> Pubkey {
     let mut data = vec![0u8; 216];
     data[0] = 1; // AccountDiscriminator::Channel
     data[1] = 1; // CURRENT_CHANNEL_VERSION
     data[3] = status as u8;
     data[36..44].copy_from_slice(&closure_started_at.to_le_bytes());
     data[52..56].copy_from_slice(&grace_period.to_le_bytes());
+    let channel = canonicalize_channel_blob(&mut data).expect("canonical channel blob");
     svm.set_account(
-        *channel,
+        channel,
         Account {
             lamports: 10_000_000,
             data,
@@ -43,6 +43,7 @@ fn seed_channel(
         },
     )
     .expect("set_account");
+    channel
 }
 
 fn set_clock(svm: &mut LiteSVM, unix_timestamp: i64) {
@@ -76,10 +77,8 @@ fn mid_grace_rejects() {
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 1_000_000_000).unwrap();
 
-    let channel = Pubkey::new_unique();
-    seed_channel(
+    let channel = seed_channel(
         &mut svm,
-        &channel,
         ChannelStatus::Closing,
         CLOSURE_STARTED_AT,
         GRACE_PERIOD,
@@ -98,10 +97,8 @@ fn at_exact_deadline_succeeds() {
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 1_000_000_000).unwrap();
 
-    let channel = Pubkey::new_unique();
-    seed_channel(
+    let channel = seed_channel(
         &mut svm,
-        &channel,
         ChannelStatus::Closing,
         CLOSURE_STARTED_AT,
         GRACE_PERIOD,
@@ -121,10 +118,8 @@ fn post_grace_transitions_and_clears_timestamp() {
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 1_000_000_000).unwrap();
 
-    let channel = Pubkey::new_unique();
-    seed_channel(
+    let channel = seed_channel(
         &mut svm,
-        &channel,
         ChannelStatus::Closing,
         CLOSURE_STARTED_AT,
         GRACE_PERIOD,

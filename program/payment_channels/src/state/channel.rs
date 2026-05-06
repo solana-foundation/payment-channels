@@ -213,8 +213,14 @@ impl Channel {
         if !account.owned_by(&crate::ID) {
             return Err(ProgramError::InvalidAccountOwner);
         }
+        let account_address = *account.address();
         let data = account.try_borrow()?;
-        Ref::try_map(data, Self::load).map_err(|(_, e)| e)
+        Ref::try_map(data, |bytes| {
+            let channel = Self::load(bytes)?;
+            Self::validate_pda(&account_address, channel)?;
+            Ok(channel)
+        })
+        .map_err(|(_, e)| e)
     }
 
     pub fn from_account_mut<'a>(
@@ -223,8 +229,14 @@ impl Channel {
         if !account.owned_by(&crate::ID) {
             return Err(ProgramError::InvalidAccountOwner);
         }
+        let account_address = *account.address();
         let data = account.try_borrow_mut()?;
-        RefMut::try_map(data, Self::load_mut).map_err(|(_, e)| e)
+        RefMut::try_map(data, |bytes| {
+            let channel = Self::load_mut(bytes)?;
+            Self::validate_pda(&account_address, channel)?;
+            Ok(channel)
+        })
+        .map_err(|(_, e)| e)
     }
 
     /// Write all fields into a freshly-allocated account buffer.
@@ -286,6 +298,20 @@ impl Channel {
         }
         Ok(())
     }
+
+    fn validate_pda(account_address: &Address, channel: &Self) -> Result<(), ProgramError> {
+        let (expected_address, expected_bump) = Self::find_pda(
+            &channel.payer,
+            &channel.payee,
+            &channel.mint,
+            &channel.authorized_signer,
+            channel.salt(),
+        );
+        if account_address != &expected_address || channel.bump != expected_bump {
+            return Err(PaymentChannelsError::ChannelAddressMismatch.into());
+        }
+        Ok(())
+    }
 }
 
 unsafe impl Transmutable for Channel {
@@ -298,13 +324,82 @@ const _: () = {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
+    use core::{mem, ptr};
+    use pinocchio::account::{NOT_BORROWED, RuntimeAccount};
+    use std::vec;
+    use std::vec::Vec;
+
     use super::*;
+
+    struct TestAccount {
+        account: AccountView,
+        _backing: Vec<u64>,
+    }
 
     fn valid_bytes() -> [u8; Channel::LEN] {
         let mut bytes = [0u8; Channel::LEN];
         bytes[0] = AccountDiscriminator::Channel as u8;
         bytes[1] = CURRENT_CHANNEL_VERSION;
         bytes
+    }
+
+    fn initialized_channel_bytes() -> ([u8; Channel::LEN], Address, u8) {
+        let payer = Address::new_from_array([1u8; 32]);
+        let payee = Address::new_from_array([2u8; 32]);
+        let mint = Address::new_from_array([3u8; 32]);
+        let authorized_signer = Address::new_from_array([4u8; 32]);
+        let salt = 42;
+        let (channel_address, bump) =
+            Channel::find_pda(&payer, &payee, &mint, &authorized_signer, salt);
+        let mut bytes = [0u8; Channel::LEN];
+        Channel::init_at(
+            &mut bytes,
+            bump,
+            salt,
+            1,
+            0,
+            [0u8; 32],
+            payer,
+            payee,
+            authorized_signer,
+            mint,
+        )
+        .expect("channel init");
+        (bytes, channel_address, bump)
+    }
+
+    fn test_account(address: Address, data: &[u8]) -> TestAccount {
+        let header_size = mem::size_of::<RuntimeAccount>();
+        let total_size = header_size + data.len();
+        let mut backing = vec![0u64; total_size.div_ceil(mem::size_of::<u64>())];
+        let account_ptr = backing.as_mut_ptr().cast::<RuntimeAccount>();
+        unsafe {
+            ptr::write(
+                account_ptr,
+                RuntimeAccount {
+                    borrow_state: NOT_BORROWED,
+                    is_signer: 0,
+                    is_writable: 1,
+                    executable: 0,
+                    padding: [0u8; 4],
+                    address,
+                    owner: crate::ID,
+                    lamports: 10_000_000,
+                    data_len: data.len() as u64,
+                },
+            );
+            ptr::copy_nonoverlapping(
+                data.as_ptr(),
+                account_ptr.cast::<u8>().add(header_size),
+                data.len(),
+            );
+            TestAccount {
+                account: AccountView::new_unchecked(account_ptr),
+                _backing: backing,
+            }
+        }
     }
 
     #[test]
@@ -340,5 +435,35 @@ mod tests {
     fn load_accepts_valid_header() {
         let bytes = valid_bytes();
         assert!(Channel::load(&bytes).is_ok());
+    }
+
+    #[test]
+    fn from_account_accepts_canonical_pda_and_bump() {
+        let (bytes, channel_address, _) = initialized_channel_bytes();
+        let account = test_account(channel_address, &bytes);
+
+        let channel = Channel::from_account(&account.account).expect("canonical channel loads");
+        assert_eq!(channel.salt(), 42);
+    }
+
+    #[test]
+    fn from_account_rejects_non_pda_address() {
+        let (bytes, _, _) = initialized_channel_bytes();
+        let account = test_account(Address::new_from_array([9u8; 32]), &bytes);
+
+        let err = Channel::from_account(&account.account).err().unwrap();
+        assert_eq!(err, PaymentChannelsError::ChannelAddressMismatch.into());
+    }
+
+    #[test]
+    fn from_account_mut_rejects_noncanonical_bump() {
+        let (mut bytes, channel_address, bump) = initialized_channel_bytes();
+        bytes[2] = bump.wrapping_add(1);
+        let mut account = test_account(channel_address, &bytes);
+
+        let err = Channel::from_account_mut(&mut account.account)
+            .err()
+            .unwrap();
+        assert_eq!(err, PaymentChannelsError::ChannelAddressMismatch.into());
     }
 }

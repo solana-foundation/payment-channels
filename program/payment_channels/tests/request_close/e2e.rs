@@ -12,17 +12,18 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-use crate::common::{PROGRAM_ID, ProgramLoader};
+use crate::common::{PROGRAM_ID, ProgramLoader, canonicalize_channel_blob};
 
-/// Inject a 216-byte Channel at `channel` owned by `PROGRAM_ID`.
-fn seed_channel(svm: &mut LiteSVM, channel: &Pubkey, status: ChannelStatus, payer: &Pubkey) {
+/// Inject a 216-byte Channel at its canonical PDA owned by `PROGRAM_ID`.
+fn seed_channel(svm: &mut LiteSVM, status: ChannelStatus, payer: &Pubkey) -> Pubkey {
     let mut data = vec![0u8; 216];
     data[0] = 1; // AccountDiscriminator::Channel
     data[1] = 1; // CURRENT_CHANNEL_VERSION
     data[3] = status as u8;
     data[88..120].copy_from_slice(&payer.to_bytes());
+    let channel = canonicalize_channel_blob(&mut data).expect("canonical channel blob");
     svm.set_account(
-        *channel,
+        channel,
         Account {
             lamports: 10_000_000,
             data,
@@ -32,6 +33,7 @@ fn seed_channel(svm: &mut LiteSVM, channel: &Pubkey, status: ChannelStatus, paye
         },
     )
     .expect("set_account");
+    channel
 }
 
 fn read_channel(svm: &LiteSVM, channel: &Pubkey) -> Vec<u8> {
@@ -52,8 +54,7 @@ fn request_close_marks_closing_and_stamps_now() {
     let payer = Keypair::new();
     svm.airdrop(&payer.pubkey(), 1_000_000_000).unwrap();
 
-    let channel = Pubkey::new_unique();
-    seed_channel(&mut svm, &channel, ChannelStatus::Open, &payer.pubkey());
+    let channel = seed_channel(&mut svm, ChannelStatus::Open, &payer.pubkey());
 
     let pre_clock_ts = svm.get_sysvar::<solana_clock::Clock>().unix_timestamp;
 

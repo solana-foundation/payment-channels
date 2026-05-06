@@ -8,7 +8,7 @@ use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
-use crate::common::{PROGRAM_ID, ProgramLoader, SPL_TOKEN};
+use crate::common::{PROGRAM_ID, ProgramLoader, SPL_TOKEN, canonicalize_channel_blob};
 
 pub(super) const DEPOSIT: u64 = 1_000_000;
 
@@ -20,6 +20,9 @@ pub(super) struct TopUpRun {
     pub payer: Pubkey,
     /// Whether `payer` is marked as a signer in the account metas.
     pub is_signer: bool,
+    /// Optional channel account pubkey override. Defaults to the canonical PDA
+    /// derived from `channel_blob`.
+    pub channel: Option<Pubkey>,
     pub channel_blob: Vec<u8>,
     /// Mint pubkey passed as account 4. Defaults to a random pubkey.
     pub mint: Pubkey,
@@ -36,6 +39,7 @@ impl TopUpRun {
         Self {
             payer,
             is_signer: true,
+            channel: None,
             channel_blob,
             mint: Pubkey::new_unique(),
             channel_ata: Pubkey::new_unique(),
@@ -46,7 +50,11 @@ impl TopUpRun {
 
     pub fn run(self) -> ProgramResult {
         let mollusk = Mollusk::load_program();
-        let channel_pubkey = Pubkey::new_unique();
+        let mut channel_blob = self.channel_blob;
+        let canonical_channel = canonicalize_channel_blob(&mut channel_blob);
+        let channel_pubkey = self
+            .channel
+            .unwrap_or_else(|| canonical_channel.unwrap_or_else(Pubkey::new_unique));
 
         let mut ix_data = vec![DISCRIMINATOR];
         ix_data.extend_from_slice(
@@ -71,7 +79,7 @@ impl TopUpRun {
 
         let channel_account = Account {
             lamports: 10_000_000,
-            data: self.channel_blob,
+            data: channel_blob,
             owner: PROGRAM_ID,
             executable: false,
             rent_epoch: 0,

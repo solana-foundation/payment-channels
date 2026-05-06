@@ -16,7 +16,7 @@ use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
-use crate::common::{PROGRAM_ID, ProgramLoader, SPL_TOKEN};
+use crate::common::{PROGRAM_ID, ProgramLoader, SPL_TOKEN, canonicalize_channel_blob};
 
 /// Execution descriptor for a single `withdrawPayer` Mollusk run.
 ///
@@ -48,7 +48,13 @@ impl WithdrawPayerRun {
 
     pub fn run(self) -> ProgramResult {
         let mollusk = Mollusk::load_program();
-        let channel_pubkey = Pubkey::new_unique();
+        let mut channel_blob = if self.channel_blob.is_empty() {
+            vec![0u8; Channel::LEN]
+        } else {
+            self.channel_blob
+        };
+        let channel_pubkey =
+            canonicalize_channel_blob(&mut channel_blob).unwrap_or_else(Pubkey::new_unique);
 
         let ix = Instruction::new_with_bytes(
             PROGRAM_ID,
@@ -65,11 +71,7 @@ impl WithdrawPayerRun {
 
         let channel_account = Account {
             lamports: 10_000_000,
-            data: if self.channel_blob.is_empty() {
-                vec![0u8; Channel::LEN]
-            } else {
-                self.channel_blob
-            },
+            data: channel_blob,
             owner: PROGRAM_ID,
             executable: false,
             rent_epoch: 0,

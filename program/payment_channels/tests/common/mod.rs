@@ -47,6 +47,41 @@ pub fn token_balance(svm: &LiteSVM, account: &Pubkey) -> u64 {
     u64::from_le_bytes(acct.data[64..72].try_into().unwrap())
 }
 
+pub fn channel_pda(
+    payer: &Pubkey,
+    payee: &Pubkey,
+    mint: &Pubkey,
+    authorized_signer: &Pubkey,
+    salt: u64,
+) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[
+            b"channel",
+            payer.as_ref(),
+            payee.as_ref(),
+            mint.as_ref(),
+            authorized_signer.as_ref(),
+            &salt.to_le_bytes(),
+        ],
+        &PROGRAM_ID,
+    )
+}
+
+pub fn canonicalize_channel_blob(data: &mut [u8]) -> Option<Pubkey> {
+    if data.len() != Channel::LEN {
+        return None;
+    }
+
+    let salt = u64::from_le_bytes(data[4..12].try_into().ok()?);
+    let payer = Pubkey::new_from_array(data[88..120].try_into().ok()?);
+    let payee = Pubkey::new_from_array(data[120..152].try_into().ok()?);
+    let authorized_signer = Pubkey::new_from_array(data[152..184].try_into().ok()?);
+    let mint = Pubkey::new_from_array(data[184..216].try_into().ok()?);
+    let (channel, bump) = channel_pda(&payer, &payee, &mint, &authorized_signer, salt);
+    data[2] = bump;
+    Some(channel)
+}
+
 pub fn set_clock(svm: &mut LiteSVM, unix_timestamp: i64) {
     let mut clock = svm.get_sysvar::<Clock>();
     clock.unix_timestamp = unix_timestamp;
@@ -67,17 +102,7 @@ pub fn open_channel(
     payer_ata: &Pubkey,
     token_program: &Pubkey,
 ) -> (Pubkey, Pubkey) {
-    let (channel, _) = Pubkey::find_program_address(
-        &[
-            b"channel",
-            payer.pubkey().as_ref(),
-            payee.as_ref(),
-            mint.as_ref(),
-            authorized_signer.as_ref(),
-            &salt.to_le_bytes(),
-        ],
-        &PROGRAM_ID,
-    );
+    let (channel, _) = channel_pda(&payer.pubkey(), payee, mint, authorized_signer, salt);
     let (channel_ata, _) = Pubkey::find_program_address(
         &[channel.as_ref(), token_program.as_ref(), mint.as_ref()],
         &ATA_PROGRAM,
@@ -206,6 +231,7 @@ pub fn expect_instruction_err(
 
 /// Builds a [`Channel`] account blob for use in Mollusk integration tests.
 pub struct ChannelBuilder {
+    salt: u64,
     status: ChannelStatus,
     deposit: u64,
     settled: u64,
@@ -221,6 +247,7 @@ pub struct ChannelBuilder {
 impl ChannelBuilder {
     pub fn new() -> Self {
         Self {
+            salt: 0,
             status: ChannelStatus::Open,
             deposit: 0,
             settled: 0,
@@ -232,6 +259,11 @@ impl ChannelBuilder {
             authorized_signer: Pubkey::default(),
             mint: Pubkey::default(),
         }
+    }
+
+    pub fn salt(mut self, salt: u64) -> Self {
+        self.salt = salt;
+        self
     }
 
     pub fn status(mut self, status: ChannelStatus) -> Self {
@@ -289,6 +321,7 @@ impl ChannelBuilder {
         data[0] = 1; // AccountDiscriminator::Channel
         data[1] = 1; // CURRENT_CHANNEL_VERSION
         data[3] = self.status as u8;
+        data[4..12].copy_from_slice(&self.salt.to_le_bytes());
         data[12..20].copy_from_slice(&self.deposit.to_le_bytes());
         data[20..28].copy_from_slice(&self.settled.to_le_bytes());
         data[36..44].copy_from_slice(&self.closure_started_at.to_le_bytes());
@@ -298,6 +331,7 @@ impl ChannelBuilder {
         data[120..152].copy_from_slice(&self.payee.to_bytes());
         data[152..184].copy_from_slice(&self.authorized_signer.to_bytes());
         data[184..216].copy_from_slice(&self.mint.to_bytes());
+        canonicalize_channel_blob(&mut data).expect("valid channel builder blob");
         data
     }
 }

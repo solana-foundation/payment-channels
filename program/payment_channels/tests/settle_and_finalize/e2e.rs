@@ -17,7 +17,8 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 
 use crate::common::{
-    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, ed25519_program_id, expect_custom_err,
+    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, canonicalize_channel_blob, ed25519_program_id,
+    expect_custom_err,
 };
 
 /// Inject a 216-byte Channel owned by PROGRAM_ID.
@@ -29,7 +30,6 @@ use crate::common::{
 #[allow(clippy::too_many_arguments)]
 fn seed_channel(
     svm: &mut LiteSVM,
-    channel: &Pubkey,
     status: ChannelStatus,
     deposit: u64,
     settled: u64,
@@ -37,7 +37,7 @@ fn seed_channel(
     grace_period: u32,
     payee: &Pubkey,
     authorized_signer: &Pubkey,
-) {
+) -> Pubkey {
     let mut data = vec![0u8; 216];
     data[0] = 1; // AccountDiscriminator::Channel
     data[1] = 1; // CURRENT_CHANNEL_VERSION
@@ -48,8 +48,9 @@ fn seed_channel(
     data[52..56].copy_from_slice(&grace_period.to_le_bytes());
     data[120..152].copy_from_slice(&payee.to_bytes());
     data[152..184].copy_from_slice(&authorized_signer.to_bytes());
+    let channel = canonicalize_channel_blob(&mut data).expect("canonical channel blob");
     svm.set_account(
-        *channel,
+        channel,
         Account {
             lamports: 10_000_000,
             data,
@@ -59,6 +60,7 @@ fn seed_channel(
         },
     )
     .expect("set_account");
+    channel
 }
 
 fn read_status(svm: &LiteSVM, channel: &Pubkey) -> u8 {
@@ -128,10 +130,8 @@ fn open_to_finalized_with_voucher() {
 
     let merchant = Keypair::new();
     let authorized_signer = Keypair::new();
-    let channel = Pubkey::new_unique();
-    seed_channel(
+    let channel = seed_channel(
         &mut svm,
-        &channel,
         ChannelStatus::Open,
         1_000_000,
         0,
@@ -188,10 +188,8 @@ fn with_voucher_expired_rejects() {
 
     let merchant = Keypair::new();
     let authorized_signer = Keypair::new();
-    let channel = Pubkey::new_unique();
-    seed_channel(
+    let channel = seed_channel(
         &mut svm,
-        &channel,
         ChannelStatus::Open,
         1_000_000,
         0,
@@ -240,10 +238,8 @@ fn with_voucher_wrong_authorized_signer_rejects() {
     let merchant = Keypair::new();
     let authorized_signer = Keypair::new();
     let impostor_signer = Keypair::new();
-    let channel = Pubkey::new_unique();
-    seed_channel(
+    let channel = seed_channel(
         &mut svm,
-        &channel,
         ChannelStatus::Open,
         1_000_000,
         0,
