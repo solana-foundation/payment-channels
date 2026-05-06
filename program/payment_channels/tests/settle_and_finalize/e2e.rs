@@ -173,6 +173,59 @@ fn open_to_finalized_with_voucher() {
     assert_eq!(read_closure_started_at(&svm, &channel), 0);
 }
 
+#[test]
+fn open_to_finalized_with_already_applied_final_voucher() {
+    let mut svm = LiteSVM::load_program();
+    let fee_payer = Keypair::new();
+    svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
+
+    let merchant = Keypair::new();
+    let authorized_signer = Keypair::new();
+    let channel = Pubkey::new_unique();
+    let cumulative = 600_000u64;
+    seed_channel(
+        &mut svm,
+        &channel,
+        ChannelStatus::Open,
+        1_000_000,
+        cumulative,
+        0,
+        0,
+        &merchant.pubkey(),
+        &authorized_signer.pubkey(),
+    );
+
+    let voucher = VoucherArgs {
+        channel_id: channel,
+        cumulative_amount: cumulative,
+        expires_at: 0,
+    };
+    let payload = voucher_payload(&voucher);
+    let signature: [u8; 64] = authorized_signer.sign_message(&payload).into();
+
+    let ed25519_ix = build_ed25519_ix(&authorized_signer.pubkey().to_bytes(), &signature, &payload);
+    let saf_ix = build_saf_ix(
+        &channel,
+        SettleAndFinalizeArgs {
+            voucher,
+            has_voucher: 1,
+        },
+        &merchant.pubkey(),
+    );
+
+    let tx = Transaction::new_signed_with_payer(
+        &[ed25519_ix, saf_ix],
+        Some(&fee_payer.pubkey()),
+        &[&fee_payer, &merchant],
+        svm.latest_blockhash(),
+    );
+    svm.send_transaction(tx).expect("tx ok");
+
+    assert_eq!(read_status(&svm, &channel), ChannelStatus::Finalized as u8);
+    assert_eq!(read_settled(&svm, &channel), cumulative);
+    assert_eq!(read_closure_started_at(&svm, &channel), 0);
+}
+
 // ─── error paths ─────────────────────────────────────────────────────────────
 
 #[test]

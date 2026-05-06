@@ -9,7 +9,7 @@ use pinocchio::{
 
 use crate::errors::PaymentChannelsError;
 use crate::instructions::VoucherArgs;
-use crate::instructions::helpers::voucher::verify_voucher;
+use crate::instructions::helpers::voucher::{WatermarkRule, verify_voucher};
 use crate::state::channel::{Channel, ChannelStatus};
 use crate::state::{Transmutable, load};
 
@@ -86,6 +86,7 @@ pub fn process(
         &args.voucher,
         accs.instructions_sysvar,
         now,
+        WatermarkRule::StrictIncrease,
     )?;
 
     ch.set_settled(new_watermark);

@@ -9,7 +9,7 @@ use pinocchio::{
 
 use crate::errors::PaymentChannelsError;
 use crate::instructions::VoucherArgs;
-use crate::instructions::helpers::voucher::verify_voucher;
+use crate::instructions::helpers::voucher::{WatermarkRule, verify_voucher};
 use crate::state::channel::{Channel, ChannelStatus};
 use crate::state::{Transmutable, load};
 
@@ -24,7 +24,8 @@ pub const DISCRIMINATOR: u8 = 4;
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct SettleAndFinalizeArgs {
     /// Final voucher when [`Self::has_voucher`] == 1; ignored otherwise.
-    /// Same freshness and monotonicity rules as `settle`.
+    /// Same freshness rules as `settle`, but the watermark guard is
+    /// inclusive so an already-applied final voucher can still finalize.
     pub voucher: VoucherArgs,
     /// Option tag: `0` skips the voucher (lock whatever is already in
     /// [`settled`](crate::Channel::settled)), `1` applies [`Self::voucher`]
@@ -120,6 +121,7 @@ pub fn process(
             &args.voucher,
             accs.instructions_sysvar,
             now,
+            WatermarkRule::FinalInclusive,
         )?;
         ch.set_settled(new_watermark);
     }

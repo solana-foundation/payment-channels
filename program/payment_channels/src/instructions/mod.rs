@@ -27,10 +27,10 @@ use crate::state::Transmutable;
 pub struct VoucherArgs {
     /// Replay scope; must equal the [`Channel`](crate::Channel) PDA.
     pub channel_id: Address,
-    /// Monotonic watermark. Must satisfy
+    /// Monotonic watermark. `settle` requires
     /// [`settled`](crate::Channel::settled) `< cumulative_amount ≤`
-    /// [`deposit`](crate::Channel::deposit); the strict increase also
-    /// serves as the implicit nonce.
+    /// [`deposit`](crate::Channel::deposit), while `settleAndFinalize`
+    /// also accepts equality for an already-applied final voucher.
     #[cfg_attr(feature = "idl", codama(type = number(u64)))]
     cumulative_amount: [u8; 8],
     /// Unix-seconds TTL; `0` means no expiry. Freshness:
