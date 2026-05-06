@@ -140,8 +140,7 @@ pub fn process(
     let now = Clock::get()?.unix_timestamp;
 
     // Owner / discriminator / version checks.
-    let channel = accs.channel.check()?;
-    let ch = Channel::from_account(&channel)?;
+    let ch = Channel::from_account(&accs.channel)?;
 
     // Status gate.
     let status = ChannelStatus::try_from(ch.status)?;
@@ -161,7 +160,7 @@ pub fn process(
     drop(ch);
 
     let token_ctx = TokenContext::new(accs.mint, accs.token_program)?;
-    let mut channel_ctx = ChannelContext::new(channel, accs.channel_token_account, token_ctx)
+    let mut channel_ctx = ChannelContext::new(accs.channel, accs.channel_token_account, token_ctx)
         .map_err(|_| PaymentChannelsError::InvalidChannelTokenAccount)?;
     let mut payer_ctx =
         PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)?;
