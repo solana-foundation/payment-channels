@@ -205,8 +205,6 @@ pub fn process(
         return Err(PaymentChannelsError::ChannelAddressMismatch.into());
     }
 
-    let channel = accs.channel.check()?;
-
     accs.channel_token_account
         .validate_as_ata_unchecked(
             &channel_address,
@@ -217,7 +215,7 @@ pub fn process(
 
     let token_ctx = TokenContext::new(accs.mint, accs.token_program)?;
     let mut channel_ctx =
-        ChannelContext::new_uninit(channel, accs.channel_token_account, token_ctx)
+        ChannelContext::new_uninit(accs.channel, accs.channel_token_account, token_ctx)
             .map_err(|_| PaymentChannelsError::EscrowAddressMismatch)?;
     let payer_ctx = PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)
         .map_err(|e| match e {
@@ -225,15 +223,13 @@ pub fn process(
             other => other,
         })?;
 
-    let payee = accs.payee.check()?;
-
     // Allocate the channel PDA. The runtime verifies the seeds match
     // accs.channel.address(); mismatched account → CPI failure.
     let salt_bytes = args.salt().to_le_bytes();
     let bump_byte = [bump];
     let seeds = channel_signer_seeds(
         payer_ctx.payer.address().as_ref(),
-        payee.address().as_ref(),
+        accs.payee.address().as_ref(),
         channel_ctx.token_ctx.mint.address().as_ref(),
         accs.authorized_signer.address().as_ref(),
         &salt_bytes,
@@ -281,7 +277,7 @@ pub fn process(
         args.grace_period(),
         distribution_hash,
         *payer_ctx.payer.address(),
-        *payee.address(),
+        *accs.payee.address(),
         *accs.authorized_signer.address(),
         *channel_ctx.token_ctx.mint.address(),
     )?;

@@ -50,6 +50,7 @@ macro_rules! decl_account_view {
             _s: PhantomData<S>,
         }
 
+        #[allow(dead_code)]
         impl<'a> $T<'a, Checked> {
             pub fn as_any(&self) -> AnyTokenAccountView<'_, Checked> {
                 AnyTokenAccountView { inner: self.inner, _s: PhantomData }
@@ -90,26 +91,6 @@ decl_account_view!(
     MintAccountView,
     TreasuryTokenAccountView,
 );
-
-// General account view checks
-
-impl<'a> ChannelAccountView<'a, Unchecked> {
-    pub fn check(self) -> Result<ChannelAccountView<'a, Checked>, PaymentChannelsError> {
-        Ok(ChannelAccountView {
-            inner: self.inner,
-            _s: Default::default(),
-        })
-    }
-}
-
-impl<'a> PayeeAccountView<'a, Unchecked> {
-    pub fn check(self) -> Result<PayeeAccountView<'a, Checked>, PaymentChannelsError> {
-        Ok(PayeeAccountView {
-            inner: self.inner,
-            _s: Default::default(),
-        })
-    }
-}
 
 impl<'a> TokenProgramAccountView<'a, Checked> {
     pub fn amount(
@@ -281,14 +262,14 @@ impl<'a> TokenContext<'a> {
 }
 
 pub struct ChannelContext<'a> {
-    pub channel: ChannelAccountView<'a, Checked>,
+    pub channel: ChannelAccountView<'a, Unchecked>,
     pub channel_token_account: ChannelTokenAccountView<'a, Checked>,
     pub token_ctx: TokenContext<'a>,
 }
 
 impl<'a> ChannelContext<'a> {
     pub fn new(
-        channel: ChannelAccountView<'a, Checked>,
+        channel: ChannelAccountView<'a, Unchecked>,
         channel_token_account: ChannelTokenAccountView<'a, Unchecked>,
         token_ctx: TokenContext<'a>,
     ) -> Result<Self, PaymentChannelsError> {
@@ -307,7 +288,7 @@ impl<'a> ChannelContext<'a> {
     /// For use in `open` where the escrow ATA has not been created yet —
     /// validates the derived address only, skipping token account data parsing.
     pub fn new_uninit(
-        channel: ChannelAccountView<'a, Checked>,
+        channel: ChannelAccountView<'a, Unchecked>,
         channel_token_account: ChannelTokenAccountView<'a, Unchecked>,
         token_ctx: TokenContext<'a>,
     ) -> Result<Self, PaymentChannelsError> {
