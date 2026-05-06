@@ -4,7 +4,7 @@ export default {
   idl: IDL_PATH,
   scripts: {
     idl: [
-      './codama-visitors.mjs#addDistributeRecipientRemainingAccounts',
+      './codama-visitors.mjs#addGeneratedClientAccountMetadata',
       {
         from: './codama-visitors.mjs#writeCodamaIdl',
         args: [IDL_PATH],

@@ -111,12 +111,7 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
         codama(account(name = "rent")),
         codama(account(name = "associated_token_program")),
         codama(account(name = "event_authority", default_value = pda("eventAuthority"))),
-        codama(
-            account(
-                name = "self_program",
-                default_value = public_key("GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc")
-            )
-        )
+        codama(account(name = "self_program"))
     )]
     Open(#[cfg_attr(feature = "idl", codama(name = "open_args"))] open::OpenArgs<'a>) = 1,
 

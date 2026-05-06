@@ -158,7 +158,6 @@ pub fn floor_bps_share(pool: u64, bps: u32) -> Result<u64, ProgramError> {
 mod tests {
     extern crate alloc;
 
-    use alloc::boxed::Box;
     use alloc::vec::Vec;
 
     use super::*;
@@ -181,19 +180,20 @@ mod tests {
         data
     }
 
-    fn make_view(count: u8) -> DistributionPreimage<'static> {
+    fn with_view<R>(count: u8, f: impl FnOnce(DistributionPreimage<'_>) -> R) -> R {
         let entries: Vec<_> = (0..count)
             .map(|i| entry(i.saturating_add(1), 100))
             .collect();
         let bytes = encode(count as u32, &entries);
-        let leaked = Box::leak(bytes.into_boxed_slice());
-        DistributionPreimage::load(leaked).unwrap()
+        f(DistributionPreimage::load(&bytes).unwrap())
     }
 
-    fn recipients_from_entries(entries: &[DistributionEntry]) -> DistributionPreimage<'static> {
+    fn with_recipients_from_entries<R>(
+        entries: &[DistributionEntry],
+        f: impl FnOnce(DistributionPreimage<'_>) -> R,
+    ) -> R {
         let bytes = encode(entries.len() as u32, entries);
-        let leaked = Box::leak(bytes.into_boxed_slice());
-        DistributionPreimage::load(leaked).unwrap()
+        f(DistributionPreimage::load(&bytes).unwrap())
     }
 
     #[test]
@@ -238,29 +238,33 @@ mod tests {
 
     #[test]
     fn load_zero_count_accepted() {
-        let r = make_view(0);
-        assert_eq!(r.entries.len(), 0);
-        assert_eq!(r.payee_bps(), BPS_DENOMINATOR);
+        with_view(0, |r| {
+            assert_eq!(r.entries.len(), 0);
+            assert_eq!(r.payee_bps(), BPS_DENOMINATOR);
+        });
     }
 
     #[test]
     fn load_returns_active_entries_and_payee_bps() {
-        let r = recipients_from_entries(&[entry(1, 2500), entry(2, 3000)]);
-        assert_eq!(r.entries.len(), 2);
-        assert_eq!(r.payee_bps(), 4500);
+        with_recipients_from_entries(&[entry(1, 2500), entry(2, 3000)], |r| {
+            assert_eq!(r.entries.len(), 2);
+            assert_eq!(r.payee_bps(), 4500);
+        });
     }
 
     #[test]
     fn load_max_count_accepted() {
-        let r = make_view(MAX_DISTRIBUTION_RECIPIENTS as u8);
-        assert_eq!(r.entries.len(), MAX_DISTRIBUTION_RECIPIENTS);
+        with_view(MAX_DISTRIBUTION_RECIPIENTS as u8, |r| {
+            assert_eq!(r.entries.len(), MAX_DISTRIBUTION_RECIPIENTS);
+        });
     }
 
     #[test]
     fn load_full_bps_sum_accepted() {
-        let r = recipients_from_entries(&[entry(1, BPS_DENOMINATOR as u16)]);
-        assert_eq!(r.entries.len(), 1);
-        assert_eq!(r.payee_bps(), 0);
+        with_recipients_from_entries(&[entry(1, BPS_DENOMINATOR as u16)], |r| {
+            assert_eq!(r.entries.len(), 1);
+            assert_eq!(r.payee_bps(), 0);
+        });
     }
 
     #[test]
@@ -284,34 +288,39 @@ mod tests {
     #[test]
     fn preimage_length_matches_count() {
         for n in 0..=MAX_DISTRIBUTION_RECIPIENTS {
-            let r = make_view(n as u8);
-            assert_eq!(
-                r.preimage().len(),
-                RECIPIENT_COUNT_PREFIX_LEN + n * DistributionEntry::LEN,
-            );
+            with_view(n as u8, |r| {
+                assert_eq!(
+                    r.preimage().len(),
+                    RECIPIENT_COUNT_PREFIX_LEN + n * DistributionEntry::LEN,
+                );
+            });
         }
     }
 
     #[test]
     fn preimage_prefix_is_count() {
-        let r = make_view(7);
-        assert_eq!(
-            &r.preimage()[..RECIPIENT_COUNT_PREFIX_LEN],
-            &7u32.to_le_bytes()
-        );
+        with_view(7, |r| {
+            assert_eq!(
+                &r.preimage()[..RECIPIENT_COUNT_PREFIX_LEN],
+                &7u32.to_le_bytes()
+            );
+        });
     }
 
     #[test]
     fn preimage_hash_is_deterministic() {
-        let r = make_view(3);
-        assert_eq!(r.preimage_hash(), r.preimage_hash());
+        with_view(3, |r| {
+            assert_eq!(r.preimage_hash(), r.preimage_hash());
+        });
     }
 
     #[test]
     fn preimage_hash_differs_by_count() {
-        let r1 = recipients_from_entries(&[entry(1, 100)]);
-        let r2 = recipients_from_entries(&[entry(1, 100), entry(2, 100)]);
-        assert_ne!(r1.preimage_hash(), r2.preimage_hash());
+        with_recipients_from_entries(&[entry(1, 100)], |r1| {
+            with_recipients_from_entries(&[entry(1, 100), entry(2, 100)], |r2| {
+                assert_ne!(r1.preimage_hash(), r2.preimage_hash());
+            });
+        });
     }
 
     #[test]
@@ -322,8 +331,9 @@ mod tests {
 
     #[test]
     fn load_accepts_distinct_recipients() {
-        let r = make_view(3);
-        assert_eq!(r.entries.len(), 3);
+        with_view(3, |r| {
+            assert_eq!(r.entries.len(), 3);
+        });
     }
 
     #[test]

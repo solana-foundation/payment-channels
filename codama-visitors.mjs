@@ -1,6 +1,10 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { argumentValueNode, instructionRemainingAccountsNode } from '@codama/nodes';
+import {
+  argumentValueNode,
+  instructionRemainingAccountsNode,
+  publicKeyValueNode,
+} from '@codama/nodes';
 
 const IDL_PATH = './program/payment_channels/idl/payment_channels.json';
 const CODAMA_STANDARD_VERSION = '1.6.0';
@@ -11,23 +15,37 @@ const OMIT_EMPTY_ARRAY_KEYS = new Set([
   'subInstructions',
 ]);
 
-// Codama's Rust macros define fixed instruction accounts, but they do not
-// currently expose instructionRemainingAccountsNode. Keep this visitor scoped
-// to the dynamic recipient ATA tail used by the generated distribute builders.
-export const addDistributeRecipientRemainingAccounts = {
+// Codama's Rust macros define the wire schema and fixed instruction accounts.
+// Keep this visitor scoped to generated-client account metadata that is either
+// not exposed by Rust macros or would duplicate the declared program id in Rust.
+export const addGeneratedClientAccountMetadata = {
   visitRoot(root) {
     const program = expectProgram(root);
     let sawDistribute = false;
+    let sawSelfProgram = false;
     const instructions = expectArray(program.instructions, 'program.instructions').map((ix) => {
-      if (ix.name !== 'distribute') return ix;
+      const accounts = expectArray(ix.accounts, `instruction ${ix.name}.accounts`).map(
+        (account) => {
+          if (account.name !== 'selfProgram') return account;
+          sawSelfProgram = true;
+          return {
+            ...account,
+            defaultValue: publicKeyValueNode(program.publicKey),
+          };
+        },
+      );
+
+      if (ix.name !== 'distribute') return { ...ix, accounts };
       sawDistribute = true;
       return {
         ...ix,
+        accounts,
         remainingAccounts: recipientAtaTail(),
       };
     });
 
     if (!sawDistribute) throw new Error('Codama IDL is missing distribute instruction');
+    if (!sawSelfProgram) throw new Error('Codama IDL is missing selfProgram account');
     return { ...root, program: { ...program, instructions } };
   },
 };

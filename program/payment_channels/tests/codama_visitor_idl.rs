@@ -13,6 +13,15 @@ fn instruction<'a>(idl: &'a Value, name: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("missing instruction {name}"))
 }
 
+fn instruction_account<'a>(instruction: &'a Value, name: &str) -> &'a Value {
+    instruction["accounts"]
+        .as_array()
+        .expect("instruction accounts")
+        .iter()
+        .find(|node| node["name"] == name)
+        .unwrap_or_else(|| panic!("missing account {name}"))
+}
+
 #[test]
 fn distribute_keeps_dynamic_recipient_token_account_tail() {
     let idl = committed_idl();
@@ -26,4 +35,17 @@ fn distribute_keeps_dynamic_recipient_token_account_tail() {
     assert_eq!(remaining[0]["isSigner"], false);
     assert_eq!(remaining[0]["value"]["kind"], "argumentValueNode");
     assert_eq!(remaining[0]["value"]["name"], "recipientTokenAccounts");
+}
+
+#[test]
+fn open_self_program_defaults_to_declared_program_id() {
+    let idl = committed_idl();
+    let open = instruction(&idl, "open");
+    let self_program = instruction_account(open, "selfProgram");
+
+    assert_eq!(self_program["defaultValue"]["kind"], "publicKeyValueNode");
+    assert_eq!(
+        self_program["defaultValue"]["publicKey"],
+        idl["program"]["publicKey"]
+    );
 }
