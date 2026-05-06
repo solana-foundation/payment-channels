@@ -4,9 +4,11 @@ mod integration;
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 use mollusk_svm::{Mollusk, result::ProgramResult};
-use payment_channels_core::event_engine::event_authority_pda;
-use payment_channels_core::instructions::open::{DISCRIMINATOR, MAX_DISTRIBUTION_RECIPIENTS};
-use payment_channels_core::state::Channel;
+use payment_channels_core::{
+    event_engine::event_authority_pda,
+    instructions::open::{DISCRIMINATOR, MAX_DISTRIBUTION_RECIPIENTS},
+    state::Channel,
+};
 use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;

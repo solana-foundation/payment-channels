@@ -20,8 +20,7 @@ pub mod event_engine;
 pub mod events;
 
 pub mod instructions;
-pub use instructions::helpers::ed25519;
-pub use instructions::*;
+pub use instructions::{helpers::ed25519, *};
 
 pub mod state;
 pub use state::*;

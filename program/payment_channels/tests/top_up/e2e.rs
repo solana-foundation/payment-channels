@@ -4,21 +4,22 @@
 
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
-use payment_channels_client::instructions::{TopUp, TopUpInstructionArgs};
-use payment_channels_client::types::TopUpArgs;
+use payment_channels_client::{
+    instructions::{TopUp, TopUpInstructionArgs},
+    types::TopUpArgs,
+};
 use payment_channels_core::PaymentChannelsError;
 use solana_account::Account;
-use solana_instruction::error::InstructionError;
-use solana_instruction::{AccountMeta, Instruction};
+use solana_instruction::{AccountMeta, Instruction, error::InstructionError};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 
-use crate::common::token_2022::{EXT_TRANSFER_FEE_CONFIG, add_mint_extension};
 use crate::common::{
     PROGRAM_ID, ProgramLoader, SPL_TOKEN, TOKEN_2022, expect_custom_err, open_channel,
+    token_2022::{EXT_TRANSFER_FEE_CONFIG, add_mint_extension},
     token_balance,
 };
 

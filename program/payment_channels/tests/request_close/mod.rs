@@ -1,7 +1,10 @@
 mod e2e;
 mod integration;
 
-use mollusk_svm::{Mollusk, result::InstructionResult, result::ProgramResult};
+use mollusk_svm::{
+    Mollusk,
+    result::{InstructionResult, ProgramResult},
+};
 use payment_channels_core::instructions::request_close::DISCRIMINATOR;
 use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};

@@ -6,12 +6,11 @@ pub mod token_2022;
 
 use litesvm::LiteSVM;
 use mollusk_svm::Mollusk;
-use payment_channels_core::PaymentChannelsError;
-use payment_channels_core::instructions::open::{
-    DISCRIMINATOR as OPEN_DISCRIMINATOR, MAX_DISTRIBUTION_RECIPIENTS,
+use payment_channels_core::{
+    PaymentChannelsError,
+    instructions::open::{DISCRIMINATOR as OPEN_DISCRIMINATOR, MAX_DISTRIBUTION_RECIPIENTS},
+    state::{Channel, channel::ChannelStatus},
 };
-use payment_channels_core::state::Channel;
-use payment_channels_core::state::channel::ChannelStatus;
 use solana_clock::Clock;
 use solana_instruction::{AccountMeta, Instruction, error::InstructionError};
 use solana_keypair::Keypair;

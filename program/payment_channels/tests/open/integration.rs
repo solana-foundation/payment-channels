@@ -1,7 +1,8 @@
 use litesvm::LiteSVM;
 use mollusk_svm::result::ProgramResult;
-use payment_channels_core::PaymentChannelsError;
-use payment_channels_core::instructions::open::MAX_DISTRIBUTION_RECIPIENTS;
+use payment_channels_core::{
+    PaymentChannelsError, instructions::open::MAX_DISTRIBUTION_RECIPIENTS,
+};
 use solana_message::Message;
 use solana_program_error::ProgramError;
 use solana_pubkey::Pubkey;
@@ -12,14 +13,17 @@ use super::{
     OpenRun, TOKEN_2022, derive_pdas, derive_pdas_with_token_program, open_ix,
     open_ix_with_token_program, setup_funded_svm, setup_funded_svm_with_token_program,
 };
-use crate::common::token_2022::{
-    EXT_CPI_GUARD, EXT_GROUP_MEMBER_POINTER, EXT_GROUP_POINTER, EXT_MEMO_TRANSFER,
-    EXT_METADATA_POINTER, EXT_MINT_CLOSE_AUTHORITY, EXT_TOKEN_GROUP, EXT_TOKEN_GROUP_MEMBER,
-    EXT_TOKEN_METADATA, EXT_TRANSFER_FEE_CONFIG, EXT_TRANSFER_HOOK, POINTER_EXTENSION_LEN,
-    TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN, add_account_extension,
-    add_mint_extension,
+use crate::common::{
+    ProgramLoader, SPL_TOKEN, expect_custom_err,
+    token_2022::{
+        EXT_CPI_GUARD, EXT_GROUP_MEMBER_POINTER, EXT_GROUP_POINTER, EXT_MEMO_TRANSFER,
+        EXT_METADATA_POINTER, EXT_MINT_CLOSE_AUTHORITY, EXT_TOKEN_GROUP, EXT_TOKEN_GROUP_MEMBER,
+        EXT_TOKEN_METADATA, EXT_TRANSFER_FEE_CONFIG, EXT_TRANSFER_HOOK, POINTER_EXTENSION_LEN,
+        TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN, add_account_extension,
+        add_mint_extension,
+    },
+    token_balance,
 };
-use crate::common::{ProgramLoader, SPL_TOKEN, expect_custom_err, token_balance};
 
 const SALT: u64 = 1;
 const DEPOSIT: u64 = 1_000_000;

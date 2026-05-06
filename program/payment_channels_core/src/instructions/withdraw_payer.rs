@@ -5,13 +5,16 @@ use pinocchio::{
     sysvars::{Sysvar, clock::Clock},
 };
 
-use crate::errors::PaymentChannelsError;
-use crate::helpers::accounts::view::{
-    ChannelAccountView, ChannelContext, ChannelTokenAccountView, MintAccountView, PayerAccountView,
-    PayerContext, PayerTokenAccountView, TokenContext, TokenProgramAccountView,
+use crate::{
+    errors::PaymentChannelsError,
+    helpers::accounts::view::{
+        ChannelAccountView, ChannelContext, ChannelTokenAccountView, MintAccountView,
+        PayerAccountView, PayerContext, PayerTokenAccountView, TokenContext,
+        TokenProgramAccountView,
+    },
+    instructions::helpers::channel_signer_seeds,
+    state::channel::{Channel, ChannelStatus},
 };
-use crate::instructions::helpers::channel_signer_seeds;
-use crate::state::channel::{Channel, ChannelStatus};
 
 /// Instruction discriminator byte for `withdrawPayer`.
 pub const DISCRIMINATOR: u8 = 8;

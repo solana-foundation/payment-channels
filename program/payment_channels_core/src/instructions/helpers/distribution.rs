@@ -3,8 +3,7 @@ use codama::CodamaType;
 use core::mem::size_of;
 use pinocchio::{Address, error::ProgramError};
 
-use crate::errors::PaymentChannelsError;
-use crate::state::Transmutable;
+use crate::{errors::PaymentChannelsError, state::Transmutable};
 
 /// Maximum number of distribution recipients per channel.
 pub const MAX_DISTRIBUTION_RECIPIENTS: usize = 32;

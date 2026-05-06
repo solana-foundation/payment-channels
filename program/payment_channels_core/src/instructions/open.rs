@@ -6,26 +6,23 @@ use pinocchio_associated_token_account::instructions::Create as CreateAta;
 use pinocchio_system::instructions::CreateAccount;
 use pinocchio_token_2022::instructions::TransferChecked;
 
-use crate::errors::PaymentChannelsError;
-use crate::helpers::accounts::validation::AccountValidator;
-use crate::helpers::accounts::view::ChannelAccountView;
-use crate::helpers::accounts::view::ChannelContext;
-use crate::helpers::accounts::view::ChannelTokenAccountView;
-use crate::helpers::accounts::view::MintAccountView;
-use crate::helpers::accounts::view::PayeeAccountView;
-use crate::helpers::accounts::view::PayerAccountView;
-use crate::helpers::accounts::view::PayerContext;
-use crate::helpers::accounts::view::PayerTokenAccountView;
-use crate::helpers::accounts::view::TokenContext;
-use crate::helpers::accounts::view::TokenProgramAccountView;
-use crate::state::Channel;
+use crate::{
+    errors::PaymentChannelsError,
+    event_engine::{EventSerialize, emit_event},
+    events::Opened,
+    helpers::accounts::{
+        validation::AccountValidator,
+        view::{
+            ChannelAccountView, ChannelContext, ChannelTokenAccountView, MintAccountView,
+            PayeeAccountView, PayerAccountView, PayerContext, PayerTokenAccountView, TokenContext,
+            TokenProgramAccountView,
+        },
+    },
+    instructions::helpers::{DistributionRecipients, channel_signer_seeds},
+    state::{Channel, Transmutable, load},
+};
 
-use crate::event_engine::EventSerialize;
-use crate::event_engine::emit_event;
-use crate::events::Opened;
 pub use crate::instructions::helpers::MAX_DISTRIBUTION_RECIPIENTS;
-use crate::instructions::helpers::{DistributionRecipients, channel_signer_seeds};
-use crate::state::{Transmutable, load};
 
 /// Instruction discriminator byte for `open`.
 pub const DISCRIMINATOR: u8 = 1;
