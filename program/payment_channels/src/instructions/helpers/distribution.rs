@@ -47,26 +47,26 @@ unsafe impl Transmutable for DistributionEntry {
 const _: () = assert!(size_of::<DistributionEntry>() == 34);
 const _: () = assert!(core::mem::align_of::<DistributionEntry>() == 1);
 
-/// Borrowed zero-copy view of a validated canonical distribution preimage.
+/// Borrowed view of a validated distribution preimage.
 ///
 /// Wire layout: `count(u32 LE) || [recipient(32) || shareBps(u16 LE)] × count`.
 #[derive(Debug, Clone, Copy)]
 pub struct DistributionRecipients<'a> {
-    /// Active entries selected by the wire count prefix.
+    /// Entries declared by the count prefix.
     pub entries: &'a [DistributionEntry],
-    /// Raw Blake3 preimage committed into the channel.
+    /// Bytes hashed into the channel's distribution commitment.
     preimage: &'a [u8],
 }
 
 const RECIPIENT_COUNT_PREFIX_LEN: usize = size_of::<u32>();
 
 impl<'a> DistributionRecipients<'a> {
-    /// Parses and validates `count || entries`.
+    /// Parses `count || entries` and verifies the distribution invariants.
     ///
-    /// Entry bytes are reinterpreted without allocation after count and length
-    /// validation. If this returns `Ok`, the active entries are canonical and
-    /// satisfy the distribution invariants: non-zero bps per entry, total bps
-    /// at most 10_000, and no duplicate recipient owner addresses.
+    /// The count must be at most [`MAX_DISTRIBUTION_RECIPIENTS`], the byte
+    /// length must exactly match the count, each entry must have non-zero
+    /// basis points, the total basis points must not exceed 10_000, and
+    /// recipient owner addresses must be unique.
     pub fn load(data: &'a [u8]) -> Result<Self, ProgramError> {
         if data.len() < RECIPIENT_COUNT_PREFIX_LEN {
             return Err(ProgramError::InvalidInstructionData);
@@ -125,7 +125,7 @@ impl<'a> DistributionRecipients<'a> {
         })
     }
 
-    /// Basis points left for the channel payee's implicit remainder share.
+    /// Basis points reserved for the channel payee's implicit remainder share.
     #[inline(always)]
     pub fn payee_bps(&self) -> u32 {
         let bps_sum: u32 = self.entries.iter().map(|entry| entry.bps() as u32).sum();
@@ -133,7 +133,7 @@ impl<'a> DistributionRecipients<'a> {
         BPS_DENOMINATOR - bps_sum
     }
 
-    /// Raw bytes hashed into [`Channel::distribution_hash`](crate::Channel::distribution_hash).
+    /// Preimage bytes hashed into [`Channel::distribution_hash`](crate::Channel::distribution_hash).
     #[inline(always)]
     pub fn preimage(&self) -> &'a [u8] {
         self.preimage

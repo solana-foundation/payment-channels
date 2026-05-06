@@ -175,8 +175,8 @@ pub fn process(
         return Err(PaymentChannelsError::InvalidDistributionHash.into());
     }
 
-    // Hash equality proves the revealed, already-loaded distribution is
-    // byte-identical to the valid plan committed by `open`.
+    // Hash equality proves the revealed distribution matches the plan
+    // committed by `open`.
     if accs.recipient_token_accounts.len() != args.recipients.entries.len() {
         return Err(PaymentChannelsError::RecipientAccountCountMismatch.into());
     }

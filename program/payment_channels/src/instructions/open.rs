@@ -32,12 +32,13 @@ pub const DISCRIMINATOR: u8 = 1;
 /// [`distribute`](crate::instructions::distribute) later verifies a matching
 /// preimage before paying out splits.
 ///
-/// Wire layout: `salt(8) | deposit(8) | grace_period(4) | count(u32 LE) | entries(count×34)`.
+/// Wire layout: `salt(8) | deposit(8) | grace_period(4) | count(u32 LE) |
+/// entries(count × 34)`.
 #[derive(Debug, Clone, Copy)]
 pub struct OpenArgs<'a> {
     /// PDA disambiguator stored in [`Channel::salt`](crate::Channel::salt).
     salt: [u8; 8],
-    /// Initial escrow and ceiling for [`Channel::settled`](crate::Channel::settled).
+    /// Initial escrow amount and ceiling for [`Channel::settled`](crate::Channel::settled).
     deposit: [u8; 8],
     /// Grace duration, in seconds.
     grace_period: [u8; 4],
