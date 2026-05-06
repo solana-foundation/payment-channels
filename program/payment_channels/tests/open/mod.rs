@@ -69,7 +69,7 @@ impl OpenRun {
         data.extend_from_slice(&self.salt.to_le_bytes());
         data.extend_from_slice(&self.deposit.to_le_bytes());
         data.extend_from_slice(&self.grace_period.to_le_bytes());
-        data.push(self.num_recipients);
+        data.extend_from_slice(&(self.num_recipients as u32).to_le_bytes());
         if self.num_recipients > 0 {
             let entries = match &self.recipients {
                 Some(rs) => rs.clone(),
@@ -192,8 +192,8 @@ pub(super) fn derive_pdas(
 /// Build the `open` instruction with all 13 accounts wired up.
 ///
 /// Wire layout: `discriminator(1) | salt(8) | deposit(8) | grace(4) |
-/// num_recipients(1) | entries(num_recipients × 34)` where each entry is
-/// `pubkey(32) | bps(u16)`.
+/// num_recipients(u32 LE) | entries(num_recipients × 34)` where each entry
+/// is `pubkey(32) | bps(u16)`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn open_ix(
     payer: &Pubkey,
@@ -244,7 +244,7 @@ pub(super) fn open_ix_with_token_program(
     data.extend_from_slice(&salt.to_le_bytes());
     data.extend_from_slice(&deposit.to_le_bytes());
     data.extend_from_slice(&grace_period.to_le_bytes());
-    data.push(num_recipients);
+    data.extend_from_slice(&(num_recipients as u32).to_le_bytes());
     if num_recipients > 0 {
         for i in 0..num_recipients as usize {
             data.extend_from_slice(&[i as u8 + 1; 32]);

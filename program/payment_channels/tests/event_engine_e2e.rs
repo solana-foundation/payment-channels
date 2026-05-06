@@ -91,7 +91,7 @@ fn open_emits_opened_event_with_anchor_compatible_wire_format() {
     data.extend_from_slice(&salt.to_le_bytes());
     data.extend_from_slice(&deposit.to_le_bytes());
     data.extend_from_slice(&grace_period.to_le_bytes());
-    data.push(1u8); // num_recipients
+    data.extend_from_slice(&1u32.to_le_bytes()); // num_recipients
     data.extend_from_slice(&[1u8; 32]); // recipient pubkey
     data.extend_from_slice(&5000u16.to_le_bytes()); // bps
 

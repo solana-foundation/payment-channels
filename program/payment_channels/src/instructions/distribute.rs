@@ -26,7 +26,7 @@ pub const DISCRIMINATOR: u8 = 7;
 
 /// Revealed distribution preimage committed at `open`.
 ///
-/// Wire layout: `count(1) || entries(count × 34)`.
+/// Wire layout: `count(u32 LE) || entries(count × 34)`.
 #[derive(Debug, Clone, Copy)]
 pub struct DistributeArgs<'a> {
     /// Dynamic recipient preimage; its hash must match the channel commitment.

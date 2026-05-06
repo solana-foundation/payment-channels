@@ -9,14 +9,14 @@ crate-type = ["lib", "cdylib"]
 
 [features]
 default = []
-# Enables codama derives + build.rs IDL emission. Host-only; must NOT
+# Enables codama derives + raw build.rs IDL emission. Host-only; must NOT
 # be enabled for `cargo build-sbf` (see `compile_error!` guard in
-# src/lib.rs). Use `cargo build --features idl` or `just generate-idl`.
+# src/lib.rs). Use `just generate-idl` to apply Codama visitors and write
+# the committed IDL.
 idl = ["dep:codama"]
 
 [build-dependencies]
-codama     = "0.9.1"
-serde_json = "1"
+codama = { version = "0.9.1", optional = true }
 
 [dependencies]
 pinocchio                          = { version = "0.11.1", features = ["cpi", "copy", "account-resize"] }

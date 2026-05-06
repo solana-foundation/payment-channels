@@ -4,6 +4,7 @@ dist
 .idea
 .DS_Store
 pnpm-debug.log
+program/payment_channels/idl/*.raw.json
 
 # Local validator ledgers and logs
 .surfpool/

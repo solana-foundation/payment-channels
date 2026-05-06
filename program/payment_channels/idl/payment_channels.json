@@ -372,7 +372,7 @@
             "kind": "prefixedCountNode",
             "prefix": {
               "endian": "le",
-              "format": "u8",
+              "format": "u32",
               "kind": "numberTypeNode"
             }
           },
@@ -750,12 +750,23 @@
             "name": "associatedTokenProgram"
           },
           {
+            "defaultValue": {
+              "kind": "pdaValueNode",
+              "pda": {
+                "kind": "pdaLinkNode",
+                "name": "eventAuthority"
+              },
+              "seeds": []
+            },
             "isSigner": false,
             "isWritable": false,
             "kind": "instructionAccountNode",
             "name": "eventAuthority"
           },
           {
+            "defaultValue": {
+              "kind": "programIdValueNode"
+            },
             "isSigner": false,
             "isWritable": false,
             "kind": "instructionAccountNode",
@@ -1132,7 +1143,18 @@
           }
         ],
         "kind": "instructionNode",
-        "name": "distribute"
+        "name": "distribute",
+        "remainingAccounts": [
+          {
+            "isSigner": false,
+            "isWritable": true,
+            "kind": "instructionRemainingAccountsNode",
+            "value": {
+              "kind": "argumentValueNode",
+              "name": "recipientTokenAccounts"
+            }
+          }
+        ]
       },
       {
         "accounts": [
@@ -1202,6 +1224,14 @@
       {
         "accounts": [
           {
+            "defaultValue": {
+              "kind": "pdaValueNode",
+              "pda": {
+                "kind": "pdaLinkNode",
+                "name": "eventAuthority"
+              },
+              "seeds": []
+            },
             "isSigner": true,
             "isWritable": false,
             "kind": "instructionAccountNode",
@@ -1237,10 +1267,28 @@
     ],
     "kind": "programNode",
     "name": "paymentChannels",
-    "pdas": [],
+    "pdas": [
+      {
+        "kind": "pdaNode",
+        "name": "eventAuthority",
+        "seeds": [
+          {
+            "kind": "constantPdaSeedNode",
+            "type": {
+              "encoding": "utf8",
+              "kind": "stringTypeNode"
+            },
+            "value": {
+              "kind": "stringValueNode",
+              "string": "event_authority"
+            }
+          }
+        ]
+      }
+    ],
     "publicKey": "GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc",
     "version": "0.1.0"
   },
   "standard": "codama",
-  "version": "1.0.0"
+  "version": "1.6.0"
 }

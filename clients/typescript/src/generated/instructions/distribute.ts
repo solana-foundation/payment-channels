@@ -7,6 +7,7 @@
  */
 
 import {
+  AccountRole,
   combineCodec,
   getStructDecoder,
   getStructEncoder,
@@ -143,6 +144,7 @@ export type DistributeInput<
   mint: Address<TAccountMint>;
   tokenProgram: Address<TAccountTokenProgram>;
   distributeArgs: DistributeInstructionDataArgs["distributeArgs"];
+  recipientTokenAccounts: Array<Address>;
 };
 
 export function getDistributeInstruction<
@@ -213,6 +215,11 @@ export function getDistributeInstruction<
   // Original args.
   const args = { ...input };
 
+  // Remaining accounts.
+  const remainingAccounts: AccountMeta[] = args.recipientTokenAccounts.map(
+    (address) => ({ address, role: AccountRole.WRITABLE }),
+  );
+
   const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
   return Object.freeze({
     accounts: [
@@ -224,6 +231,7 @@ export function getDistributeInstruction<
       getAccountMeta("treasuryTokenAccount", accounts.treasuryTokenAccount),
       getAccountMeta("mint", accounts.mint),
       getAccountMeta("tokenProgram", accounts.tokenProgram),
+      ...remainingAccounts,
     ],
     data: getDistributeInstructionDataEncoder().encode(
       args as DistributeInstructionDataArgs,

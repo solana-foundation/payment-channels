@@ -86,7 +86,7 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
     /// Payer-signed; creates the channel PDA, locks the deposit, and
     /// commits the distribution hash. `NONEXISTENT → OPEN`.
     ///
-    /// Dynamic argument IDL shape is patched by `build.rs`.
+    /// Dynamic argument IDL shape is patched by Codama visitors.
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "payer", signer, writable)),
@@ -174,7 +174,7 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
     /// Recipient token accounts are appended as remaining accounts in the
     /// same order as the `DistributionEntry`s in the preimage.
     ///
-    /// Dynamic argument IDL shape is patched by `build.rs`.
+    /// Dynamic argument IDL shape is patched by Codama visitors.
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "channel", writable)),
@@ -255,9 +255,10 @@ mod tests {
 
         // Open / Distribute contain borrowed references; build valid dummy
         // args from borrowed slices instead of zeroed memory.
-        let open_data = [0u8; 20 + 1]; // header(20) + count(1)
+        let open_data = [0u8; 20 + 4]; // header(20) + count(u32)
         let open = open::OpenArgs::load(&open_data).unwrap();
-        let distribute = distribute::DistributeArgs::load(&[0u8]).unwrap(); // count=0
+        let distribute_data = 0u32.to_le_bytes();
+        let distribute = distribute::DistributeArgs::load(&distribute_data).unwrap(); // count=0
 
         assert_eq!(
             tag(&PaymentChannelsInstruction::Open(open)),

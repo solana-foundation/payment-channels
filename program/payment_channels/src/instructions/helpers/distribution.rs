@@ -55,14 +55,16 @@ const _: () = assert!(core::mem::align_of::<DistributionEntry>() == 1);
 
 /// Borrowed zero-copy view of a validated canonical distribution preimage.
 ///
-/// Wire layout: `count(1) || [recipient(32) || shareBps(u16 LE)] × count`.
+/// Wire layout: `count(u32 LE) || [recipient(32) || shareBps(u16 LE)] × count`.
 #[derive(Debug, Clone, Copy)]
 pub struct DistributionRecipients<'a> {
-    /// Active entries selected by the wire count byte.
+    /// Active entries selected by the wire count prefix.
     pub entries: &'a [DistributionEntry],
     /// Raw Blake3 preimage committed into the channel.
     preimage: &'a [u8],
 }
+
+const RECIPIENT_COUNT_PREFIX_LEN: usize = size_of::<u32>();
 
 impl<'a> DistributionRecipients<'a> {
     /// Parses and validates `count || entries`.
@@ -72,15 +74,21 @@ impl<'a> DistributionRecipients<'a> {
     /// satisfy the distribution invariants: non-zero bps per entry, total bps
     /// at most 10_000, and no duplicate recipient owner addresses.
     pub fn load(data: &'a [u8]) -> Result<Self, ProgramError> {
-        let (&count, entries_bytes) = data
-            .split_first()
-            .ok_or(ProgramError::InvalidInstructionData)?;
-        let n = count as usize;
-        if n > MAX_DISTRIBUTION_RECIPIENTS {
+        if data.len() < RECIPIENT_COUNT_PREFIX_LEN {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+        let (count_bytes, entries_bytes) = data.split_at(RECIPIENT_COUNT_PREFIX_LEN);
+        let count = u32::from_le_bytes(
+            count_bytes
+                .try_into()
+                .map_err(|_| ProgramError::InvalidInstructionData)?,
+        );
+        if count > MAX_DISTRIBUTION_RECIPIENTS as u32 {
             return Err(PaymentChannelsError::InvalidRecipientCount.into());
         }
+        let n = count as usize;
 
-        let expected_len = 1usize
+        let expected_len = RECIPIENT_COUNT_PREFIX_LEN
             .checked_add(
                 n.checked_mul(DistributionEntry::LEN)
                     .ok_or(PaymentChannelsError::ArithmeticOverflow)?,
@@ -170,9 +178,10 @@ mod tests {
         }
     }
 
-    fn encode(count: u8, entries: &[DistributionEntry]) -> Vec<u8> {
-        let mut data = Vec::with_capacity(1 + entries.len() * DistributionEntry::LEN);
-        data.push(count);
+    fn encode(count: u32, entries: &[DistributionEntry]) -> Vec<u8> {
+        let mut data =
+            Vec::with_capacity(RECIPIENT_COUNT_PREFIX_LEN + entries.len() * DistributionEntry::LEN);
+        data.extend_from_slice(&count.to_le_bytes());
         for entry in entries {
             data.extend_from_slice(entry.recipient.as_ref());
             data.extend_from_slice(&entry.bps);
@@ -184,13 +193,13 @@ mod tests {
         let entries: Vec<_> = (0..count)
             .map(|i| entry(i.saturating_add(1), 100))
             .collect();
-        let bytes = encode(count, &entries);
+        let bytes = encode(count as u32, &entries);
         let leaked = Box::leak(bytes.into_boxed_slice());
         DistributionRecipients::load(leaked).unwrap()
     }
 
     fn recipients_from_entries(entries: &[DistributionEntry]) -> DistributionRecipients<'static> {
-        let bytes = encode(entries.len() as u8, entries);
+        let bytes = encode(entries.len() as u32, entries);
         let leaked = Box::leak(bytes.into_boxed_slice());
         DistributionRecipients::load(leaked).unwrap()
     }
@@ -205,7 +214,7 @@ mod tests {
 
     #[test]
     fn load_rejects_count_above_max() {
-        let data = [MAX_DISTRIBUTION_RECIPIENTS as u8 + 1];
+        let data = ((MAX_DISTRIBUTION_RECIPIENTS + 1) as u32).to_le_bytes();
         assert_eq!(
             DistributionRecipients::load(&data).map(|_| ()),
             Err(ProgramError::from(
@@ -217,7 +226,7 @@ mod tests {
     #[test]
     fn load_rejects_truncated_entries() {
         let mut data = Vec::new();
-        data.push(1u8);
+        data.extend_from_slice(&1u32.to_le_bytes());
         data.extend_from_slice(&[0u8; DistributionEntry::LEN - 1]);
         assert_eq!(
             DistributionRecipients::load(&data).map(|_| ()),
@@ -284,14 +293,20 @@ mod tests {
     fn preimage_length_matches_count() {
         for n in 0..=MAX_DISTRIBUTION_RECIPIENTS {
             let r = make_view(n as u8);
-            assert_eq!(r.preimage().len(), 1 + n * DistributionEntry::LEN);
+            assert_eq!(
+                r.preimage().len(),
+                RECIPIENT_COUNT_PREFIX_LEN + n * DistributionEntry::LEN,
+            );
         }
     }
 
     #[test]
-    fn preimage_first_byte_is_count() {
+    fn preimage_prefix_is_count() {
         let r = make_view(7);
-        assert_eq!(r.preimage()[0], 7);
+        assert_eq!(
+            &r.preimage()[..RECIPIENT_COUNT_PREFIX_LEN],
+            &7u32.to_le_bytes()
+        );
     }
 
     #[test]

@@ -10,8 +10,6 @@ import {
   combineCodec,
   getArrayDecoder,
   getArrayEncoder,
-  getU8Decoder,
-  getU8Encoder,
   type Codec,
   type Decoder,
   type Encoder,
@@ -28,15 +26,11 @@ export type DistributionRecipients = Array<DistributionEntry>;
 export type DistributionRecipientsArgs = Array<DistributionEntryArgs>;
 
 export function getDistributionRecipientsEncoder(): Encoder<DistributionRecipientsArgs> {
-  return getArrayEncoder(getDistributionEntryEncoder(), {
-    size: getU8Encoder(),
-  });
+  return getArrayEncoder(getDistributionEntryEncoder());
 }
 
 export function getDistributionRecipientsDecoder(): Decoder<DistributionRecipients> {
-  return getArrayDecoder(getDistributionEntryDecoder(), {
-    size: getU8Decoder(),
-  });
+  return getArrayDecoder(getDistributionEntryDecoder());
 }
 
 export function getDistributionRecipientsCodec(): Codec<

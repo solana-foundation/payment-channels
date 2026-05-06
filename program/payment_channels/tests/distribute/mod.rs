@@ -43,7 +43,7 @@ pub(super) fn treasury_owner() -> Pubkey {
     Pubkey::new_from_array(b)
 }
 
-/// Build a typed `DistributionRecipients` (U8PrefixedVec) from `splits`.
+/// Build typed `DistributionRecipients` from `splits`.
 pub(super) fn build_recipients(splits: &[Split]) -> DistributionRecipients {
     let entries: Vec<DistributionEntry> = splits
         .iter()

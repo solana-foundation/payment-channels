@@ -6,6 +6,5 @@
 //!
 
 use crate::generated::types::DistributionEntry;
-use spl_collections::U8PrefixedVec;
 
-pub type DistributionRecipients = U8PrefixedVec<DistributionEntry>;
+pub type DistributionRecipients = Vec<DistributionEntry>;

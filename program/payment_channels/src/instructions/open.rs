@@ -33,8 +33,8 @@ pub const DISCRIMINATOR: u8 = 1;
 /// preimage before paying out splits.
 ///
 /// Wire layout: `salt(8) | deposit(8) | grace_period(4) | recipients`.
-/// `recipients` is the u8-prefixed dynamic preimage patched into the IDL by
-/// `build.rs`.
+/// `recipients` is the u32-prefixed dynamic preimage represented in the IDL
+/// by Codama visitors.
 #[derive(Debug, Clone, Copy)]
 pub struct OpenArgs<'a> {
     /// PDA disambiguator stored in [`Channel::salt`](crate::Channel::salt).
@@ -51,11 +51,11 @@ impl<'a> OpenArgs<'a> {
     const SALT_LEN: usize = core::mem::size_of::<u64>();
     const DEPOSIT_LEN: usize = core::mem::size_of::<u64>();
     const GRACE_PERIOD_LEN: usize = core::mem::size_of::<u32>();
-    const RECIPIENT_COUNT_LEN: usize = core::mem::size_of::<u8>();
+    const RECIPIENT_COUNT_LEN: usize = core::mem::size_of::<u32>();
 
     /// Bytes before the dynamic recipient preimage.
     const FIXED_HEADER_LEN: usize = Self::SALT_LEN + Self::DEPOSIT_LEN + Self::GRACE_PERIOD_LEN;
-    /// Smallest valid `open` payload: fixed header plus recipient count byte.
+    /// Smallest valid `open` payload: fixed header plus recipient count prefix.
     const MIN_LEN: usize = Self::FIXED_HEADER_LEN + Self::RECIPIENT_COUNT_LEN;
 
     /// PDA disambiguator stored in [`Channel::salt`](crate::Channel::salt).

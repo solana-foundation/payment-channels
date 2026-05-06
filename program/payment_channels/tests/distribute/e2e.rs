@@ -169,7 +169,7 @@ fn open_ix_data_for_splits(
     data.extend_from_slice(&salt.to_le_bytes());
     data.extend_from_slice(&deposit.to_le_bytes());
     data.extend_from_slice(&grace_period.to_le_bytes());
-    data.push(splits.len() as u8);
+    data.extend_from_slice(&(splits.len() as u32).to_le_bytes());
     for s in splits {
         data.extend_from_slice(s.owner.as_ref());
         data.extend_from_slice(&s.bps.to_le_bytes());
@@ -1007,10 +1007,10 @@ fn num_recipients_exceeds_max() {
     let paid_out = 0;
     let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
 
-    // Manually encode instruction data with count=33 to bypass the generated
-    // U8PrefixedVec encoder. The count>32 check happens before account
-    // validation, so we can pass 0 recipient accounts.
-    let mut data = vec![DISCRIMINATOR, 33u8];
+    // Manually encode instruction data with count=33. The count>32 check
+    // happens before account validation, so we can pass 0 recipient accounts.
+    let mut data = vec![DISCRIMINATOR];
+    data.extend_from_slice(&33u32.to_le_bytes());
     for _ in 0..33 {
         data.extend_from_slice(&[0u8; 32]); // recipient
         data.extend_from_slice(&1000u16.to_le_bytes()); // bps
