@@ -15,3 +15,7 @@ test-ledger/
 # Local env / config
 .env
 config.json
+.agents/
+.claude/
+.pi/
+skills-lock.json
