@@ -15,8 +15,9 @@ default = []
 idl = ["payment_channels_core/idl"]
 
 [build-dependencies]
-codama     = "0.9.1"
-serde_json = "1"
+codama                = "0.9.1"
+payment_channels_core = { path = "../payment_channels_core", version = "0.1.0" }
+serde_json            = "1"
 
 [dependencies]
 payment_channels_core = { path = "../payment_channels_core", version = "0.1.0" }

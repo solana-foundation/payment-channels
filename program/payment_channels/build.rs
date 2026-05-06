@@ -5,7 +5,6 @@ use serde_json::Value;
 use std::{env, fs, io, path::Path};
 
 const PROGRAM_NAME: &str = "paymentChannels";
-const PROGRAM_ID: &str = "GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=src/");
@@ -41,7 +40,7 @@ fn generate_idl() -> Result<(), Box<dyn std::error::Error>> {
     program.insert("name".to_string(), Value::String(PROGRAM_NAME.to_string()));
     program.insert(
         "publicKey".to_string(),
-        Value::String(PROGRAM_ID.to_string()),
+        Value::String(payment_channels_core::ID.to_string()),
     );
     program.insert(
         "version".to_string(),
