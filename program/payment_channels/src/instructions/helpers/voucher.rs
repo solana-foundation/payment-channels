@@ -224,15 +224,7 @@ mod tests {
         let v = VoucherArgs::new(CHANNEL_ID, 200, 0);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
-        let out = verify_parsed(
-            &CHANNEL_ID,
-            &ch,
-            &v,
-            &parsed,
-            1_000_000,
-            STRICT,
-        )
-        .unwrap();
+        let out = verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 1_000_000, STRICT).unwrap();
         assert_eq!(out, 200);
     }
 
@@ -242,15 +234,7 @@ mod tests {
         let v = VoucherArgs::new(CHANNEL_ID, 500, 2_000);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
-        let out = verify_parsed(
-            &CHANNEL_ID,
-            &ch,
-            &v,
-            &parsed,
-            1_999,
-            STRICT,
-        )
-        .unwrap();
+        let out = verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 1_999, STRICT).unwrap();
         assert_eq!(out, 500);
     }
 
@@ -263,14 +247,7 @@ mod tests {
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
-            verify_parsed(
-                &CHANNEL_ID,
-                &ch,
-                &v,
-                &parsed,
-                0,
-                STRICT,
-            ),
+            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0, STRICT),
             PaymentChannelsError::VoucherChannelMismatch,
         );
     }
@@ -282,14 +259,7 @@ mod tests {
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
-            verify_parsed(
-                &CHANNEL_ID,
-                &ch,
-                &v,
-                &parsed,
-                500,
-                STRICT,
-            ),
+            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 500, STRICT),
             PaymentChannelsError::VoucherExpired,
         );
     }
@@ -301,14 +271,7 @@ mod tests {
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
-            verify_parsed(
-                &CHANNEL_ID,
-                &ch,
-                &v,
-                &parsed,
-                501,
-                STRICT,
-            ),
+            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 501, STRICT),
             PaymentChannelsError::VoucherExpired,
         );
     }
@@ -320,14 +283,7 @@ mod tests {
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
-            verify_parsed(
-                &CHANNEL_ID,
-                &ch,
-                &v,
-                &parsed,
-                0,
-                STRICT,
-            ),
+            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0, STRICT),
             PaymentChannelsError::VoucherExpired,
         );
     }
@@ -339,14 +295,7 @@ mod tests {
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
-            verify_parsed(
-                &CHANNEL_ID,
-                &ch,
-                &v,
-                &parsed,
-                0,
-                STRICT,
-            ),
+            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0, STRICT),
             PaymentChannelsError::VoucherWatermarkNotMonotonic,
         );
     }
@@ -357,15 +306,7 @@ mod tests {
         let v = VoucherArgs::new(CHANNEL_ID, 250, 0);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
-        let out = verify_parsed(
-            &CHANNEL_ID,
-            &ch,
-            &v,
-            &parsed,
-            0,
-            FINAL,
-        )
-        .unwrap();
+        let out = verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0, FINAL).unwrap();
         assert_eq!(out, 250);
     }
 
@@ -376,14 +317,7 @@ mod tests {
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
-            verify_parsed(
-                &CHANNEL_ID,
-                &ch,
-                &v,
-                &parsed,
-                0,
-                STRICT,
-            ),
+            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0, STRICT),
             PaymentChannelsError::VoucherWatermarkNotMonotonic,
         );
     }
@@ -395,14 +329,7 @@ mod tests {
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
-            verify_parsed(
-                &CHANNEL_ID,
-                &ch,
-                &v,
-                &parsed,
-                0,
-                FINAL,
-            ),
+            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0, FINAL),
             PaymentChannelsError::VoucherWatermarkNotMonotonic,
         );
     }
@@ -414,14 +341,7 @@ mod tests {
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
-            verify_parsed(
-                &CHANNEL_ID,
-                &ch,
-                &v,
-                &parsed,
-                0,
-                STRICT,
-            ),
+            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0, STRICT),
             PaymentChannelsError::VoucherWatermarkNotMonotonic,
         );
     }
@@ -433,14 +353,7 @@ mod tests {
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
-            verify_parsed(
-                &CHANNEL_ID,
-                &ch,
-                &v,
-                &parsed,
-                0,
-                STRICT,
-            ),
+            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0, STRICT),
             PaymentChannelsError::VoucherOverDeposit,
         );
     }
@@ -642,14 +555,7 @@ mod tests {
         msg[0] ^= 1;
         let parsed = valid_parsed(&msg);
         expect_err(
-            verify_parsed(
-                &CHANNEL_ID,
-                &ch,
-                &v,
-                &parsed,
-                0,
-                STRICT,
-            ),
+            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0, STRICT),
             PaymentChannelsError::VoucherMessageMismatch,
         );
     }
@@ -666,14 +572,7 @@ mod tests {
                 .expect("test message must be VOUCHER_PAYLOAD_SIZE"),
         };
         expect_err(
-            verify_parsed(
-                &CHANNEL_ID,
-                &ch,
-                &v,
-                &parsed,
-                0,
-                STRICT,
-            ),
+            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0, STRICT),
             PaymentChannelsError::VoucherSignerMismatch,
         );
     }
