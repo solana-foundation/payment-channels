@@ -1,26 +1,37 @@
-use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
+use pinocchio::{
+    AccountView, Address, ProgramResult,
+    cpi::Signer,
+    error::ProgramError,
+    sysvars::{Sysvar, clock::Clock},
+};
 
 use crate::errors::PaymentChannelsError;
+use crate::helpers::accounts::view::{
+    ChannelAccountView, ChannelContext, ChannelTokenAccountView, MintAccountView, PayerAccountView,
+    PayerContext, PayerTokenAccountView, TokenContext, TokenProgramAccountView,
+};
+use crate::instructions::helpers::channel_signer_seeds;
+use crate::state::channel::{Channel, ChannelStatus};
 
 /// Instruction discriminator byte for `withdrawPayer`.
 pub const DISCRIMINATOR: u8 = 8;
 
 pub struct WithdrawPayerAccounts<'a> {
-    /// Must equal [`Channel::payer`](crate::Channel::payer).
-    pub payer: &'a AccountView,
+    /// Must equal [`Channel::payer`](crate::Channel::payer) and be a signer.
+    pub payer: PayerAccountView<'a>,
     /// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at)
     /// stamped; not tombstoned.
-    pub channel: &'a AccountView,
-    pub channel_token_account: &'a AccountView,
-    pub payer_token_account: &'a AccountView,
-    pub mint: &'a AccountView,
-    pub token_program: &'a AccountView,
+    pub channel: ChannelAccountView<'a>,
+    pub channel_token_account: ChannelTokenAccountView<'a>,
+    pub payer_token_account: PayerTokenAccountView<'a>,
+    pub mint: MintAccountView<'a>,
+    pub token_program: TokenProgramAccountView<'a>,
 }
 
-impl<'a> TryFrom<&'a [AccountView]> for WithdrawPayerAccounts<'a> {
+impl<'a> TryFrom<&'a mut [AccountView]> for WithdrawPayerAccounts<'a> {
     type Error = ProgramError;
 
-    fn try_from(accounts: &'a [AccountView]) -> Result<Self, Self::Error> {
+    fn try_from(accounts: &'a mut [AccountView]) -> Result<Self, Self::Error> {
         let [
             payer,
             channel,
@@ -33,12 +44,12 @@ impl<'a> TryFrom<&'a [AccountView]> for WithdrawPayerAccounts<'a> {
             return Err(ProgramError::NotEnoughAccountKeys);
         };
         Ok(Self {
-            payer,
-            channel,
-            channel_token_account,
-            payer_token_account,
-            mint,
-            token_program,
+            payer: payer.into(),
+            channel: channel.into(),
+            channel_token_account: channel_token_account.into(),
+            payer_token_account: payer_token_account.into(),
+            mint: mint.into(),
+            token_program: token_program.into(),
         })
     }
 }
@@ -47,7 +58,80 @@ impl<'a> TryFrom<&'a [AccountView]> for WithdrawPayerAccounts<'a> {
 /// [`settled`](crate::Channel::settled) during `FINALIZED`; records
 /// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `= now` and
 /// does **not** tombstone the PDA.
-pub fn process(_program_id: &Address, accounts: &[AccountView]) -> ProgramResult {
-    let _accs = WithdrawPayerAccounts::try_from(accounts)?;
-    Err(PaymentChannelsError::NotImplemented.into())
+pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
+    let accs = WithdrawPayerAccounts::try_from(accounts)?;
+    let now = Clock::get()?.unix_timestamp;
+
+    // Signer check before any account reads.
+    if !accs.payer.is_signer() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+
+    // Owner / discriminator / version checks.
+    let channel = accs.channel.check()?;
+    let ch = Channel::from_account(&channel)?;
+
+    // Status gate: FINALIZED only.
+    if ch.status != ChannelStatus::Finalized as u8 {
+        return Err(PaymentChannelsError::InvalidChannelStatus.into());
+    }
+
+    // Identity + one-shot guard (all channel-state checks before token validation).
+    if accs.payer.address() != &ch.payer {
+        return Err(PaymentChannelsError::UnauthorizedPayer.into());
+    }
+    if ch.payer_withdrawn_at() != 0 {
+        return Err(PaymentChannelsError::PayerAlreadyWithdrawn.into());
+    }
+    if accs.mint.address() != &ch.mint {
+        return Err(PaymentChannelsError::MintAccountMismatch.into());
+    }
+
+    // Snapshot accounting + PDA seed material before dropping ch.
+    let deposit = ch.deposit();
+    let settled = ch.settled();
+    let payer_bytes: [u8; 32] = *ch.payer.as_array();
+    let payee_bytes: [u8; 32] = *ch.payee.as_array();
+    let mint_bytes: [u8; 32] = *ch.mint.as_array();
+    let signer_bytes: [u8; 32] = *ch.authorized_signer.as_array();
+    let salt_bytes: [u8; 8] = ch.salt().to_le_bytes();
+    let bump_byte: [u8; 1] = [ch.bump];
+    drop(ch);
+
+    // Validate token contexts + ATA derivations.
+    let token_ctx = TokenContext::new(accs.mint, accs.token_program)?;
+    let mut channel_ctx = ChannelContext::new(channel, accs.channel_token_account, token_ctx)
+        .map_err(|_| PaymentChannelsError::InvalidChannelTokenAccount)?;
+    let payer_ctx = PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)
+        .map_err(|e| match e {
+            PaymentChannelsError::AddressMismatch => PaymentChannelsError::InvalidPayerTokenAccount,
+            other => other,
+        })?;
+
+    // Stamp before CPI — runtime rolls back on failure.
+    {
+        let mut ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
+        ch.set_payer_withdrawn_at(now);
+    }
+
+    let signer_seeds = channel_signer_seeds(
+        &payer_bytes,
+        &payee_bytes,
+        &mint_bytes,
+        &signer_bytes,
+        &salt_bytes,
+        &bump_byte,
+    );
+    let signers = [Signer::from(&signer_seeds)];
+
+    let refund = deposit
+        .checked_sub(settled)
+        .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+    channel_ctx.transfer_checked_signed(
+        &payer_ctx.payer_token_account.as_any(),
+        refund,
+        &signers,
+    )?;
+
+    Ok(())
 }
