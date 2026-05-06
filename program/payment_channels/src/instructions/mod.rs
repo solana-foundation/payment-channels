@@ -10,7 +10,7 @@ pub mod top_up;
 pub mod withdraw_payer;
 
 #[cfg(feature = "idl")]
-use codama::{CodamaInstructions, CodamaType};
+use codama::{CodamaInstructions, CodamaPda, CodamaType};
 use pinocchio::{Address, error::ProgramError};
 
 use crate::state::Transmutable;
@@ -75,6 +75,18 @@ unsafe impl Transmutable for VoucherArgs {
     const LEN: usize = VOUCHER_PAYLOAD_SIZE;
 }
 
+/// PDA signer for Anchor-compatible self-CPI event emission.
+///
+/// Runtime code derives the same address from
+/// [`EVENT_AUTHORITY_SEED`](crate::event_engine::EVENT_AUTHORITY_SEED); this
+/// IDL-only marker lets generated clients derive it for `open` and
+/// `emitEvent`.
+#[cfg(feature = "idl")]
+#[allow(dead_code)]
+#[derive(CodamaPda)]
+#[codama(seed(type = string(utf8), value = "event_authority"))]
+pub(crate) struct EventAuthority;
+
 /// Byte-0-dispatched instruction codomain. Each variant's discriminant
 /// matches the `DISCRIMINATOR` const in the corresponding sibling module;
 /// [`from_bytes`](Self::from_bytes) peels the first byte and routes to the
@@ -98,8 +110,13 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
         codama(account(name = "system_program", default_value = program("system"))),
         codama(account(name = "rent")),
         codama(account(name = "associated_token_program")),
-        codama(account(name = "event_authority")),
-        codama(account(name = "self_program"))
+        codama(account(name = "event_authority", default_value = pda("eventAuthority"))),
+        codama(
+            account(
+                name = "self_program",
+                default_value = public_key("GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc")
+            )
+        )
     )]
     Open(#[cfg_attr(feature = "idl", codama(name = "open_args"))] open::OpenArgs<'a>) = 1,
 
@@ -205,7 +222,10 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
     /// instruction set. `228 = EVENT_IX_TAG_LE[0]`: self-CPI event data
     /// starts with this byte, so byte-0 dispatch routes straight to
     /// [`emit_event::process`](crate::instructions::emit_event::process).
-    #[cfg_attr(feature = "idl", codama(account(name = "event_authority", signer)))]
+    #[cfg_attr(
+        feature = "idl",
+        codama(account(name = "event_authority", signer, default_value = pda("eventAuthority")))
+    )]
     EmitEvent = 228,
 }
 

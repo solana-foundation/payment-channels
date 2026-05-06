@@ -8,6 +8,8 @@
 
 import {
   combineCodec,
+  getArrayDecoder,
+  getArrayEncoder,
   getStructDecoder,
   getStructEncoder,
   type Codec,
@@ -15,22 +17,26 @@ import {
   type Encoder,
 } from "@solana/kit";
 import {
-  getDistributionRecipientsDecoder,
-  getDistributionRecipientsEncoder,
-  type DistributionRecipients,
-  type DistributionRecipientsArgs,
+  getDistributionEntryDecoder,
+  getDistributionEntryEncoder,
+  type DistributionEntry,
+  type DistributionEntryArgs,
 } from ".";
 
-export type DistributeArgs = { recipients: DistributionRecipients };
+export type DistributeArgs = { recipients: Array<DistributionEntry> };
 
-export type DistributeArgsArgs = { recipients: DistributionRecipientsArgs };
+export type DistributeArgsArgs = { recipients: Array<DistributionEntryArgs> };
 
 export function getDistributeArgsEncoder(): Encoder<DistributeArgsArgs> {
-  return getStructEncoder([["recipients", getDistributionRecipientsEncoder()]]);
+  return getStructEncoder([
+    ["recipients", getArrayEncoder(getDistributionEntryEncoder())],
+  ]);
 }
 
 export function getDistributeArgsDecoder(): Decoder<DistributeArgs> {
-  return getStructDecoder([["recipients", getDistributionRecipientsDecoder()]]);
+  return getStructDecoder([
+    ["recipients", getArrayDecoder(getDistributionEntryDecoder())],
+  ]);
 }
 
 export function getDistributeArgsCodec(): Codec<

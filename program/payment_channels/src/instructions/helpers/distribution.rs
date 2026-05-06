@@ -47,11 +47,11 @@ unsafe impl Transmutable for DistributionEntry {
 const _: () = assert!(size_of::<DistributionEntry>() == 34);
 const _: () = assert!(core::mem::align_of::<DistributionEntry>() == 1);
 
-/// Borrowed view of a validated distribution preimage.
+/// Borrowed view of the validated distribution preimage.
 ///
 /// Wire layout: `count(u32 LE) || [recipient(32) || shareBps(u16 LE)] × count`.
 #[derive(Debug, Clone, Copy)]
-pub struct DistributionRecipients<'a> {
+pub struct DistributionPreimage<'a> {
     /// Entries declared by the count prefix.
     pub entries: &'a [DistributionEntry],
     /// Bytes hashed into the channel's distribution commitment.
@@ -60,7 +60,7 @@ pub struct DistributionRecipients<'a> {
 
 const RECIPIENT_COUNT_PREFIX_LEN: usize = size_of::<u32>();
 
-impl<'a> DistributionRecipients<'a> {
+impl<'a> DistributionPreimage<'a> {
     /// Parses `count || entries` and verifies the distribution invariants.
     ///
     /// The count must be at most [`MAX_DISTRIBUTION_RECIPIENTS`], the byte
@@ -181,25 +181,25 @@ mod tests {
         data
     }
 
-    fn make_view(count: u8) -> DistributionRecipients<'static> {
+    fn make_view(count: u8) -> DistributionPreimage<'static> {
         let entries: Vec<_> = (0..count)
             .map(|i| entry(i.saturating_add(1), 100))
             .collect();
         let bytes = encode(count as u32, &entries);
         let leaked = Box::leak(bytes.into_boxed_slice());
-        DistributionRecipients::load(leaked).unwrap()
+        DistributionPreimage::load(leaked).unwrap()
     }
 
-    fn recipients_from_entries(entries: &[DistributionEntry]) -> DistributionRecipients<'static> {
+    fn recipients_from_entries(entries: &[DistributionEntry]) -> DistributionPreimage<'static> {
         let bytes = encode(entries.len() as u32, entries);
         let leaked = Box::leak(bytes.into_boxed_slice());
-        DistributionRecipients::load(leaked).unwrap()
+        DistributionPreimage::load(leaked).unwrap()
     }
 
     #[test]
     fn load_rejects_empty_data() {
         assert_eq!(
-            DistributionRecipients::load(&[]).map(|_| ()),
+            DistributionPreimage::load(&[]).map(|_| ()),
             Err(ProgramError::InvalidInstructionData),
         );
     }
@@ -208,7 +208,7 @@ mod tests {
     fn load_rejects_count_above_max() {
         let data = ((MAX_DISTRIBUTION_RECIPIENTS + 1) as u32).to_le_bytes();
         assert_eq!(
-            DistributionRecipients::load(&data).map(|_| ()),
+            DistributionPreimage::load(&data).map(|_| ()),
             Err(ProgramError::from(
                 PaymentChannelsError::InvalidRecipientCount
             )),
@@ -221,7 +221,7 @@ mod tests {
         data.extend_from_slice(&1u32.to_le_bytes());
         data.extend_from_slice(&[0u8; DistributionEntry::LEN - 1]);
         assert_eq!(
-            DistributionRecipients::load(&data).map(|_| ()),
+            DistributionPreimage::load(&data).map(|_| ()),
             Err(ProgramError::InvalidInstructionData),
         );
     }
@@ -231,7 +231,7 @@ mod tests {
         let mut data = encode(0, &[]);
         data.push(0);
         assert_eq!(
-            DistributionRecipients::load(&data).map(|_| ()),
+            DistributionPreimage::load(&data).map(|_| ()),
             Err(ProgramError::InvalidInstructionData),
         );
     }
@@ -267,7 +267,7 @@ mod tests {
     fn load_rejects_zero_bps() {
         let data = encode(1, &[entry(1, 0)]);
         assert_eq!(
-            DistributionRecipients::load(&data).map(|_| ()),
+            DistributionPreimage::load(&data).map(|_| ()),
             Err(ProgramError::from(PaymentChannelsError::InvalidSplitConfig)),
         );
     }
@@ -276,7 +276,7 @@ mod tests {
     fn load_rejects_over_10000_bps() {
         let data = encode(1, &[entry(1, BPS_DENOMINATOR as u16 + 1)]);
         assert_eq!(
-            DistributionRecipients::load(&data).map(|_| ()),
+            DistributionPreimage::load(&data).map(|_| ()),
             Err(ProgramError::from(PaymentChannelsError::InvalidSplitConfig)),
         );
     }
@@ -330,7 +330,7 @@ mod tests {
     fn load_rejects_duplicate_recipient() {
         let data = encode(3, &[entry(1, 100), entry(2, 100), entry(1, 100)]);
         assert_eq!(
-            DistributionRecipients::load(&data).map(|_| ()),
+            DistributionPreimage::load(&data).map(|_| ()),
             Err(ProgramError::from(PaymentChannelsError::DuplicateRecipient)),
         );
     }

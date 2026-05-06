@@ -8,6 +8,8 @@
 
 import {
   combineCodec,
+  getArrayDecoder,
+  getArrayEncoder,
   getStructDecoder,
   getStructEncoder,
   getU32Decoder,
@@ -19,24 +21,24 @@ import {
   type Encoder,
 } from "@solana/kit";
 import {
-  getDistributionRecipientsDecoder,
-  getDistributionRecipientsEncoder,
-  type DistributionRecipients,
-  type DistributionRecipientsArgs,
+  getDistributionEntryDecoder,
+  getDistributionEntryEncoder,
+  type DistributionEntry,
+  type DistributionEntryArgs,
 } from ".";
 
 export type OpenArgs = {
   salt: bigint;
   deposit: bigint;
   gracePeriod: number;
-  recipients: DistributionRecipients;
+  recipients: Array<DistributionEntry>;
 };
 
 export type OpenArgsArgs = {
   salt: number | bigint;
   deposit: number | bigint;
   gracePeriod: number;
-  recipients: DistributionRecipientsArgs;
+  recipients: Array<DistributionEntryArgs>;
 };
 
 export function getOpenArgsEncoder(): Encoder<OpenArgsArgs> {
@@ -44,7 +46,7 @@ export function getOpenArgsEncoder(): Encoder<OpenArgsArgs> {
     ["salt", getU64Encoder()],
     ["deposit", getU64Encoder()],
     ["gracePeriod", getU32Encoder()],
-    ["recipients", getDistributionRecipientsEncoder()],
+    ["recipients", getArrayEncoder(getDistributionEntryEncoder())],
   ]);
 }
 
@@ -53,7 +55,7 @@ export function getOpenArgsDecoder(): Decoder<OpenArgs> {
     ["salt", getU64Decoder()],
     ["deposit", getU64Decoder()],
     ["gracePeriod", getU32Decoder()],
-    ["recipients", getDistributionRecipientsDecoder()],
+    ["recipients", getArrayDecoder(getDistributionEntryDecoder())],
   ]);
 }
 

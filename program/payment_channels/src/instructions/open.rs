@@ -1,3 +1,7 @@
+#[cfg(feature = "idl")]
+use alloc::vec::Vec;
+#[cfg(feature = "idl")]
+use codama::CodamaType;
 use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer, error::ProgramError};
 use pinocchio_associated_token_account::instructions::Create as CreateAta;
 use pinocchio_system::instructions::CreateAccount;
@@ -20,8 +24,10 @@ use crate::state::Channel;
 use crate::event_engine::EventSerialize;
 use crate::event_engine::emit_event;
 use crate::events::Opened;
+#[cfg(feature = "idl")]
+use crate::instructions::helpers::DistributionEntry;
 pub use crate::instructions::helpers::MAX_DISTRIBUTION_RECIPIENTS;
-use crate::instructions::helpers::{DistributionRecipients, channel_signer_seeds};
+use crate::instructions::helpers::{DistributionPreimage, channel_signer_seeds};
 
 /// Instruction discriminator byte for `open`.
 pub const DISCRIMINATOR: u8 = 1;
@@ -42,7 +48,18 @@ pub struct OpenArgs<'a> {
     deposit: [u8; 8],
     /// Grace duration, in seconds.
     grace_period: [u8; 4],
-    pub recipients: DistributionRecipients<'a>,
+    pub recipients: DistributionPreimage<'a>,
+}
+
+#[cfg(feature = "idl")]
+#[allow(dead_code)]
+#[derive(CodamaType)]
+#[codama(name = "open_args")]
+pub struct OpenArgsWire {
+    pub salt: u64,
+    pub deposit: u64,
+    pub grace_period: u32,
+    pub recipients: Vec<DistributionEntry>,
 }
 
 impl<'a> OpenArgs<'a> {
@@ -85,7 +102,7 @@ impl<'a> OpenArgs<'a> {
         let grace_period = grace_period
             .try_into()
             .map_err(|_| ProgramError::InvalidInstructionData)?;
-        let recipients = DistributionRecipients::load(recipients_bytes)?;
+        let recipients = DistributionPreimage::load(recipients_bytes)?;
         Ok(Self {
             salt,
             deposit,

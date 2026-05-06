@@ -1,21 +1,9 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import {
-  argumentValueNode,
-  arrayTypeNode,
-  definedTypeLinkNode,
-  definedTypeNode,
-  instructionRemainingAccountsNode,
-  numberTypeNode,
-  pdaValueNode,
-  prefixedCountNode,
-  programIdValueNode,
-  structFieldTypeNode,
-  structTypeNode,
-} from '@codama/nodes';
-import { setInstructionAccountDefaultValuesVisitor } from '@codama/visitors';
+import { argumentValueNode, instructionRemainingAccountsNode } from '@codama/nodes';
 
 const IDL_PATH = './program/payment_channels/idl/payment_channels.json';
+const CODAMA_STANDARD_VERSION = '1.6.0';
 const OMIT_EMPTY_ARRAY_KEYS = new Set([
   'byteDeltas',
   'extraArguments',
@@ -23,36 +11,24 @@ const OMIT_EMPTY_ARRAY_KEYS = new Set([
   'subInstructions',
 ]);
 
-export const patchDynamicDistributionIdl = {
+// Codama's Rust macros define fixed instruction accounts, but they do not
+// currently expose instructionRemainingAccountsNode. Keep this visitor scoped
+// to the dynamic recipient ATA tail used by the generated distribute builders.
+export const addDistributeRecipientRemainingAccounts = {
   visitRoot(root) {
     const program = expectProgram(root);
-    const definedTypes = [...expectArray(program.definedTypes, 'program.definedTypes')];
-    [distributionRecipientsType(), openArgsType(), distributeArgsType()].forEach((node) =>
-      upsertByName(definedTypes, node),
-    );
-
-    let sawOpen = false;
     let sawDistribute = false;
     const instructions = expectArray(program.instructions, 'program.instructions').map((ix) => {
-      if (ix.name === 'open') {
-        sawOpen = true;
-        ensureInstructionArg(ix, 'openArgs');
-        return ix;
-      }
-      if (ix.name === 'distribute') {
-        sawDistribute = true;
-        ensureInstructionArg(ix, 'distributeArgs');
-        return {
-          ...ix,
-          remainingAccounts: recipientAtaTail(),
-        };
-      }
-      return ix;
+      if (ix.name !== 'distribute') return ix;
+      sawDistribute = true;
+      return {
+        ...ix,
+        remainingAccounts: recipientAtaTail(),
+      };
     });
 
-    if (!sawOpen) throw new Error('Codama IDL is missing open instruction');
     if (!sawDistribute) throw new Error('Codama IDL is missing distribute instruction');
-    return { ...root, program: { ...program, definedTypes, instructions } };
+    return { ...root, program: { ...program, instructions } };
   },
 };
 
@@ -64,29 +40,6 @@ export const writeCodamaIdl = (outputPath = IDL_PATH) => ({
     return root;
   },
 });
-
-// Default `eventAuthority` and `selfProgram` accounts on any ix that lists them.
-export const setEventAuthorityAndSelfProgramDefaults = setInstructionAccountDefaultValuesVisitor([
-  { account: 'eventAuthority', defaultValue: pdaValueNode('eventAuthority') },
-  { account: 'selfProgram', defaultValue: programIdValueNode() },
-]);
-
-function ensureInstructionArg(ix, publicName) {
-  const matches = expectArray(ix.arguments, `${ix.name}.arguments`).filter(
-    (arg) =>
-      arg.name === publicName &&
-      arg.type?.kind === 'definedTypeLinkNode' &&
-      arg.type.name === publicName,
-  );
-  if (matches.length !== 1) {
-    throw new Error(`Codama IDL instruction ${ix.name} expected one ${publicName} argument`);
-  }
-}
-
-function upsertByName(nodes, node) {
-  const index = nodes.findIndex((candidate) => candidate.name === node.name);
-  index >= 0 ? (nodes[index] = node) : nodes.push(node);
-}
 
 function expectProgram(root) {
   if (root?.kind !== 'rootNode' || root.program?.kind !== 'programNode') {
@@ -102,7 +55,10 @@ function expectArray(value, path) {
 
 function stringifyCodamaIdl(root) {
   const idl = prune(root);
-  if (idl.kind === 'rootNode' && !('additionalPrograms' in idl)) idl.additionalPrograms = [];
+  if (idl.kind === 'rootNode') {
+    idl.version = CODAMA_STANDARD_VERSION;
+    if (!('additionalPrograms' in idl)) idl.additionalPrograms = [];
+  }
   return JSON.stringify(sortKeys(idl), null, 2);
 }
 
@@ -131,32 +87,6 @@ function sortKeys(value) {
       .map(([key, child]) => [key, sortKeys(child)]),
   );
 }
-
-const number = (format) => numberTypeNode(format);
-const link = (name) => definedTypeLinkNode(name);
-const field = (name, type) => structFieldTypeNode({ name, type });
-const defined = (name, type) => definedTypeNode({ name, type });
-const struct = (fields) => structTypeNode(fields);
-
-const distributionRecipientsType = () =>
-  defined(
-    'distributionRecipients',
-    arrayTypeNode(link('distributionEntry'), prefixedCountNode(number('u32'))),
-  );
-
-const openArgsType = () =>
-  defined(
-    'openArgs',
-    struct([
-      field('salt', number('u64')),
-      field('deposit', number('u64')),
-      field('gracePeriod', number('u32')),
-      field('recipients', link('distributionRecipients')),
-    ]),
-  );
-
-const distributeArgsType = () =>
-  defined('distributeArgs', struct([field('recipients', link('distributionRecipients'))]));
 
 const recipientAtaTail = () => [
   instructionRemainingAccountsNode(argumentValueNode('recipientTokenAccounts'), {

@@ -53,8 +53,9 @@ build-program: prepare-deploy-keys
     @echo "✓ program built"
 
 # Raw IDL is emitted by build.rs, gated on the `idl` feature so plain
-# `cargo build` / `cargo build-sbf` don't touch it. Codama visitors then
-# patch the dynamic recipient client shape and write the committed IDL.
+# `cargo build` / `cargo build-sbf` don't touch it. Rust Codama macros define
+# the wire types; the remaining visitor only adds distribute's dynamic account
+# tail and writes the committed IDL.
 generate-idl:
     cd {{program_dir}} && GENERATE_IDL="$RANDOM-$(date +%s)" cargo build --features idl
     pnpm exec codama run idl --idl {{raw_idl_file}}

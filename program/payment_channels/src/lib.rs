@@ -5,6 +5,9 @@
 
 #![no_std]
 
+#[cfg(feature = "idl")]
+extern crate alloc;
+
 #[cfg(all(feature = "idl", target_os = "solana"))]
 compile_error!("the `idl` feature is host-only; do not enable it for SBF builds");
 

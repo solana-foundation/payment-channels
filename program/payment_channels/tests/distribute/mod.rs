@@ -12,7 +12,7 @@ mod integration;
 use mollusk_svm::{Mollusk, result::ProgramResult};
 use payment_channels::state::Channel;
 use payment_channels_client::instructions::{Distribute, DistributeInstructionArgs};
-use payment_channels_client::types::{DistributeArgs, DistributionEntry, DistributionRecipients};
+use payment_channels_client::types::{DistributeArgs, DistributionEntry};
 use solana_account::Account;
 use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
@@ -43,16 +43,15 @@ pub(super) fn treasury_owner() -> Pubkey {
     Pubkey::new_from_array(b)
 }
 
-/// Builds `DistributionRecipients` from `splits`.
-pub(super) fn build_recipients(splits: &[Split]) -> DistributionRecipients {
-    let entries: Vec<DistributionEntry> = splits
+/// Builds the u32-prefixed recipient vector accepted by the generated client.
+pub(super) fn build_recipients(splits: &[Split]) -> Vec<DistributionEntry> {
+    splits
         .iter()
         .map(|s| DistributionEntry {
             recipient: Address::from(s.owner.to_bytes()),
             bps: s.bps,
         })
-        .collect();
-    DistributionRecipients::from(entries)
+        .collect()
 }
 
 /// Full distribute ix build with the 8-slot fixed head + dynamic recipient tail.
@@ -67,7 +66,7 @@ pub(super) fn build_distribute_ix(
     mint: &Pubkey,
     token_program: &Pubkey,
     recipient_atas: &[Pubkey],
-    recipients: DistributionRecipients,
+    recipients: Vec<DistributionEntry>,
 ) -> Instruction {
     let remaining: Vec<AccountMeta> = recipient_atas
         .iter()
@@ -104,7 +103,7 @@ pub(super) struct DistributeRun {
     pub mint: Pubkey,
     pub token_program: Pubkey,
     pub recipient_atas: Vec<Pubkey>,
-    pub recipients: DistributionRecipients,
+    pub recipients: Vec<DistributionEntry>,
 }
 
 impl DistributeRun {

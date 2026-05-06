@@ -13,7 +13,7 @@ use payment_channels::ed25519;
 use payment_channels::instructions::distribute::DISCRIMINATOR;
 use payment_channels::instructions::open::DISCRIMINATOR as OPEN_DISCRIMINATOR;
 use payment_channels_client::instructions::{Settle, SettleInstructionArgs, WithdrawPayer};
-use payment_channels_client::types::{DistributionRecipients, SettleArgs, VoucherArgs};
+use payment_channels_client::types::{DistributionEntry, SettleArgs, VoucherArgs};
 use solana_instruction::error::InstructionError;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
@@ -492,7 +492,7 @@ impl Scenario {
         }
     }
 
-    fn recipients(&self) -> DistributionRecipients {
+    fn recipients(&self) -> Vec<DistributionEntry> {
         build_recipients(&self.splits)
     }
 

@@ -1,3 +1,7 @@
+#[cfg(feature = "idl")]
+use alloc::vec::Vec;
+#[cfg(feature = "idl")]
+use codama::CodamaType;
 use pinocchio::{
     AccountView, Address, ProgramResult, Resize,
     cpi::Signer,
@@ -12,7 +16,7 @@ use crate::helpers::accounts::view::{
 };
 use crate::helpers::accounts::view::{PayerAccountView, RecipientTokenAccountsView};
 use crate::instructions::helpers::{
-    DistributionEntry, DistributionRecipients, channel_signer_seeds, floor_bps_share,
+    DistributionEntry, DistributionPreimage, channel_signer_seeds, floor_bps_share,
 };
 use crate::state::channel::{Channel, ChannelStatus};
 use crate::state::closed_channel::ClosedChannel;
@@ -28,13 +32,21 @@ pub const DISCRIMINATOR: u8 = 7;
 pub struct DistributeArgs<'a> {
     /// Reveal of the plan committed at `open`. Rehashed on-chain; digest must
     /// equal [`Channel::distribution_hash`](crate::Channel::distribution_hash).
-    pub recipients: DistributionRecipients<'a>,
+    pub recipients: DistributionPreimage<'a>,
+}
+
+#[cfg(feature = "idl")]
+#[allow(dead_code)]
+#[derive(CodamaType)]
+#[codama(name = "distribute_args")]
+pub struct DistributeArgsWire {
+    pub recipients: Vec<DistributionEntry>,
 }
 
 impl<'a> DistributeArgs<'a> {
     pub fn load(data: &'a [u8]) -> Result<Self, ProgramError> {
         Ok(Self {
-            recipients: DistributionRecipients::load(data)?,
+            recipients: DistributionPreimage::load(data)?,
         })
     }
 }

@@ -276,8 +276,8 @@ export async function getOpenInstructionAsync<
     accounts.eventAuthority.value = await findEventAuthorityPda();
   }
   if (!accounts.selfProgram.value) {
-    accounts.selfProgram.value = programAddress;
-    accounts.selfProgram.isWritable = false;
+    accounts.selfProgram.value =
+      "GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc" as Address<"GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc">;
   }
 
   const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
@@ -444,8 +444,8 @@ export function getOpenInstruction<
       "11111111111111111111111111111111" as Address<"11111111111111111111111111111111">;
   }
   if (!accounts.selfProgram.value) {
-    accounts.selfProgram.value = programAddress;
-    accounts.selfProgram.isWritable = false;
+    accounts.selfProgram.value =
+      "GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc" as Address<"GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc">;
   }
 
   const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
