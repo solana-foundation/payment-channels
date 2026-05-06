@@ -4,9 +4,9 @@
 
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
-use payment_channels::PaymentChannelsError;
 use payment_channels_client::instructions::{TopUp, TopUpInstructionArgs};
 use payment_channels_client::types::TopUpArgs;
+use payment_channels_core::PaymentChannelsError;
 use solana_account::Account;
 use solana_instruction::error::InstructionError;
 use solana_instruction::{AccountMeta, Instruction};

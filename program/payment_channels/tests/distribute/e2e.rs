@@ -7,12 +7,12 @@
 
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
-use payment_channels::PaymentChannelsError;
-use payment_channels::VOUCHER_PAYLOAD_SIZE;
-use payment_channels::ed25519;
-use payment_channels::instructions::open::DISCRIMINATOR as OPEN_DISCRIMINATOR;
 use payment_channels_client::instructions::{Settle, SettleInstructionArgs, WithdrawPayer};
 use payment_channels_client::types::{DistributionRecipients, SettleArgs, VoucherArgs};
+use payment_channels_core::PaymentChannelsError;
+use payment_channels_core::VOUCHER_PAYLOAD_SIZE;
+use payment_channels_core::ed25519;
+use payment_channels_core::instructions::open::DISCRIMINATOR as OPEN_DISCRIMINATOR;
 use solana_instruction::error::InstructionError;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;

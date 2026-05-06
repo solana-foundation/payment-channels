@@ -3,7 +3,7 @@
 //! Runs the full CPI chain (CreateAccount + CreateAta + token Transfer) via
 //! LiteSVM and verifies every field written into the channel account.
 
-use payment_channels::state::{
+use payment_channels_core::state::{
     AccountDiscriminator, CURRENT_CHANNEL_VERSION, Channel, ChannelStatus,
 };
 use solana_message::Message;

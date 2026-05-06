@@ -3450,16 +3450,12 @@ dependencies = [
  "blake3",
  "borsh",
  "codama",
- "const-crypto",
  "litesvm",
  "litesvm-token",
  "mollusk-svm",
  "payment_channels_client",
+ "payment_channels_core",
  "pinocchio",
- "pinocchio-associated-token-account",
- "pinocchio-system",
- "pinocchio-token",
- "pinocchio-token-2022",
  "rstest",
  "serde_json",
  "solana-account",
@@ -3476,7 +3472,6 @@ dependencies = [
  "solana-transaction",
  "solana-transaction-error",
  "spl-token-2022-interface",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3494,6 +3489,24 @@ dependencies = [
  "solana-cpi",
  "solana-instruction",
  "solana-program-error",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "payment_channels_core"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "borsh",
+ "codama",
+ "const-crypto",
+ "pinocchio",
+ "pinocchio-associated-token-account",
+ "pinocchio-system",
+ "pinocchio-token",
+ "pinocchio-token-2022",
+ "solana-address 2.6.0",
+ "spl-token-2022-interface",
  "thiserror 2.0.18",
 ]
 

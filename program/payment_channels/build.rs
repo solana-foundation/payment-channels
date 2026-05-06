@@ -1,10 +1,16 @@
 //! Codama IDL build script.
 
 use codama::Codama;
-use std::{env, fs, path::Path};
+use serde_json::Value;
+use std::{env, fs, io, path::Path};
+
+const PROGRAM_NAME: &str = "paymentChannels";
+const PROGRAM_ID: &str = "GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=src/");
+    println!("cargo:rerun-if-changed=../payment_channels_core/Cargo.toml");
+    println!("cargo:rerun-if-changed=../payment_channels_core/src/");
     println!("cargo:rerun-if-env-changed=GENERATE_IDL");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_IDL");
 
@@ -23,11 +29,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn generate_idl() -> Result<(), Box<dyn std::error::Error>> {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR")?;
-    let crate_path = Path::new(&manifest_dir).join("src");
+    let crate_path = Path::new(&manifest_dir).join("../payment_channels_core/src");
     let codama = Codama::load(&crate_path)?;
     let idl_json = codama.get_json_idl()?;
 
-    let parsed: serde_json::Value = serde_json::from_str(&idl_json)?;
+    let mut parsed: Value = serde_json::from_str(&idl_json)?;
+    let program = parsed
+        .get_mut("program")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "IDL missing program node"))?;
+    program.insert("name".to_string(), Value::String(PROGRAM_NAME.to_string()));
+    program.insert(
+        "publicKey".to_string(),
+        Value::String(PROGRAM_ID.to_string()),
+    );
+    program.insert(
+        "version".to_string(),
+        Value::String(env!("CARGO_PKG_VERSION").to_string()),
+    );
+
     let mut formatted = serde_json::to_string_pretty(&parsed)?;
     formatted.push('\n');
 

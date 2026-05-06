@@ -3,9 +3,9 @@
 #![allow(clippy::result_large_err)]
 
 use litesvm::LiteSVM;
-use payment_channels::PaymentChannelsError;
-use payment_channels::state::channel::ChannelStatus;
 use payment_channels_client::instructions::Finalize;
+use payment_channels_core::PaymentChannelsError;
+use payment_channels_core::state::channel::ChannelStatus;
 use solana_account::Account;
 use solana_clock::Clock;
 use solana_keypair::Keypair;

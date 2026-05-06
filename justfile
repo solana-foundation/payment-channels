@@ -71,6 +71,7 @@ build-client: generate-client
 test: test-program
 
 test-program: generate-client
+    cargo test -p payment_channels_core
     cd {{program_dir}} && cargo test-sbf
 
 # Focused event-engine end-to-end run (litesvm). Loads the compiled .so

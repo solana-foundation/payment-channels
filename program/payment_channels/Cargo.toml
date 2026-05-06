@@ -5,35 +5,29 @@ edition = "2024"
 license = "MIT"
 
 [lib]
-crate-type = ["lib", "cdylib"]
+crate-type = ["cdylib"]
 
 [features]
 default = []
 # Enables codama derives + build.rs IDL emission. Host-only; must NOT
 # be enabled for `cargo build-sbf` (see `compile_error!` guard in
 # src/lib.rs). Use `cargo build --features idl` or `just generate-idl`.
-idl = ["dep:codama"]
+idl = ["payment_channels_core/idl"]
 
 [build-dependencies]
 codama     = "0.9.1"
 serde_json = "1"
 
 [dependencies]
-pinocchio                          = { version = "0.11.1", features = ["cpi", "copy", "account-resize"] }
-solana-address                     = { version = "2", features = ["curve25519", "borsh"] }
-pinocchio-associated-token-account = "0.4.0"
-pinocchio-system                   = "0.6.0"
-pinocchio-token                    = "0.6.0"
-pinocchio-token-2022               = "0.3.1"
-codama                             = { version = "0.9.1", optional = true }
-const-crypto                       = "0.3"
-borsh                              = { version = "1", default-features = false, features = ["derive"] }
-thiserror                          = { version = "2", default-features = false }
+payment_channels_core = { path = "../payment_channels_core" }
+pinocchio             = "0.11.1"
 
 [dev-dependencies]
+borsh                    = { version = "1", default-features = false, features = ["derive"] }
 litesvm                  = { version = "0.11", features = ["precompiles"] }
 litesvm-token            = { version = "0.11", features = ["token-2022"] }
 payment_channels_client  = { workspace = true }
+solana-address           = { version = "2", features = ["curve25519", "borsh"] }
 solana-account           = "^3"
 solana-clock             = "^3"
 solana-instruction       = "^3"

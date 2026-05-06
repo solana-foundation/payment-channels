@@ -3,8 +3,8 @@
 #![allow(clippy::result_large_err)]
 
 use litesvm::LiteSVM;
-use payment_channels::state::channel::ChannelStatus;
 use payment_channels_client::instructions::RequestClose;
+use payment_channels_core::state::channel::ChannelStatus;
 use solana_account::Account;
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;

@@ -6,12 +6,12 @@ pub mod token_2022;
 
 use litesvm::LiteSVM;
 use mollusk_svm::Mollusk;
-use payment_channels::PaymentChannelsError;
-use payment_channels::instructions::open::{
+use payment_channels_core::PaymentChannelsError;
+use payment_channels_core::instructions::open::{
     DISCRIMINATOR as OPEN_DISCRIMINATOR, MAX_DISTRIBUTION_RECIPIENTS,
 };
-use payment_channels::state::Channel;
-use payment_channels::state::channel::ChannelStatus;
+use payment_channels_core::state::Channel;
+use payment_channels_core::state::channel::ChannelStatus;
 use solana_clock::Clock;
 use solana_instruction::{AccountMeta, Instruction, error::InstructionError};
 use solana_keypair::Keypair;
@@ -21,7 +21,7 @@ use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 
 /// Payment channels program ID.
-pub const PROGRAM_ID: Pubkey = Pubkey::new_from_array(*payment_channels::ID.as_array());
+pub const PROGRAM_ID: Pubkey = Pubkey::new_from_array(*payment_channels_core::ID.as_array());
 
 pub const SPL_TOKEN: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 pub const TOKEN_2022: Pubkey = pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
@@ -31,12 +31,12 @@ pub const SYSVAR_RENT: Pubkey = pubkey!("SysvarRent11111111111111111111111111111
 pub const INSTRUCTIONS_SYSVAR: Pubkey = pubkey!("Sysvar1nstructions1111111111111111111111111");
 
 pub fn ed25519_program_id() -> Pubkey {
-    Pubkey::new_from_array(*payment_channels::ed25519::PROGRAM_ID.as_array())
+    Pubkey::new_from_array(*payment_channels_core::ed25519::PROGRAM_ID.as_array())
 }
 
 pub fn event_authority() -> Pubkey {
     Pubkey::find_program_address(
-        &[payment_channels::event_engine::EVENT_AUTHORITY_SEED],
+        &[payment_channels_core::event_engine::EVENT_AUTHORITY_SEED],
         &PROGRAM_ID,
     )
     .0

@@ -3,11 +3,11 @@
 #![allow(clippy::result_large_err)]
 
 use litesvm::LiteSVM;
-use payment_channels::ed25519;
-use payment_channels::state::channel::ChannelStatus;
-use payment_channels::{PaymentChannelsError, VOUCHER_PAYLOAD_SIZE};
 use payment_channels_client::instructions::{SettleAndFinalize, SettleAndFinalizeInstructionArgs};
 use payment_channels_client::types::{SettleAndFinalizeArgs, VoucherArgs};
+use payment_channels_core::ed25519;
+use payment_channels_core::state::channel::ChannelStatus;
+use payment_channels_core::{PaymentChannelsError, VOUCHER_PAYLOAD_SIZE};
 use solana_account::Account;
 use solana_clock::Clock;
 use solana_instruction::Instruction;

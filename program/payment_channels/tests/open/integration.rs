@@ -1,7 +1,7 @@
 use litesvm::LiteSVM;
 use mollusk_svm::result::ProgramResult;
-use payment_channels::PaymentChannelsError;
-use payment_channels::instructions::open::MAX_DISTRIBUTION_RECIPIENTS;
+use payment_channels_core::PaymentChannelsError;
+use payment_channels_core::instructions::open::MAX_DISTRIBUTION_RECIPIENTS;
 use solana_message::Message;
 use solana_program_error::ProgramError;
 use solana_pubkey::Pubkey;

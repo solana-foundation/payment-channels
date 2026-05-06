@@ -15,9 +15,11 @@
 
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
-use payment_channels::PaymentChannelsError;
-use payment_channels::event_engine::{EMIT_EVENT_IX_DISC, EVENT_AUTHORITY_SEED, EVENT_IX_TAG_LE};
-use payment_channels::events::Opened;
+use payment_channels_core::PaymentChannelsError;
+use payment_channels_core::event_engine::{
+    EMIT_EVENT_IX_DISC, EVENT_AUTHORITY_SEED, EVENT_IX_TAG_LE,
+};
+use payment_channels_core::events::Opened;
 use solana_instruction::error::InstructionError;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
@@ -44,7 +46,7 @@ fn fund(svm: &mut LiteSVM, pubkey: &Pubkey, lamports: u64) {
 
 #[test]
 fn open_emits_opened_event_with_anchor_compatible_wire_format() {
-    use payment_channels::instructions::open::{DISCRIMINATOR, MAX_DISTRIBUTION_RECIPIENTS};
+    use payment_channels_core::instructions::open::{DISCRIMINATOR, MAX_DISTRIBUTION_RECIPIENTS};
 
     let mut svm = LiteSVM::load_program();
     let payer = Keypair::new();
@@ -156,7 +158,7 @@ fn open_emits_opened_event_with_anchor_compatible_wire_format() {
     let disc = &data[8..16];
     let body = &data[16..];
     let expected_disc =
-        <Opened as payment_channels::event_engine::EventDiscriminator>::DISCRIMINATOR;
+        <Opened as payment_channels_core::event_engine::EventDiscriminator>::DISCRIMINATOR;
     assert_eq!(disc, &expected_disc, "event discriminator mismatch");
 
     // Manual parse of the 32-byte Borsh payload. We intentionally skip

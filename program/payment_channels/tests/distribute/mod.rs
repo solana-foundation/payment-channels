@@ -10,9 +10,9 @@ mod e2e;
 mod integration;
 
 use mollusk_svm::{Mollusk, result::ProgramResult};
-use payment_channels::instructions::distribute::DISCRIMINATOR;
-use payment_channels::state::Channel;
 use payment_channels_client::types::{DistributeArgs, DistributionEntry, DistributionRecipients};
+use payment_channels_core::instructions::distribute::DISCRIMINATOR;
+use payment_channels_core::state::Channel;
 use solana_account::Account;
 use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
