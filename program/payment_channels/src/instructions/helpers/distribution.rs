@@ -4,7 +4,7 @@ use core::mem::size_of;
 use pinocchio::{Address, error::ProgramError};
 
 use crate::errors::PaymentChannelsError;
-use crate::state::Transmutable;
+use crate::state::{Transmutable, load};
 
 /// Maximum number of distribution recipients per channel.
 pub const MAX_DISTRIBUTION_RECIPIENTS: usize = 32;
@@ -47,6 +47,32 @@ unsafe impl Transmutable for DistributionEntry {
 const _: () = assert!(size_of::<DistributionEntry>() == 34);
 const _: () = assert!(core::mem::align_of::<DistributionEntry>() == 1);
 
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy)]
+struct LeU32([u8; size_of::<u32>()]);
+
+impl LeU32 {
+    #[inline(always)]
+    fn get(&self) -> u32 {
+        u32::from_le_bytes(self.0)
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct DistributionPreimageHeader {
+    count: LeU32,
+}
+
+unsafe impl Transmutable for DistributionPreimageHeader {
+    const LEN: usize = size_of::<Self>();
+}
+
+const _: () = assert!(size_of::<LeU32>() == size_of::<u32>());
+const _: () = assert!(core::mem::align_of::<LeU32>() == 1);
+const _: () = assert!(size_of::<DistributionPreimageHeader>() == size_of::<u32>());
+const _: () = assert!(core::mem::align_of::<DistributionPreimageHeader>() == 1);
+
 /// Borrowed view of the validated distribution preimage.
 ///
 /// Wire layout: `count(u32 LE) || [recipient(32) || shareBps(u16 LE)] × count`.
@@ -58,8 +84,6 @@ pub struct DistributionPreimage<'a> {
     preimage: &'a [u8],
 }
 
-const RECIPIENT_COUNT_PREFIX_LEN: usize = size_of::<u32>();
-
 impl<'a> DistributionPreimage<'a> {
     /// Parses `count || entries` and verifies the distribution invariants.
     ///
@@ -68,21 +92,19 @@ impl<'a> DistributionPreimage<'a> {
     /// basis points, the total basis points must not exceed 10_000, and
     /// recipient owner addresses must be unique.
     pub fn load(data: &'a [u8]) -> Result<Self, ProgramError> {
-        if data.len() < RECIPIENT_COUNT_PREFIX_LEN {
+        if data.len() < DistributionPreimageHeader::LEN {
             return Err(ProgramError::InvalidInstructionData);
         }
-        let (count_bytes, entries_bytes) = data.split_at(RECIPIENT_COUNT_PREFIX_LEN);
-        let count = u32::from_le_bytes(
-            count_bytes
-                .try_into()
-                .map_err(|_| ProgramError::InvalidInstructionData)?,
-        );
+        let (header_bytes, entries_bytes) = data.split_at(DistributionPreimageHeader::LEN);
+        let header = unsafe { load::<DistributionPreimageHeader>(header_bytes) }
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
+        let count = header.count.get();
         if count > MAX_DISTRIBUTION_RECIPIENTS as u32 {
             return Err(PaymentChannelsError::InvalidRecipientCount.into());
         }
         let n = count as usize;
 
-        let expected_len = RECIPIENT_COUNT_PREFIX_LEN
+        let expected_len = DistributionPreimageHeader::LEN
             .checked_add(
                 n.checked_mul(DistributionEntry::LEN)
                     .ok_or(PaymentChannelsError::ArithmeticOverflow)?,
@@ -170,8 +192,9 @@ mod tests {
     }
 
     fn encode(count: u32, entries: &[DistributionEntry]) -> Vec<u8> {
-        let mut data =
-            Vec::with_capacity(RECIPIENT_COUNT_PREFIX_LEN + entries.len() * DistributionEntry::LEN);
+        let mut data = Vec::with_capacity(
+            DistributionPreimageHeader::LEN + entries.len() * DistributionEntry::LEN,
+        );
         data.extend_from_slice(&count.to_le_bytes());
         for entry in entries {
             data.extend_from_slice(entry.recipient.as_ref());
@@ -291,7 +314,7 @@ mod tests {
             with_view(n as u8, |r| {
                 assert_eq!(
                     r.preimage().len(),
-                    RECIPIENT_COUNT_PREFIX_LEN + n * DistributionEntry::LEN,
+                    DistributionPreimageHeader::LEN + n * DistributionEntry::LEN,
                 );
             });
         }
@@ -301,7 +324,7 @@ mod tests {
     fn preimage_prefix_is_count() {
         with_view(7, |r| {
             assert_eq!(
-                &r.preimage()[..RECIPIENT_COUNT_PREFIX_LEN],
+                &r.preimage()[..DistributionPreimageHeader::LEN],
                 &7u32.to_le_bytes()
             );
         });

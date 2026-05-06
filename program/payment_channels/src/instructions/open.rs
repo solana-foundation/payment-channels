@@ -2,6 +2,7 @@
 use alloc::vec::Vec;
 #[cfg(feature = "idl")]
 use codama::CodamaType;
+use core::mem::size_of;
 use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer, error::ProgramError};
 use pinocchio_associated_token_account::instructions::Create as CreateAta;
 use pinocchio_system::instructions::CreateAccount;
@@ -19,7 +20,7 @@ use crate::helpers::accounts::view::PayerContext;
 use crate::helpers::accounts::view::PayerTokenAccountView;
 use crate::helpers::accounts::view::TokenContext;
 use crate::helpers::accounts::view::TokenProgramAccountView;
-use crate::state::Channel;
+use crate::state::{Channel, Transmutable, load};
 
 use crate::event_engine::EventSerialize;
 use crate::event_engine::emit_event;
@@ -42,14 +43,54 @@ pub const DISCRIMINATOR: u8 = 1;
 /// entries(count × 34)`.
 #[derive(Debug, Clone, Copy)]
 pub struct OpenArgs<'a> {
-    /// PDA disambiguator stored in [`Channel::salt`](crate::Channel::salt).
-    salt: [u8; 8],
-    /// Initial escrow amount and ceiling for [`Channel::settled`](crate::Channel::settled).
-    deposit: [u8; 8],
-    /// Grace duration, in seconds.
-    grace_period: [u8; 4],
+    header: &'a OpenArgsHeader,
     pub recipients: DistributionPreimage<'a>,
 }
+
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy)]
+struct LeU64([u8; size_of::<u64>()]);
+
+impl LeU64 {
+    #[inline(always)]
+    fn get(&self) -> u64 {
+        u64::from_le_bytes(self.0)
+    }
+}
+
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy)]
+struct LeU32([u8; size_of::<u32>()]);
+
+impl LeU32 {
+    #[inline(always)]
+    fn get(&self) -> u32 {
+        u32::from_le_bytes(self.0)
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct OpenArgsHeader {
+    /// PDA disambiguator stored in [`Channel::salt`](crate::Channel::salt).
+    salt: LeU64,
+    /// Initial escrow amount and ceiling for [`Channel::settled`](crate::Channel::settled).
+    deposit: LeU64,
+    /// Grace duration, in seconds.
+    grace_period: LeU32,
+}
+
+unsafe impl Transmutable for OpenArgsHeader {
+    const LEN: usize = size_of::<Self>();
+}
+
+const _: () = assert!(size_of::<LeU64>() == size_of::<u64>());
+const _: () = assert!(core::mem::align_of::<LeU64>() == 1);
+const _: () = assert!(size_of::<LeU32>() == size_of::<u32>());
+const _: () = assert!(core::mem::align_of::<LeU32>() == 1);
+const _: () =
+    assert!(size_of::<OpenArgsHeader>() == size_of::<u64>() + size_of::<u64>() + size_of::<u32>());
+const _: () = assert!(core::mem::align_of::<OpenArgsHeader>() == 1);
 
 #[cfg(feature = "idl")]
 #[allow(dead_code)]
@@ -63,52 +104,30 @@ pub struct OpenArgsWire {
 }
 
 impl<'a> OpenArgs<'a> {
-    const SALT_LEN: usize = core::mem::size_of::<u64>();
-    const DEPOSIT_LEN: usize = core::mem::size_of::<u64>();
-    const GRACE_PERIOD_LEN: usize = core::mem::size_of::<u32>();
-    const RECIPIENT_COUNT_LEN: usize = core::mem::size_of::<u32>();
-
-    const FIXED_HEADER_LEN: usize = Self::SALT_LEN + Self::DEPOSIT_LEN + Self::GRACE_PERIOD_LEN;
-    const MIN_LEN: usize = Self::FIXED_HEADER_LEN + Self::RECIPIENT_COUNT_LEN;
-
     #[inline(always)]
     pub fn salt(&self) -> u64 {
-        u64::from_le_bytes(self.salt)
+        self.header.salt.get()
     }
 
     #[inline(always)]
     pub fn deposit(&self) -> u64 {
-        u64::from_le_bytes(self.deposit)
+        self.header.deposit.get()
     }
 
     #[inline(always)]
     pub fn grace_period(&self) -> u32 {
-        u32::from_le_bytes(self.grace_period)
+        self.header.grace_period.get()
     }
 
     pub fn load(data: &'a [u8]) -> Result<Self, ProgramError> {
-        if data.len() < Self::MIN_LEN {
+        if data.len() < OpenArgsHeader::LEN {
             return Err(ProgramError::InvalidInstructionData);
         }
-        let (salt, rest) = data.split_at(Self::SALT_LEN);
-        let (deposit, rest) = rest.split_at(Self::DEPOSIT_LEN);
-        let (grace_period, recipients_bytes) = rest.split_at(Self::GRACE_PERIOD_LEN);
-        let salt = salt
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
-        let deposit = deposit
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
-        let grace_period = grace_period
-            .try_into()
+        let (header_bytes, recipients_bytes) = data.split_at(OpenArgsHeader::LEN);
+        let header = unsafe { load::<OpenArgsHeader>(header_bytes) }
             .map_err(|_| ProgramError::InvalidInstructionData)?;
         let recipients = DistributionPreimage::load(recipients_bytes)?;
-        Ok(Self {
-            salt,
-            deposit,
-            grace_period,
-            recipients,
-        })
+        Ok(Self { header, recipients })
     }
 }
 
