@@ -68,8 +68,7 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
     }
 
     // Owner / discriminator / version checks.
-    let channel = accs.channel.check()?;
-    let ch = Channel::from_account(&channel)?;
+    let ch = Channel::from_account(&accs.channel)?;
 
     // Status gate: FINALIZED only.
     if ch.status != ChannelStatus::Finalized as u8 {
@@ -100,7 +99,7 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
 
     // Validate token contexts + ATA derivations.
     let token_ctx = TokenContext::new(accs.mint, accs.token_program)?;
-    let mut channel_ctx = ChannelContext::new(channel, accs.channel_token_account, token_ctx)
+    let mut channel_ctx = ChannelContext::new(accs.channel, accs.channel_token_account, token_ctx)
         .map_err(|_| PaymentChannelsError::InvalidChannelTokenAccount)?;
     let payer_ctx = PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)
         .map_err(|e| match e {

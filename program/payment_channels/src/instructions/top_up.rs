@@ -103,10 +103,8 @@ pub fn process(
         return Err(PaymentChannelsError::DepositMustBeNonZero.into());
     }
 
-    let channel = accs.channel.check()?;
-
     {
-        let ch = Channel::from_account(&channel)?;
+        let ch = Channel::from_account(&accs.channel)?;
         if ch.status != ChannelStatus::Open as u8 {
             return Err(PaymentChannelsError::InvalidChannelStatus.into());
         }
@@ -119,7 +117,7 @@ pub fn process(
     }
 
     let token_ctx = TokenContext::new(accs.mint, accs.token_program)?;
-    let mut channel_ctx = ChannelContext::new(channel, accs.channel_token_account, token_ctx)
+    let mut channel_ctx = ChannelContext::new(accs.channel, accs.channel_token_account, token_ctx)
         .map_err(|_| PaymentChannelsError::EscrowAddressMismatch)?;
     let payer_ctx = PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)
         .map_err(|e| match e {
