@@ -121,6 +121,9 @@ pub enum PaymentChannelsError {
     /// 264 - num_recipients outside [0, 32]
     #[error("num_recipients outside [0, 32]")]
     DistributionAmountOverflow = 0x108,
+    /// 265 - Distribution preimage length calculation overflow
+    #[error("Distribution preimage length calculation overflow")]
+    DistributionPreimageLengthOverflow = 0x109,
     /// 2000 - Derived channel account address does not match the user provided address
     #[error("Derived channel account address does not match the user provided address")]
     ChannelAddressMismatch = 0x7D0,

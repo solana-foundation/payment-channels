@@ -672,6 +672,12 @@
         "name": "distributionAmountOverflow"
       },
       {
+        "code": 265,
+        "kind": "errorNode",
+        "message": "Distribution preimage length calculation overflow",
+        "name": "distributionPreimageLengthOverflow"
+      },
+      {
         "code": 2000,
         "kind": "errorNode",
         "message": "Derived channel account address does not match the user provided address",
