@@ -125,7 +125,7 @@ Total 48 bytes, stored align-1 (`[u8; 8]` arrays for the two ints). Field order 
 
 **Verification.** The merchant bundles an Ed25519 native-program ix in the same transaction. The program reads the verified message bytes from that ix via the Instructions sysvar and asserts they equal `VoucherArgs::as_bytes()`. The pubkey embedded in the precompile ix MUST equal `Channel.authorized_signer` (which equals `payer` if no delegate was bound at `open`).
 
-**Replay protection.** `channel_id` (a PDA, hence program- and seed-specific) + monotonic `cumulative_amount > settled` + optional `expires_at`. No explicit nonce.
+**Replay protection.** `channel_id` (a PDA, hence program- and seed-specific) + strictly monotonic `cumulative_amount > settled` + optional `expires_at`. No explicit nonce. This strict watermark rule applies to `settle` and to `settleAndFinalize` when a voucher is supplied. If the final voucher has already been applied, omit the optional voucher and finalize at the current `settled` watermark.
 
 ### FSM
 
@@ -140,9 +140,9 @@ Total 48 bytes, stored align-1 (`[u8; 8]` arrays for the two ints). Field order 
 | `open` | `NONEXISTENT → OPEN` | PDA does not exist; `0 ≤ num_splits ≤ MAX_DISTRIBUTION_RECIPIENTS`; `shareBps[i] > 0 ∀ i ∈ [0, num_splits)`; `0 ≤ Σ shareBps[0..num_splits] ≤ 10000` |
 | `settle` | `OPEN → OPEN` | `settled < voucher.cumulative ≤ deposit` & voucher fresh† |
 | `topUp` | `OPEN → OPEN` | `closureStartedAt == 0` |
-| `settleAndFinalize` | `OPEN → FINALIZED` | merchant signer; voucher optional (if present: `settled ≤ voucher.cumulative ≤ deposit` & voucher fresh†) |
+| `settleAndFinalize` | `OPEN → FINALIZED` | merchant signer; voucher optional (if present: `settled < voucher.cumulative ≤ deposit` & voucher fresh†) |
 | `requestClose` | `OPEN → CLOSING` | sets `closureStartedAt = now` |
-| `settleAndFinalize` | `CLOSING → FINALIZED` | merchant signer & `now < closureStartedAt + GRACE`; voucher optional (if present: `settled ≤ voucher.cumulative ≤ deposit` & voucher fresh†) |
+| `settleAndFinalize` | `CLOSING → FINALIZED` | merchant signer & `now < closureStartedAt + GRACE`; voucher optional (if present: `settled < voucher.cumulative ≤ deposit` & voucher fresh†) |
 | `finalize` | `CLOSING → FINALIZED` | `now ≥ closureStartedAt + GRACE` |
 | `distribute` | `OPEN → OPEN` | `Blake3(canonicalized preimage) == distribution_hash` & `settled > paid_out` |
 | `distribute` | `FINALIZED → CLOSED` | `Blake3(canonicalized preimage) == distribution_hash` & (`settled > paid_out` OR refund/tombstone work remains) (permissionless; tombstones the PDA) |

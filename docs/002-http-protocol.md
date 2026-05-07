@@ -48,7 +48,7 @@ Actors: **C** = client (payer). **S** = server (merchant).
 To avoid paying Solana network fees for invalid transactions and to ensure protocol security, the server MUST perform the following validations off-chain before submitting any transactions:
 
 1. **`POST /channel/open` Payload Validation:** The server MUST strictly validate that the `distributionSplits`, `payee`, and `mint` in the payload exactly match what it requested in the `402` challenge. Failing to do so allows a malicious client to alter the distribution to themselves.
-2. **Voucher Validation:** Before accepting a metered request or submitting `settle` / `settleAndFinalize`, the server MUST verify the Ed25519 signature over the Borsh-serialized voucher, check that `cumulativeAmount <= deposit`, and ensure the voucher is fresh (`expiresAt` is null or in the future). The same validation applies to any `voucher` carried in `POST /channel/close`.
+2. **Voucher Validation:** Before accepting a metered request or submitting `settle` / voucher-bearing `settleAndFinalize`, the server MUST verify the Ed25519 signature over the Borsh-serialized voucher, check that `settled < cumulativeAmount <= deposit`, and ensure the voucher is fresh (`expiresAt` is null or in the future). The same validation applies to any `voucher` carried in `POST /channel/close`.
 
 **Challenge `request` object** (JCS-canonicalized then base64url-nopad into the `request` auth-param of `WWW-Authenticate: Payment`):
 
@@ -325,7 +325,7 @@ Content-Type: application/json
 }
 ```
 
-`voucher` is OPTIONAL; omit it when no final settle is needed and the channel finalizes at the current on-chain `settled` watermark.
+`voucher` is OPTIONAL. When present, it MUST strictly advance the on-chain watermark (`settled < voucher.cumulativeAmount`). Omit it when no final settle is needed and the channel finalizes at the current on-chain `settled` watermark.
 
 **Example 6: Successful response with `Payment-Receipt` (S -> C)**
 
