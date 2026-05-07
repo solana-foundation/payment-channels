@@ -1,4 +1,6 @@
 #[cfg(feature = "idl")]
+use alloc::vec::Vec;
+#[cfg(feature = "idl")]
 use codama::CodamaType;
 use core::mem::size_of;
 use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer, error::ProgramError};
@@ -18,14 +20,15 @@ use crate::helpers::accounts::view::PayerContext;
 use crate::helpers::accounts::view::PayerTokenAccountView;
 use crate::helpers::accounts::view::TokenContext;
 use crate::helpers::accounts::view::TokenProgramAccountView;
-use crate::state::Channel;
+use crate::state::{Channel, Transmutable, load};
 
 use crate::event_engine::EventSerialize;
 use crate::event_engine::emit_event;
 use crate::events::Opened;
+#[cfg(feature = "idl")]
+use crate::instructions::helpers::DistributionEntry;
 pub use crate::instructions::helpers::MAX_DISTRIBUTION_RECIPIENTS;
-use crate::instructions::helpers::{DistributionRecipients, channel_signer_seeds};
-use crate::state::{Transmutable, load};
+use crate::instructions::helpers::{DistributionPreimage, channel_signer_seeds};
 
 /// Instruction discriminator byte for `open`.
 pub const DISCRIMINATOR: u8 = 1;
@@ -36,51 +39,96 @@ pub const DISCRIMINATOR: u8 = 1;
 /// [`distribute`](crate::instructions::distribute) later verifies a matching
 /// preimage before paying out splits.
 ///
-/// Wire layout: `salt(8) | deposit(8) | grace_period(4) | count(1) | entries(32×34)`.
-#[repr(C)]
+/// Wire layout: `salt(8) | deposit(8) | grace_period(4) | count(u32 LE) |
+/// entries(count × 34)`.
 #[derive(Debug, Clone, Copy)]
-#[cfg_attr(feature = "idl", derive(CodamaType))]
-pub struct OpenArgs {
-    /// PDA disambiguator; stored in [`Channel::salt`](crate::Channel::salt).
-    /// Enables concurrent channels for the same
-    /// `(payer, payee, mint, authorized_signer)` tuple.
-    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
-    salt: [u8; 8],
-    /// Initial escrow; the immutable ceiling on
-    /// [`Channel::settled`](crate::Channel::settled) (raised later only by
-    /// `topUp`).
-    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
-    deposit: [u8; 8],
-    /// Grace duration (seconds). Governs the `CLOSING → FINALIZED`
-    /// unlock for permissionless `finalize`.
-    #[cfg_attr(feature = "idl", codama(type = number(u32)))]
-    grace_period: [u8; 4],
-    pub recipients: DistributionRecipients,
+pub struct OpenArgs<'a> {
+    header: &'a OpenArgsHeader,
+    pub recipients: DistributionPreimage<'a>,
 }
 
-impl OpenArgs {
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy)]
+struct LeU64([u8; size_of::<u64>()]);
+
+impl LeU64 {
+    #[inline(always)]
+    fn get(&self) -> u64 {
+        u64::from_le_bytes(self.0)
+    }
+}
+
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy)]
+struct LeU32([u8; size_of::<u32>()]);
+
+impl LeU32 {
+    #[inline(always)]
+    fn get(&self) -> u32 {
+        u32::from_le_bytes(self.0)
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct OpenArgsHeader {
+    /// PDA disambiguator stored in [`Channel::salt`](crate::Channel::salt).
+    salt: LeU64,
+    /// Initial escrow amount and ceiling for [`Channel::settled`](crate::Channel::settled).
+    deposit: LeU64,
+    /// Grace duration, in seconds.
+    grace_period: LeU32,
+}
+
+unsafe impl Transmutable for OpenArgsHeader {
+    const LEN: usize = size_of::<Self>();
+}
+
+const _: () = assert!(size_of::<LeU64>() == size_of::<u64>());
+const _: () = assert!(core::mem::align_of::<LeU64>() == 1);
+const _: () = assert!(size_of::<LeU32>() == size_of::<u32>());
+const _: () = assert!(core::mem::align_of::<LeU32>() == 1);
+const _: () =
+    assert!(size_of::<OpenArgsHeader>() == size_of::<u64>() + size_of::<u64>() + size_of::<u32>());
+const _: () = assert!(core::mem::align_of::<OpenArgsHeader>() == 1);
+
+#[cfg(feature = "idl")]
+#[allow(dead_code)]
+#[derive(CodamaType)]
+#[codama(name = "open_args")]
+pub struct OpenArgsWire {
+    pub salt: u64,
+    pub deposit: u64,
+    pub grace_period: u32,
+    pub recipients: Vec<DistributionEntry>,
+}
+
+impl<'a> OpenArgs<'a> {
     #[inline(always)]
     pub fn salt(&self) -> u64 {
-        u64::from_le_bytes(self.salt)
+        self.header.salt.get()
     }
 
     #[inline(always)]
     pub fn deposit(&self) -> u64 {
-        u64::from_le_bytes(self.deposit)
+        self.header.deposit.get()
     }
 
     #[inline(always)]
     pub fn grace_period(&self) -> u32 {
-        u32::from_le_bytes(self.grace_period)
+        self.header.grace_period.get()
     }
 
-    pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
-        unsafe { load::<Self>(data) }.map_err(|_| ProgramError::InvalidInstructionData)
+    pub fn load(data: &'a [u8]) -> Result<Self, ProgramError> {
+        if data.len() < OpenArgsHeader::LEN {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+        let (header_bytes, recipients_bytes) = data.split_at(OpenArgsHeader::LEN);
+        let header = unsafe { load::<OpenArgsHeader>(header_bytes) }
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
+        let recipients = DistributionPreimage::load(recipients_bytes)?;
+        Ok(Self { header, recipients })
     }
-}
-
-unsafe impl Transmutable for OpenArgs {
-    const LEN: usize = size_of::<Self>();
 }
 
 /// [`Self::payer`], [`Self::payee`], [`Self::mint`],
@@ -162,7 +210,7 @@ impl<'a> TryFrom<&'a mut [AccountView]> for OpenAccounts<'a> {
 pub fn process(
     program_id: &Address,
     accounts: &mut [AccountView],
-    args: &OpenArgs,
+    args: &OpenArgs<'_>,
 ) -> ProgramResult {
     let accs = OpenAccounts::try_from(accounts)?;
 
@@ -173,8 +221,6 @@ pub fn process(
     if accs.payer.address() == accs.payee.address() {
         return Err(PaymentChannelsError::PayerPayeeMustDiffer.into());
     }
-
-    let validated = args.recipients.validate()?;
 
     let deposit = args.deposit();
     if deposit == 0 {
@@ -189,7 +235,8 @@ pub fn process(
         args.salt(),
     );
 
-    if validated
+    if args
+        .recipients
         .entries
         .iter()
         .any(|entry| entry.recipient == channel_address)

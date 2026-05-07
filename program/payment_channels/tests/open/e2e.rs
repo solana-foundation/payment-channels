@@ -116,8 +116,8 @@ fn open_sets_channel_fields() {
 fn open_with_no_splits_succeeds() {
     // count == 0 collapses to a vanilla two-party channel: pool flows entirely
     // to the payee at `distribute`. The full `open` CPI chain must still run
-    // and the on-chain digest must equal blake3(&[0u8]) — the canonical preimage
-    // for a zero-recipient plan.
+    // and the on-chain digest must equal blake3(count=0u32 LE) — the
+    // canonical preimage for a zero-recipient plan.
     let mut svm = LiteSVM::load_program();
 
     let payee = Pubkey::new_unique();
@@ -152,9 +152,7 @@ fn open_with_no_splits_succeeds() {
     assert_eq!(channel_data.len(), Channel::LEN);
     assert_eq!(channel_data[3], ChannelStatus::Open as u8);
 
-    // distribution_hash == blake3(&[0u8]) — locked at `open` from the
-    // canonical preimage `count(1)` with no entries.
-    let expected: [u8; 32] = blake3::hash(&[0u8]).into();
+    let expected: [u8; 32] = blake3::hash(&0u32.to_le_bytes()).into();
     assert_eq!(&channel_data[56..88], &expected, "distribution_hash");
 }
 
@@ -268,6 +266,6 @@ fn open_with_no_splits_succeeds_token_2022() {
     assert_eq!(channel_data.len(), Channel::LEN);
     assert_eq!(channel_data[3], ChannelStatus::Open as u8);
 
-    let expected: [u8; 32] = blake3::hash(&[0u8]).into();
+    let expected: [u8; 32] = blake3::hash(&0u32.to_le_bytes()).into();
     assert_eq!(&channel_data[56..88], &expected, "distribution_hash");
 }

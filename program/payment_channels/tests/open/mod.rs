@@ -5,7 +5,7 @@ use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 use mollusk_svm::{Mollusk, result::ProgramResult};
 use payment_channels::event_engine::event_authority_pda;
-use payment_channels::instructions::open::{DISCRIMINATOR, MAX_DISTRIBUTION_RECIPIENTS};
+use payment_channels::instructions::open::DISCRIMINATOR;
 use payment_channels::state::Channel;
 use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
@@ -19,9 +19,6 @@ use crate::common::{
 
 pub(super) const EVENT_AUTHORITY: Pubkey =
     Pubkey::new_from_array(*event_authority_pda::ID.as_array());
-
-/// Wire-format width per `DistributionEntry`: 32 bytes pubkey + u16 bps.
-const ENTRY_LEN: usize = 32 + 2;
 
 /// Execution descriptor for a single `open` Mollusk run.
 ///
@@ -72,18 +69,17 @@ impl OpenRun {
         data.extend_from_slice(&self.salt.to_le_bytes());
         data.extend_from_slice(&self.deposit.to_le_bytes());
         data.extend_from_slice(&self.grace_period.to_le_bytes());
-        data.push(self.num_recipients);
-        for i in 0..MAX_DISTRIBUTION_RECIPIENTS {
-            let active = (i as u8) < self.num_recipients;
-            if active {
-                let (pk, bps) = match &self.recipients {
-                    Some(rs) => rs[i],
-                    None => (Pubkey::new_from_array([i as u8 + 1; 32]), i as u16 + 1),
-                };
+        data.extend_from_slice(&(self.num_recipients as u32).to_le_bytes());
+        if self.num_recipients > 0 {
+            let entries = match &self.recipients {
+                Some(rs) => rs.clone(),
+                None => (0..self.num_recipients as usize)
+                    .map(|i| (Pubkey::new_from_array([i as u8 + 1; 32]), i as u16 + 1))
+                    .collect(),
+            };
+            for (pk, bps) in entries {
                 data.extend_from_slice(pk.as_ref());
                 data.extend_from_slice(&bps.to_le_bytes());
-            } else {
-                data.extend_from_slice(&[0u8; ENTRY_LEN]);
             }
         }
 
@@ -196,7 +192,8 @@ pub(super) fn derive_pdas(
 /// Build the `open` instruction with all 13 accounts wired up.
 ///
 /// Wire layout: `discriminator(1) | salt(8) | deposit(8) | grace(4) |
-/// num_recipients(1) | entries(MAX × 34)` where each entry is `pubkey(32) | bps(u16)`.
+/// num_recipients(u32 LE) | entries(num_recipients × 34)` where each entry
+/// is `pubkey(32) | bps(u16)`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn open_ix(
     payer: &Pubkey,
@@ -247,13 +244,11 @@ pub(super) fn open_ix_with_token_program(
     data.extend_from_slice(&salt.to_le_bytes());
     data.extend_from_slice(&deposit.to_le_bytes());
     data.extend_from_slice(&grace_period.to_le_bytes());
-    data.push(num_recipients);
-    for i in 0..MAX_DISTRIBUTION_RECIPIENTS {
-        if (i as u8) < num_recipients {
+    data.extend_from_slice(&(num_recipients as u32).to_le_bytes());
+    if num_recipients > 0 {
+        for i in 0..num_recipients as usize {
             data.extend_from_slice(&[i as u8 + 1; 32]);
             data.extend_from_slice(&(i as u16 + 1).to_le_bytes());
-        } else {
-            data.extend_from_slice(&[0u8; ENTRY_LEN]);
         }
     }
     Instruction::new_with_bytes(

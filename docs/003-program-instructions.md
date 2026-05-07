@@ -92,7 +92,7 @@ Permissionless crank. Verifies the committed splits preimage (Blake3) against `C
 
 | Name | Type | Description |
 |---|---|---|
-| `recipients` | `DistributionRecipients` | Splits preimage (`count(1) || [recipient(32) || shareBps(u16 LE)] × count`). Rehashed on-chain; Blake3 digest must equal `Channel.distribution_hash`. |
+| `recipients` | `Vec<DistributionEntry>` | Splits preimage (`count(u32 LE) || [recipient(32) || shareBps(u16 LE)] × count`). Rehashed on-chain; Blake3 digest must equal `Channel.distribution_hash`. |
 
 **Accounts**
 

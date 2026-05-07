@@ -8,7 +8,7 @@ pub mod token;
 pub mod voucher;
 
 pub use distribution::{
-    DistributionEntry, DistributionRecipients, MAX_DISTRIBUTION_RECIPIENTS, floor_bps_share,
+    DistributionEntry, DistributionPreimage, MAX_DISTRIBUTION_RECIPIENTS, floor_bps_share,
 };
 
 use crate::state::channel::CHANNEL_SEED;

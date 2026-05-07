@@ -7,6 +7,7 @@ ts_client_dir     := "clients/typescript"
 deploy_key        := "keys/payment_channels-keypair.json"
 target_deploy_key := "target/deploy/payment_channels-keypair.json"
 idl_file          := program_dir / "idl/payment_channels.json"
+raw_idl_file      := program_dir / "idl/payment_channels.raw.json"
 
 default:
     @just --list
@@ -51,11 +52,13 @@ build-program: prepare-deploy-keys
     cd {{program_dir}} && cargo build-sbf
     @echo "✓ program built"
 
-# IDL is emitted by build.rs, gated on the `idl` feature so plain
-# `cargo build` / `cargo build-sbf` don't touch it (codama is
-# behind the same feature).
+# Raw IDL is emitted by build.rs, gated on the `idl` feature so plain
+# `cargo build` / `cargo build-sbf` don't touch it. Rust Codama macros define
+# the wire types; the remaining visitor only adds distribute's dynamic account
+# tail and writes the committed IDL.
 generate-idl:
     cd {{program_dir}} && GENERATE_IDL="$RANDOM-$(date +%s)" cargo build --features idl
+    pnpm exec codama run idl --idl {{raw_idl_file}}
     @echo "✓ IDL: {{idl_file}}"
 
 generate-client: generate-idl

@@ -7,6 +7,7 @@
  */
 
 import {
+  AccountRole,
   combineCodec,
   getStructDecoder,
   getStructEncoder,
@@ -17,9 +18,9 @@ import {
   transformEncoder,
   type AccountMeta,
   type Address,
-  type FixedSizeCodec,
-  type FixedSizeDecoder,
-  type FixedSizeEncoder,
+  type Codec,
+  type Decoder,
+  type Encoder,
   type Instruction,
   type InstructionWithAccounts,
   type InstructionWithData,
@@ -97,7 +98,7 @@ export type DistributeInstructionDataArgs = {
   distributeArgs: DistributeArgsArgs;
 };
 
-export function getDistributeInstructionDataEncoder(): FixedSizeEncoder<DistributeInstructionDataArgs> {
+export function getDistributeInstructionDataEncoder(): Encoder<DistributeInstructionDataArgs> {
   return transformEncoder(
     getStructEncoder([
       ["discriminator", getU8Encoder()],
@@ -107,14 +108,14 @@ export function getDistributeInstructionDataEncoder(): FixedSizeEncoder<Distribu
   );
 }
 
-export function getDistributeInstructionDataDecoder(): FixedSizeDecoder<DistributeInstructionData> {
+export function getDistributeInstructionDataDecoder(): Decoder<DistributeInstructionData> {
   return getStructDecoder([
     ["discriminator", getU8Decoder()],
     ["distributeArgs", getDistributeArgsDecoder()],
   ]);
 }
 
-export function getDistributeInstructionDataCodec(): FixedSizeCodec<
+export function getDistributeInstructionDataCodec(): Codec<
   DistributeInstructionDataArgs,
   DistributeInstructionData
 > {
@@ -143,6 +144,7 @@ export type DistributeInput<
   mint: Address<TAccountMint>;
   tokenProgram: Address<TAccountTokenProgram>;
   distributeArgs: DistributeInstructionDataArgs["distributeArgs"];
+  recipientTokenAccounts: Array<Address>;
 };
 
 export function getDistributeInstruction<
@@ -213,6 +215,11 @@ export function getDistributeInstruction<
   // Original args.
   const args = { ...input };
 
+  // Remaining accounts.
+  const remainingAccounts: AccountMeta[] = args.recipientTokenAccounts.map(
+    (address) => ({ address, role: AccountRole.WRITABLE }),
+  );
+
   const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
   return Object.freeze({
     accounts: [
@@ -224,6 +231,7 @@ export function getDistributeInstruction<
       getAccountMeta("treasuryTokenAccount", accounts.treasuryTokenAccount),
       getAccountMeta("mint", accounts.mint),
       getAccountMeta("tokenProgram", accounts.tokenProgram),
+      ...remainingAccounts,
     ],
     data: getDistributeInstructionDataEncoder().encode(
       args as DistributeInstructionDataArgs,

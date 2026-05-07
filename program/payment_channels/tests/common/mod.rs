@@ -7,9 +7,7 @@ pub mod token_2022;
 use litesvm::LiteSVM;
 use mollusk_svm::Mollusk;
 use payment_channels::PaymentChannelsError;
-use payment_channels::instructions::open::{
-    DISCRIMINATOR as OPEN_DISCRIMINATOR, MAX_DISTRIBUTION_RECIPIENTS,
-};
+use payment_channels::instructions::open::DISCRIMINATOR as OPEN_DISCRIMINATOR;
 use payment_channels::state::Channel;
 use payment_channels::state::channel::ChannelStatus;
 use solana_clock::Clock;
@@ -88,10 +86,9 @@ pub fn open_channel(
     data.extend_from_slice(&salt.to_le_bytes());
     data.extend_from_slice(&deposit.to_le_bytes());
     data.extend_from_slice(&3_600u32.to_le_bytes());
-    data.push(1u8);
+    data.extend_from_slice(&1u32.to_le_bytes());
     data.extend_from_slice(&[1u8; 32]);
     data.extend_from_slice(&5_000u16.to_le_bytes());
-    data.extend_from_slice(&[0u8; (MAX_DISTRIBUTION_RECIPIENTS - 1) * 34]);
 
     let ix = Instruction::new_with_bytes(
         PROGRAM_ID,

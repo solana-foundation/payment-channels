@@ -4,7 +4,7 @@ use core::mem::size_of;
 use pinocchio::{Address, error::ProgramError};
 
 use crate::errors::PaymentChannelsError;
-use crate::state::Transmutable;
+use crate::state::{Transmutable, load};
 
 /// Maximum number of distribution recipients per channel.
 pub const MAX_DISTRIBUTION_RECIPIENTS: usize = 32;
@@ -40,52 +40,89 @@ impl DistributionEntry {
     }
 }
 
-/// Packed distribution plan committed at `open` and verified by `distribute`.
-///
-/// Wire layout: `count(1) | entries(32×34)`.
+unsafe impl Transmutable for DistributionEntry {
+    const LEN: usize = size_of::<Self>();
+}
+
+const _: () = assert!(size_of::<DistributionEntry>() == 34);
+const _: () = assert!(core::mem::align_of::<DistributionEntry>() == 1);
+
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy)]
+struct LeU32([u8; size_of::<u32>()]);
+
+impl LeU32 {
+    #[inline(always)]
+    fn get(&self) -> u32 {
+        u32::from_le_bytes(self.0)
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
-#[cfg_attr(feature = "idl", derive(CodamaType))]
-pub struct DistributionRecipients {
-    /// Number of active entries (0–[`MAX_DISTRIBUTION_RECIPIENTS`]).
-    pub count: u8,
-    // Codama requires a literal here; keep in sync with MAX_DISTRIBUTION_RECIPIENTS.
-    pub entries: [DistributionEntry; 32],
+struct DistributionPreimageHeader {
+    count: LeU32,
 }
 
-/// Validated active view over a packed distribution preimage.
-pub struct ValidatedDistribution<'a> {
-    /// Active entries selected by `DistributionRecipients::count`.
+unsafe impl Transmutable for DistributionPreimageHeader {
+    const LEN: usize = size_of::<Self>();
+}
+
+const _: () = assert!(size_of::<LeU32>() == size_of::<u32>());
+const _: () = assert!(core::mem::align_of::<LeU32>() == 1);
+const _: () = assert!(size_of::<DistributionPreimageHeader>() == size_of::<u32>());
+const _: () = assert!(core::mem::align_of::<DistributionPreimageHeader>() == 1);
+
+/// Borrowed view of the validated distribution preimage.
+///
+/// Wire layout: `count(u32 LE) || [recipient(32) || shareBps(u16 LE)] × count`.
+#[derive(Debug, Clone, Copy)]
+pub struct DistributionPreimage<'a> {
+    /// Entries declared by the count prefix.
     pub entries: &'a [DistributionEntry],
-    /// Basis points left for the channel payee's implicit remainder share.
-    pub payee_bps: u32,
+    /// Bytes hashed into the channel's distribution commitment.
+    preimage: &'a [u8],
 }
 
-// Fails to compile if the literal above drifts from MAX_DISTRIBUTION_RECIPIENTS.
-const _: () = assert!(
-    MAX_DISTRIBUTION_RECIPIENTS == 32,
-    "if MAX_DISTRIBUTION_RECIPIENTS changes, also update: \
-     (1) DistributionRecipients::entries length literal here, \
-     (2) PaymentChannelsError::InvalidRecipientCount #[error(...)] message in errors.rs",
-);
-
-impl DistributionRecipients {
-    /// Validates `count` is in `0..=MAX_DISTRIBUTION_RECIPIENTS`, every
-    /// active bps entry is non-zero, the active bps sum is at most 10_000,
-    /// and no recipient address repeats among the active entries.
-    /// `count == 0` collapses to a vanilla two-party channel where the payee
-    /// receives 100 % of `pool` at `distribute`. `Σ bps == 10_000` drives the
-    /// payee's implicit-remainder share to zero. Dedup is enforced only here
-    /// because `distribute` re-establishes the same plan via the blake3
-    /// preimage check; floored per-entry shares are biased against aggregated
-    /// splits, so duplicates are rejected outright instead of summed downstream.
-    pub fn validate(&self) -> Result<ValidatedDistribution<'_>, ProgramError> {
-        let n = self.count as usize;
-        if n > MAX_DISTRIBUTION_RECIPIENTS {
+impl<'a> DistributionPreimage<'a> {
+    /// Parses `count || entries` and verifies the distribution invariants.
+    ///
+    /// The count must be at most [`MAX_DISTRIBUTION_RECIPIENTS`], the byte
+    /// length must exactly match the count, each entry must have non-zero
+    /// basis points, the total basis points must not exceed 10_000, and
+    /// recipient owner addresses must be unique.
+    pub fn load(data: &'a [u8]) -> Result<Self, ProgramError> {
+        if data.len() < DistributionPreimageHeader::LEN {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+        let (header_bytes, entries_bytes) = data.split_at(DistributionPreimageHeader::LEN);
+        let header = unsafe { load::<DistributionPreimageHeader>(header_bytes) }
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
+        let count = header.count.get();
+        if count > MAX_DISTRIBUTION_RECIPIENTS as u32 {
             return Err(PaymentChannelsError::InvalidRecipientCount.into());
         }
+        let n = count as usize;
+
+        let expected_len = DistributionPreimageHeader::LEN
+            .checked_add(
+                n.checked_mul(DistributionEntry::LEN)
+                    .ok_or(PaymentChannelsError::ArithmeticOverflow)?,
+            )
+            .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+        if data.len() != expected_len {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        let entries = if n == 0 {
+            &[]
+        } else {
+            unsafe {
+                core::slice::from_raw_parts(entries_bytes.as_ptr().cast::<DistributionEntry>(), n)
+            }
+        };
+
         let mut bps_sum = 0u32;
-        let entries = &self.entries[..n];
         for (i, entry) in entries.iter().enumerate() {
             let bps = entry.bps();
             if bps == 0 {
@@ -103,55 +140,32 @@ impl DistributionRecipients {
         if bps_sum > BPS_DENOMINATOR {
             return Err(PaymentChannelsError::InvalidSplitConfig.into());
         }
-        Ok(ValidatedDistribution {
+
+        Ok(Self {
             entries,
-            payee_bps: BPS_DENOMINATOR - bps_sum,
+            preimage: data,
         })
     }
 
-    /// Infallible view of an already-validated distribution plan.
-    ///
-    /// Caller must hold a proof that `count <= MAX_DISTRIBUTION_RECIPIENTS`
-    /// and `Σ bps <= 10_000` — either freshly returned by [`Self::validate`]
-    /// (open) or proven byte-identical to a validated plan via
-    /// `distribution_hash` equality (distribute). Violating the precondition
-    /// either panics on the slice or underflows on `payee_bps`.
-    pub fn view_unchecked(&self) -> ValidatedDistribution<'_> {
-        let entries = &self.entries[..self.count as usize];
-        let bps_sum: u32 = entries.iter().map(|e| e.bps() as u32).sum();
-        ValidatedDistribution {
-            entries,
-            payee_bps: BPS_DENOMINATOR - bps_sum,
-        }
+    /// Basis points reserved for the channel payee's implicit remainder share.
+    #[inline(always)]
+    pub fn payee_bps(&self) -> u32 {
+        let bps_sum: u32 = self.entries.iter().map(|entry| entry.bps() as u32).sum();
+        debug_assert!(bps_sum <= BPS_DENOMINATOR);
+        BPS_DENOMINATOR - bps_sum
     }
 
-    /// Raw bytes of `count(1) || entries[0..count](count×34)` — the blake3
-    /// preimage for [`Channel::distribution_hash`](crate::Channel::distribution_hash).
-    /// `count` is clamped to `MAX_DISTRIBUTION_RECIPIENTS` so a forged
-    /// out-of-range count cannot panic the slice; the unclamped count byte
-    /// is preserved verbatim as the first preimage byte, so distinct logical
-    /// plans cannot alias to the same digest.
+    /// Preimage bytes hashed into [`Channel::distribution_hash`](crate::Channel::distribution_hash).
     #[inline(always)]
-    pub fn preimage(&self) -> &[u8] {
-        let n = (self.count as usize).min(MAX_DISTRIBUTION_RECIPIENTS);
-        &self.as_bytes()[..1 + n * DistributionEntry::LEN]
+    pub fn preimage(&self) -> &'a [u8] {
+        self.preimage
     }
 
     /// Blake3 hash of the active preimage committed into the channel at `open`.
     pub fn preimage_hash(&self) -> [u8; 32] {
-        super::hash::blake3(self.preimage())
+        super::hash::blake3(self.preimage)
     }
 }
-
-unsafe impl Transmutable for DistributionRecipients {
-    const LEN: usize = size_of::<Self>();
-}
-
-unsafe impl Transmutable for DistributionEntry {
-    const LEN: usize = size_of::<Self>();
-}
-
-const _: () = assert!(size_of::<DistributionEntry>() == 34);
 
 /// `floor(pool * bps / 10_000)` in u128 to avoid overflow.
 #[inline]
@@ -164,121 +178,60 @@ pub fn floor_bps_share(pool: u64, bps: u32) -> Result<u64, ProgramError> {
 
 #[cfg(test)]
 mod tests {
+    extern crate alloc;
+
+    use alloc::vec::Vec;
+
     use super::*;
 
-    fn make_recipients(count: u8) -> DistributionRecipients {
-        let mut entries = [DistributionEntry {
-            recipient: Address::default(),
-            bps: 100u16.to_le_bytes(),
-        }; MAX_DISTRIBUTION_RECIPIENTS];
-        // Distinct address per slot so `validate`'s dedup pass passes
-        // for any `count`; tests that need duplicates assemble entries inline.
-        for (i, e) in entries.iter_mut().enumerate() {
-            e.recipient = Address::new_from_array([i as u8 + 1; 32]);
+    fn entry(byte: u8, bps: u16) -> DistributionEntry {
+        DistributionEntry {
+            recipient: Address::new_from_array([byte; 32]),
+            bps: bps.to_le_bytes(),
         }
-        DistributionRecipients { count, entries }
     }
 
-    #[test]
-    fn validate_zero_count_accepted() {
-        assert_eq!(make_recipients(0).validate().unwrap().entries.len(), 0,);
-    }
-
-    #[test]
-    fn validate_returns_active_entries_and_payee_bps() {
-        let mut entries = [DistributionEntry {
-            recipient: Address::default(),
-            bps: 0u16.to_le_bytes(),
-        }; MAX_DISTRIBUTION_RECIPIENTS];
-        entries[0].recipient = Address::new_from_array([1u8; 32]);
-        entries[0].bps = 2500u16.to_le_bytes();
-        entries[1].recipient = Address::new_from_array([2u8; 32]);
-        entries[1].bps = 3000u16.to_le_bytes();
-        let r = DistributionRecipients { count: 2, entries };
-        let view = r.validate().unwrap();
-
-        assert_eq!(view.entries.len(), 2);
-        assert_eq!(view.payee_bps, 4500);
-    }
-
-    #[test]
-    fn view_unchecked_returns_active_entries_and_payee_bps() {
-        let mut entries = [DistributionEntry {
-            recipient: Address::default(),
-            bps: 0u16.to_le_bytes(),
-        }; MAX_DISTRIBUTION_RECIPIENTS];
-        entries[0].bps = 2500u16.to_le_bytes();
-        entries[1].bps = 3000u16.to_le_bytes();
-        let r = DistributionRecipients { count: 2, entries };
-        let view = r.view_unchecked();
-
-        assert_eq!(view.entries.len(), 2);
-        assert_eq!(view.payee_bps, 4500);
-    }
-
-    #[test]
-    fn preimage_clamps_count_above_max_without_panic() {
-        // count = MAX + 1 = 33; preimage() must produce a 1 + 32*34 = 1089
-        // byte slice (not panic) and its first byte must equal 33 (the
-        // unclamped count byte preserved verbatim).
-        let mut r = make_recipients(MAX_DISTRIBUTION_RECIPIENTS as u8);
-        r.count = MAX_DISTRIBUTION_RECIPIENTS as u8 + 1;
-        let bytes = r.preimage();
-        assert_eq!(
-            bytes.len(),
-            1 + MAX_DISTRIBUTION_RECIPIENTS * DistributionEntry::LEN,
+    fn encode(count: u32, entries: &[DistributionEntry]) -> Vec<u8> {
+        let mut data = Vec::with_capacity(
+            DistributionPreimageHeader::LEN + entries.len() * DistributionEntry::LEN,
         );
-        assert_eq!(bytes[0], MAX_DISTRIBUTION_RECIPIENTS as u8 + 1);
+        data.extend_from_slice(&count.to_le_bytes());
+        for entry in entries {
+            data.extend_from_slice(entry.recipient.as_ref());
+            data.extend_from_slice(&entry.bps);
+        }
+        data
+    }
+
+    fn with_view<R>(count: u8, f: impl FnOnce(DistributionPreimage<'_>) -> R) -> R {
+        let entries: Vec<_> = (0..count)
+            .map(|i| entry(i.saturating_add(1), 100))
+            .collect();
+        let bytes = encode(count as u32, &entries);
+        f(DistributionPreimage::load(&bytes).unwrap())
+    }
+
+    fn with_recipients_from_entries<R>(
+        entries: &[DistributionEntry],
+        f: impl FnOnce(DistributionPreimage<'_>) -> R,
+    ) -> R {
+        let bytes = encode(entries.len() as u32, entries);
+        f(DistributionPreimage::load(&bytes).unwrap())
     }
 
     #[test]
-    fn validate_max_count_accepted() {
+    fn load_rejects_empty_data() {
         assert_eq!(
-            make_recipients(MAX_DISTRIBUTION_RECIPIENTS as u8)
-                .validate()
-                .unwrap()
-                .entries
-                .len(),
-            MAX_DISTRIBUTION_RECIPIENTS,
+            DistributionPreimage::load(&[]).map(|_| ()),
+            Err(ProgramError::InvalidInstructionData),
         );
     }
 
     #[test]
-    fn validate_full_bps_sum_accepted() {
-        let mut entries = [DistributionEntry {
-            recipient: Address::default(),
-            bps: 0u16.to_le_bytes(),
-        }; MAX_DISTRIBUTION_RECIPIENTS];
-        entries[0].bps = (BPS_DENOMINATOR as u16).to_le_bytes();
-        let r = DistributionRecipients { count: 1, entries };
-        assert_eq!(r.validate().unwrap().entries.len(), 1);
-    }
-
-    #[test]
-    fn validate_over_10000_bps_rejected() {
-        let mut entries = [DistributionEntry {
-            recipient: Address::default(),
-            bps: 0u16.to_le_bytes(),
-        }; MAX_DISTRIBUTION_RECIPIENTS];
-        entries[0].bps = (BPS_DENOMINATOR as u16 + 1).to_le_bytes();
-        let r = DistributionRecipients { count: 1, entries };
+    fn load_rejects_count_above_max() {
+        let data = ((MAX_DISTRIBUTION_RECIPIENTS + 1) as u32).to_le_bytes();
         assert_eq!(
-            r.validate().map(|_| ()),
-            Err(ProgramError::from(PaymentChannelsError::InvalidSplitConfig)),
-        );
-    }
-
-    #[test]
-    fn validate_over_max_rejected() {
-        let r = DistributionRecipients {
-            count: MAX_DISTRIBUTION_RECIPIENTS as u8 + 1,
-            entries: [DistributionEntry {
-                recipient: Address::default(),
-                bps: [0u8; 2],
-            }; MAX_DISTRIBUTION_RECIPIENTS],
-        };
-        assert_eq!(
-            r.validate().map(|_| ()),
+            DistributionPreimage::load(&data).map(|_| ()),
             Err(ProgramError::from(
                 PaymentChannelsError::InvalidRecipientCount
             )),
@@ -286,32 +239,111 @@ mod tests {
     }
 
     #[test]
+    fn load_rejects_truncated_entries() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&1u32.to_le_bytes());
+        data.extend_from_slice(&[0u8; DistributionEntry::LEN - 1]);
+        assert_eq!(
+            DistributionPreimage::load(&data).map(|_| ()),
+            Err(ProgramError::InvalidInstructionData),
+        );
+    }
+
+    #[test]
+    fn load_rejects_trailing_bytes() {
+        let mut data = encode(0, &[]);
+        data.push(0);
+        assert_eq!(
+            DistributionPreimage::load(&data).map(|_| ()),
+            Err(ProgramError::InvalidInstructionData),
+        );
+    }
+
+    #[test]
+    fn load_zero_count_accepted() {
+        with_view(0, |r| {
+            assert_eq!(r.entries.len(), 0);
+            assert_eq!(r.payee_bps(), BPS_DENOMINATOR);
+        });
+    }
+
+    #[test]
+    fn load_returns_active_entries_and_payee_bps() {
+        with_recipients_from_entries(&[entry(1, 2500), entry(2, 3000)], |r| {
+            assert_eq!(r.entries.len(), 2);
+            assert_eq!(r.payee_bps(), 4500);
+        });
+    }
+
+    #[test]
+    fn load_max_count_accepted() {
+        with_view(MAX_DISTRIBUTION_RECIPIENTS as u8, |r| {
+            assert_eq!(r.entries.len(), MAX_DISTRIBUTION_RECIPIENTS);
+        });
+    }
+
+    #[test]
+    fn load_full_bps_sum_accepted() {
+        with_recipients_from_entries(&[entry(1, BPS_DENOMINATOR as u16)], |r| {
+            assert_eq!(r.entries.len(), 1);
+            assert_eq!(r.payee_bps(), 0);
+        });
+    }
+
+    #[test]
+    fn load_rejects_zero_bps() {
+        let data = encode(1, &[entry(1, 0)]);
+        assert_eq!(
+            DistributionPreimage::load(&data).map(|_| ()),
+            Err(ProgramError::from(PaymentChannelsError::InvalidSplitConfig)),
+        );
+    }
+
+    #[test]
+    fn load_rejects_over_10000_bps() {
+        let data = encode(1, &[entry(1, BPS_DENOMINATOR as u16 + 1)]);
+        assert_eq!(
+            DistributionPreimage::load(&data).map(|_| ()),
+            Err(ProgramError::from(PaymentChannelsError::InvalidSplitConfig)),
+        );
+    }
+
+    #[test]
     fn preimage_length_matches_count() {
-        for n in 1..=MAX_DISTRIBUTION_RECIPIENTS {
-            let r = make_recipients(n as u8);
-            assert_eq!(r.preimage().len(), 1 + n * DistributionEntry::LEN);
+        for n in 0..=MAX_DISTRIBUTION_RECIPIENTS {
+            with_view(n as u8, |r| {
+                assert_eq!(
+                    r.preimage().len(),
+                    DistributionPreimageHeader::LEN + n * DistributionEntry::LEN,
+                );
+            });
         }
     }
 
     #[test]
-    fn preimage_first_byte_is_count() {
-        let r = make_recipients(7);
-        assert_eq!(r.preimage()[0], 7);
+    fn preimage_prefix_is_count() {
+        with_view(7, |r| {
+            assert_eq!(
+                &r.preimage()[..DistributionPreimageHeader::LEN],
+                &7u32.to_le_bytes()
+            );
+        });
     }
 
     #[test]
     fn preimage_hash_is_deterministic() {
-        let r = make_recipients(3);
-        assert_eq!(r.preimage_hash(), r.preimage_hash());
+        with_view(3, |r| {
+            assert_eq!(r.preimage_hash(), r.preimage_hash());
+        });
     }
 
     #[test]
     fn preimage_hash_differs_by_count() {
-        let mut r1 = make_recipients(1);
-        let mut r2 = make_recipients(2);
-        r1.entries[0].recipient = Address::default();
-        r2.entries[0].recipient = Address::default();
-        assert_ne!(r1.preimage_hash(), r2.preimage_hash());
+        with_recipients_from_entries(&[entry(1, 100)], |r1| {
+            with_recipients_from_entries(&[entry(1, 100), entry(2, 100)], |r2| {
+                assert_ne!(r1.preimage_hash(), r2.preimage_hash());
+            });
+        });
     }
 
     #[test]
@@ -321,43 +353,18 @@ mod tests {
     }
 
     #[test]
-    fn validate_accepts_distinct_recipients() {
-        // make_recipients seeds slot i with address [i+1; 32], so all 32
-        // active entries have distinct recipients.
-        let r = make_recipients(3);
-        assert!(r.validate().is_ok());
+    fn load_accepts_distinct_recipients() {
+        with_view(3, |r| {
+            assert_eq!(r.entries.len(), 3);
+        });
     }
 
     #[test]
-    fn validate_rejects_duplicate_recipient() {
-        let mut entries = [DistributionEntry {
-            recipient: Address::default(),
-            bps: 100u16.to_le_bytes(),
-        }; MAX_DISTRIBUTION_RECIPIENTS];
-        entries[0].recipient = Address::new_from_array([1u8; 32]);
-        entries[1].recipient = Address::new_from_array([2u8; 32]);
-        entries[2].recipient = Address::new_from_array([1u8; 32]);
-        let r = DistributionRecipients { count: 3, entries };
+    fn load_rejects_duplicate_recipient() {
+        let data = encode(3, &[entry(1, 100), entry(2, 100), entry(1, 100)]);
         assert_eq!(
-            r.validate().map(|_| ()),
+            DistributionPreimage::load(&data).map(|_| ()),
             Err(ProgramError::from(PaymentChannelsError::DuplicateRecipient)),
         );
-    }
-
-    #[test]
-    fn validate_ignores_inactive_tail() {
-        // Active prefix is unique; inactive tail repeats an active address.
-        // Dedup must scan only `entries[..count]`.
-        let mut entries = [DistributionEntry {
-            recipient: Address::default(),
-            bps: 100u16.to_le_bytes(),
-        }; MAX_DISTRIBUTION_RECIPIENTS];
-        entries[0].recipient = Address::new_from_array([1u8; 32]);
-        entries[1].recipient = Address::new_from_array([2u8; 32]);
-        for e in entries[2..].iter_mut() {
-            e.recipient = Address::new_from_array([1u8; 32]);
-        }
-        let r = DistributionRecipients { count: 2, entries };
-        assert!(r.validate().is_ok());
     }
 }

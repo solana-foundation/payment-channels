@@ -18,9 +18,9 @@ import {
   type AccountMeta,
   type AccountSignerMeta,
   type Address,
-  type FixedSizeCodec,
-  type FixedSizeDecoder,
-  type FixedSizeEncoder,
+  type Codec,
+  type Decoder,
+  type Encoder,
   type Instruction,
   type InstructionWithAccounts,
   type InstructionWithData,
@@ -119,7 +119,7 @@ export type OpenInstructionData = { discriminator: number; openArgs: OpenArgs };
 
 export type OpenInstructionDataArgs = { openArgs: OpenArgsArgs };
 
-export function getOpenInstructionDataEncoder(): FixedSizeEncoder<OpenInstructionDataArgs> {
+export function getOpenInstructionDataEncoder(): Encoder<OpenInstructionDataArgs> {
   return transformEncoder(
     getStructEncoder([
       ["discriminator", getU8Encoder()],
@@ -129,14 +129,14 @@ export function getOpenInstructionDataEncoder(): FixedSizeEncoder<OpenInstructio
   );
 }
 
-export function getOpenInstructionDataDecoder(): FixedSizeDecoder<OpenInstructionData> {
+export function getOpenInstructionDataDecoder(): Decoder<OpenInstructionData> {
   return getStructDecoder([
     ["discriminator", getU8Decoder()],
     ["openArgs", getOpenArgsDecoder()],
   ]);
 }
 
-export function getOpenInstructionDataCodec(): FixedSizeCodec<
+export function getOpenInstructionDataCodec(): Codec<
   OpenInstructionDataArgs,
   OpenInstructionData
 > {
@@ -276,8 +276,8 @@ export async function getOpenInstructionAsync<
     accounts.eventAuthority.value = await findEventAuthorityPda();
   }
   if (!accounts.selfProgram.value) {
-    accounts.selfProgram.value = programAddress;
-    accounts.selfProgram.isWritable = false;
+    accounts.selfProgram.value =
+      "GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc" as Address<"GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc">;
   }
 
   const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
@@ -444,8 +444,8 @@ export function getOpenInstruction<
       "11111111111111111111111111111111" as Address<"11111111111111111111111111111111">;
   }
   if (!accounts.selfProgram.value) {
-    accounts.selfProgram.value = programAddress;
-    accounts.selfProgram.isWritable = false;
+    accounts.selfProgram.value =
+      "GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc" as Address<"GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc">;
   }
 
   const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
