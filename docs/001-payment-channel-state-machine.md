@@ -125,7 +125,7 @@ Total 48 bytes, stored align-1 (`[u8; 8]` arrays for the two ints). Field order 
 
 **Verification.** The merchant bundles an Ed25519 native-program ix in the same transaction. The program reads the verified message bytes from that ix via the Instructions sysvar and asserts they equal `VoucherArgs::as_bytes()`. The pubkey embedded in the precompile ix MUST equal `Channel.authorized_signer` (which equals `payer` if no delegate was bound at `open`).
 
-**Replay protection.** `channel_id` (a PDA, hence program- and seed-specific) + strictly monotonic `cumulative_amount > settled` + optional `expires_at`. No explicit nonce. This strict watermark rule applies to `settle` and to `settleAndFinalize` when a voucher is supplied. A supplied `settleAndFinalize` voucher with `cumulative_amount <= settled` is invalid; if no additional settlement is needed, call `settleAndFinalize` without a voucher to finalize the current `settled` watermark.
+**Replay protection.** `channel_id` (a PDA, hence program- and seed-specific) + strictly monotonic `cumulative_amount > settled` + optional `expires_at`. No explicit nonce. This strict watermark rule applies to `settle` and to `settleAndFinalize` when a voucher is supplied. A supplied `settleAndFinalize` voucher with `cumulative_amount <= settled` is invalid and MUST cause the `settleAndFinalize` instruction to reject; if no additional settlement is needed, call `settleAndFinalize` without a voucher to finalize the current `settled` watermark.
 
 ### FSM
 
