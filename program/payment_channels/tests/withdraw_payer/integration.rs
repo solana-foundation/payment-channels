@@ -79,7 +79,9 @@ fn unsigned_payer_rejects() {
             ..WithdrawPayerRun::new(payer, finalized_channel(payer))
         }
         .run(),
-        ProgramResult::Failure(ProgramError::MissingRequiredSignature),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::MissingRequiredSignature as u32
+        )),
     );
 }
 

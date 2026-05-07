@@ -12,7 +12,7 @@ impl From<PaymentChannelsError> for ProgramError {
 #[derive(Debug, Copy, Clone, Error)]
 #[cfg_attr(feature = "idl", derive(CodamaErrors))]
 pub enum PaymentChannelsError {
-    // genereal channel validation errors
+    // generel channel validation errors
     #[error("Not implemented")]
     NotImplemented = 0,
     #[error("A signature was required but not found")]

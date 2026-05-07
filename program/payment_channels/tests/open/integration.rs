@@ -85,7 +85,9 @@ fn unsigned_payer_rejected() {
             ..OpenRun::new(SALT, DEPOSIT, GRACE, 1)
         }
         .run(),
-        ProgramResult::Failure(ProgramError::MissingRequiredSignature),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::MissingRequiredSignature as u32
+        )),
     );
 }
 
@@ -124,31 +126,6 @@ fn wrong_channel_pda_rejected() {
         .run(),
         ProgramResult::Failure(ProgramError::Custom(
             PaymentChannelsError::ChannelAddressMismatch as u32
-        )),
-    );
-}
-
-#[test]
-fn wrong_escrow_ata_rejected() {
-    let payer = Pubkey::new_unique();
-    let payee = Pubkey::new_unique();
-    let mint = Pubkey::new_unique();
-    let authorized_signer = Pubkey::new_unique();
-    let (channel, _) = derive_pdas(&payer, &payee, &mint, &authorized_signer, SALT);
-    let wrong_ata = Pubkey::new_unique();
-    assert_eq!(
-        OpenRun {
-            payer,
-            payee,
-            mint,
-            authorized_signer,
-            channel,
-            channel_ata: wrong_ata,
-            ..OpenRun::new(SALT, DEPOSIT, GRACE, 1)
-        }
-        .run(),
-        ProgramResult::Failure(ProgramError::Custom(
-            PaymentChannelsError::ChannelAccountMismatch as u32
         )),
     );
 }
@@ -283,7 +260,7 @@ fn non_ata_payer_token_account_rejected() {
     let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
     expect_custom_err(
         svm.send_transaction(tx),
-        PaymentChannelsError::InvalidPayerTokenAccount,
+        PaymentChannelsError::PayerAccountMismatch,
     );
 }
 

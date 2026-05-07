@@ -18,13 +18,11 @@ use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 use payment_channels::PaymentChannelsError;
 use payment_channels::event_engine::{EMIT_EVENT_IX_DISC, EVENT_AUTHORITY_SEED, EVENT_IX_TAG_LE};
 use payment_channels::events::Opened;
-use solana_instruction::error::InstructionError;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_pubkey::{Pubkey, pubkey};
 use solana_signer::Signer;
 use solana_transaction::Transaction;
-use solana_transaction_error::TransactionError;
 
 mod common;
 use common::{PROGRAM_ID, ProgramLoader, expect_custom_err};
@@ -223,11 +221,10 @@ fn emit_event_rejects_non_signer_authority() {
         &[&payer],
         svm.latest_blockhash(),
     );
-    let err = svm.send_transaction(tx).expect_err("should fail");
-    match err.err {
-        TransactionError::InstructionError(_, InstructionError::MissingRequiredSignature) => {}
-        other => panic!("unexpected error: {other:?}"),
-    }
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::MissingRequiredSignature,
+    );
 }
 
 #[test]
@@ -247,11 +244,10 @@ fn emit_event_rejects_zero_accounts() {
         &[&payer],
         svm.latest_blockhash(),
     );
-    let err = svm.send_transaction(tx).expect_err("should fail");
-    match err.err {
-        TransactionError::InstructionError(_, InstructionError::NotEnoughAccountKeys) => {}
-        other => panic!("unexpected error: {other:?}"),
-    }
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::NotEnoughAccountKeys,
+    );
 }
 
 #[test]
@@ -270,9 +266,8 @@ fn emit_event_rejects_extra_accounts() {
         &[&payer],
         svm.latest_blockhash(),
     );
-    let err = svm.send_transaction(tx).expect_err("should fail");
-    match err.err {
-        TransactionError::InstructionError(_, InstructionError::NotEnoughAccountKeys) => {}
-        other => panic!("unexpected error: {other:?}"),
-    }
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::NotEnoughAccountKeys,
+    );
 }
