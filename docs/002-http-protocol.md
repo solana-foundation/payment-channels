@@ -325,7 +325,7 @@ Content-Type: application/json
 }
 ```
 
-`voucher` is OPTIONAL. When present, it MUST strictly advance the on-chain watermark (`settled < voucher.cumulativeAmount`). Omit it when no final settle is needed and the channel finalizes at the current on-chain `settled` watermark.
+`voucher` is OPTIONAL. When present, it MUST strictly advance the on-chain watermark (`settled < voucher.cumulativeAmount`); a supplied voucher at or below the current `settled` watermark is invalid. If no final settle is needed, send the close request without a voucher so the channel finalizes at the current on-chain `settled` watermark.
 
 **Example 6: Successful response with `Payment-Receipt` (S -> C)**
 
