@@ -3,10 +3,8 @@ use codama::CodamaAccount;
 use core::mem::size_of;
 use pinocchio::error::ProgramError;
 
-use crate::state::{
-    common::AccountDiscriminator,
-    transmutable::{Transmutable, load_mut},
-};
+use crate::state::common::AccountDiscriminator;
+use crate::state::transmutable::{Transmutable, load_mut};
 
 /// Tombstoned channel PDA. Replaces the [`Channel`](crate::Channel) bytes via
 /// in-place realloc at `distribute`'s FINALIZED branch so the address stays

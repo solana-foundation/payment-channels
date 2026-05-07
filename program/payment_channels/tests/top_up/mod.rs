@@ -2,10 +2,8 @@ mod e2e;
 mod integration;
 
 use mollusk_svm::{Mollusk, result::ProgramResult};
-use payment_channels_core::{
-    instructions::top_up::{DISCRIMINATOR, TopUpArgs},
-    state::Transmutable,
-};
+use payment_channels_core::instructions::top_up::{DISCRIMINATOR, TopUpArgs};
+use payment_channels_core::state::Transmutable;
 use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;

@@ -7,15 +7,11 @@ use pinocchio::{
     sysvars::{Sysvar, clock::Clock},
 };
 
-use crate::{
-    errors::PaymentChannelsError,
-    instructions::{VoucherArgs, helpers::voucher::verify_voucher},
-    state::{
-        Transmutable,
-        channel::{Channel, ChannelStatus},
-        load,
-    },
-};
+use crate::errors::PaymentChannelsError;
+use crate::instructions::VoucherArgs;
+use crate::instructions::helpers::voucher::verify_voucher;
+use crate::state::channel::{Channel, ChannelStatus};
+use crate::state::{Transmutable, load};
 
 /// Instruction discriminator byte for `settle`.
 pub const DISCRIMINATOR: u8 = 2;

@@ -9,12 +9,10 @@
 
 use borsh::BorshSerialize;
 use const_crypto::ed25519;
-use pinocchio::{
-    AccountView, Address, ProgramResult,
-    cpi::{Seed, Signer, invoke_signed},
-    error::ProgramError,
-    instruction::{InstructionAccount, InstructionView},
-};
+use pinocchio::cpi::{Seed, Signer, invoke_signed};
+use pinocchio::error::ProgramError;
+use pinocchio::instruction::{InstructionAccount, InstructionView};
+use pinocchio::{AccountView, Address, ProgramResult};
 
 use crate::errors::PaymentChannelsError;
 

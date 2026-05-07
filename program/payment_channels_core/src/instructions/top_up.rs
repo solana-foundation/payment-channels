@@ -4,15 +4,13 @@ use core::mem::size_of;
 use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 use pinocchio_token_2022::instructions::TransferChecked;
 
-use crate::{
-    errors::PaymentChannelsError,
-    helpers::accounts::view::{
-        ChannelAccountView, ChannelContext, ChannelTokenAccountView, MintAccountView,
-        PayerAccountView, PayerContext, PayerTokenAccountView, TokenContext,
-        TokenProgramAccountView,
-    },
-    state::{Channel, Transmutable, channel::ChannelStatus, load},
+use crate::errors::PaymentChannelsError;
+use crate::helpers::accounts::view::{
+    ChannelAccountView, ChannelContext, ChannelTokenAccountView, MintAccountView, PayerAccountView,
+    PayerContext, PayerTokenAccountView, TokenContext, TokenProgramAccountView,
 };
+use crate::state::channel::ChannelStatus;
+use crate::state::{Channel, Transmutable, load};
 
 /// Instruction discriminator byte for `topUp`.
 pub const DISCRIMINATOR: u8 = 3;

@@ -4,10 +4,9 @@ use pinocchio::{
     sysvars::{Sysvar, clock::Clock},
 };
 
-use crate::{
-    errors::PaymentChannelsError,
-    state::{Channel, channel::ChannelStatus},
-};
+use crate::errors::PaymentChannelsError;
+use crate::state::Channel;
+use crate::state::channel::ChannelStatus;
 
 /// Instruction discriminator byte for `finalize`.
 pub const DISCRIMINATOR: u8 = 6;

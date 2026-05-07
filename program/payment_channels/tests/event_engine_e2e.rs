@@ -15,12 +15,13 @@
 
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
-use payment_channels_core::{
-    PaymentChannelsError,
-    event_engine::{EMIT_EVENT_IX_DISC, EVENT_AUTHORITY_SEED, EVENT_IX_TAG_LE},
-    events::Opened,
+use payment_channels_core::PaymentChannelsError;
+use payment_channels_core::event_engine::{
+    EMIT_EVENT_IX_DISC, EVENT_AUTHORITY_SEED, EVENT_IX_TAG_LE,
 };
-use solana_instruction::{AccountMeta, Instruction, error::InstructionError};
+use payment_channels_core::events::Opened;
+use solana_instruction::error::InstructionError;
+use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_pubkey::{Pubkey, pubkey};
 use solana_signer::Signer;

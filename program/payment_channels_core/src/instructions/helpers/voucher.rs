@@ -12,11 +12,10 @@
 use pinocchio::{AccountView, Address, error::ProgramError, sysvars::instructions::Instructions};
 
 use super::ed25519::parse as ed25519_ix;
-use crate::{
-    errors::PaymentChannelsError,
-    instructions::VoucherArgs,
-    state::{Transmutable, channel::Channel},
-};
+use crate::errors::PaymentChannelsError;
+use crate::instructions::VoucherArgs;
+use crate::state::Transmutable;
+use crate::state::channel::Channel;
 
 /// Verify a voucher against the channel and the preceding Ed25519 ix.
 /// Returns the new watermark on success.

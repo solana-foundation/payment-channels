@@ -10,7 +10,8 @@ mod e2e;
 mod integration;
 
 use mollusk_svm::{Mollusk, result::ProgramResult};
-use payment_channels_core::{instructions::withdraw_payer::DISCRIMINATOR, state::Channel};
+use payment_channels_core::instructions::withdraw_payer::DISCRIMINATOR;
+use payment_channels_core::state::Channel;
 use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;

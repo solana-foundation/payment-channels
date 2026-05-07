@@ -9,9 +9,6 @@ default = []
 # Enables codama derives for host-only IDL generation.
 idl = ["dep:codama"]
 
-[package.metadata.solana]
-program-id = "GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc"
-
 [dependencies]
 pinocchio                          = { version = "0.11.1", features = ["cpi", "copy", "account-resize"] }
 solana-address                     = { version = "2", features = ["curve25519", "borsh"] }

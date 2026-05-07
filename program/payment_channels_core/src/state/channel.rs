@@ -7,13 +7,9 @@ use pinocchio::{
     error::ProgramError,
 };
 
-use crate::{
-    errors::PaymentChannelsError,
-    state::{
-        common::{AccountDiscriminator, CURRENT_CHANNEL_VERSION},
-        transmutable::{Transmutable, load, load_mut},
-    },
-};
+use crate::errors::PaymentChannelsError;
+use crate::state::common::{AccountDiscriminator, CURRENT_CHANNEL_VERSION};
+use crate::state::transmutable::{Transmutable, load, load_mut};
 
 /// PDA seed prefix. Full seeds:
 /// `[CHANNEL_SEED, payer, payee, mint, authorized_signer, salt.to_le_bytes()]`.

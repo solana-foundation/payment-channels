@@ -4,7 +4,8 @@
 //! token-flow scenarios live in [`super::e2e`].
 
 use mollusk_svm::result::ProgramResult;
-use payment_channels_core::{PaymentChannelsError, state::channel::ChannelStatus};
+use payment_channels_core::PaymentChannelsError;
+use payment_channels_core::state::channel::ChannelStatus;
 use solana_program_error::ProgramError;
 use solana_pubkey::Pubkey;
 
