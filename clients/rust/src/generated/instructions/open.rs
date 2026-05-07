@@ -157,7 +157,7 @@ impl OpenInstructionArgs {
 ///   9. `[]` rent
 ///   10. `[]` associated_token_program
 ///   11. `[]` event_authority
-///   12. `[]` self_program
+///   12. `[optional]` self_program (default to `GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc`)
 #[derive(Clone, Debug, Default)]
 pub struct OpenBuilder {
     payer: Option<solana_address::Address>,
@@ -251,6 +251,7 @@ impl OpenBuilder {
         self.event_authority = Some(event_authority);
         self
     }
+    /// `[optional account, default to 'GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc']`
     #[inline(always)]
     pub fn self_program(&mut self, self_program: solana_address::Address) -> &mut Self {
         self.self_program = Some(self_program);
@@ -301,7 +302,9 @@ impl OpenBuilder {
                 .associated_token_program
                 .expect("associated_token_program is not set"),
             event_authority: self.event_authority.expect("event_authority is not set"),
-            self_program: self.self_program.expect("self_program is not set"),
+            self_program: self.self_program.unwrap_or(solana_address::address!(
+                "GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc"
+            )),
         };
         let args = OpenInstructionArgs {
             open_args: self.open_args.clone().expect("open_args is not set"),

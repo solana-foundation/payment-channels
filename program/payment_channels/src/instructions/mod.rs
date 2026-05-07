@@ -10,7 +10,7 @@ pub mod top_up;
 pub mod withdraw_payer;
 
 #[cfg(feature = "idl")]
-use codama::{CodamaInstructions, CodamaType};
+use codama::{CodamaInstructions, CodamaPda, CodamaType};
 use pinocchio::{Address, error::ProgramError};
 
 use crate::state::Transmutable;
@@ -75,6 +75,18 @@ unsafe impl Transmutable for VoucherArgs {
     const LEN: usize = VOUCHER_PAYLOAD_SIZE;
 }
 
+/// PDA signer for Anchor-compatible self-CPI event emission.
+///
+/// Runtime code derives the same address from
+/// [`EVENT_AUTHORITY_SEED`](crate::event_engine::EVENT_AUTHORITY_SEED); this
+/// IDL-only marker lets generated clients derive it for `open` and
+/// `emitEvent`.
+#[cfg(feature = "idl")]
+#[allow(dead_code)]
+#[derive(CodamaPda)]
+#[codama(seed(type = string(utf8), value = "event_authority"))]
+pub(crate) struct EventAuthority;
+
 /// Byte-0-dispatched instruction codomain. Each variant's discriminant
 /// matches the `DISCRIMINATOR` const in the corresponding sibling module;
 /// [`from_bytes`](Self::from_bytes) peels the first byte and routes to the
@@ -98,10 +110,10 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
         codama(account(name = "system_program", default_value = program("system"))),
         codama(account(name = "rent")),
         codama(account(name = "associated_token_program")),
-        codama(account(name = "event_authority")),
+        codama(account(name = "event_authority", default_value = pda("eventAuthority"))),
         codama(account(name = "self_program"))
     )]
-    Open(#[cfg_attr(feature = "idl", codama(name = "open_args"))] &'a open::OpenArgs) = 1,
+    Open(#[cfg_attr(feature = "idl", codama(name = "open_args"))] open::OpenArgs<'a>) = 1,
 
     /// Permissionless crank: advances the on-chain
     /// [`settled`](crate::Channel::settled) watermark against a payer-signed
@@ -168,7 +180,6 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
     /// [`deposit`](crate::Channel::deposit) `−`
     /// [`settled`](crate::Channel::settled) headroom (if not already
     /// withdrawn) and tombstones the escrow ATA + the Channel PDA.
-    ///
     /// Recipient token accounts are appended as remaining accounts in the
     /// same order as the`DistributionEntry`s in the preimage.
     #[cfg_attr(
@@ -184,7 +195,7 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
     )]
     Distribute(
         #[cfg_attr(feature = "idl", codama(name = "distribute_args"))]
-        &'a distribute::DistributeArgs,
+        distribute::DistributeArgs<'a>,
     ) = 7,
 
     /// Payer-signed one-shot refund of [`deposit`](crate::Channel::deposit)
@@ -206,7 +217,10 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
     /// instruction set. `228 = EVENT_IX_TAG_LE[0]`: self-CPI event data
     /// starts with this byte, so byte-0 dispatch routes straight to
     /// [`emit_event::process`](crate::instructions::emit_event::process).
-    #[cfg_attr(feature = "idl", codama(account(name = "event_authority", signer)))]
+    #[cfg_attr(
+        feature = "idl",
+        codama(account(name = "event_authority", signer, default_value = pda("eventAuthority")))
+    )]
     EmitEvent = 228,
 }
 
@@ -248,14 +262,17 @@ mod tests {
 
     #[test]
     fn discriminators_match_variants() {
-        let open: open::OpenArgs = unsafe { core::mem::zeroed() };
         let settle: settle::SettleArgs = unsafe { core::mem::zeroed() };
         let top_up: top_up::TopUpArgs = unsafe { core::mem::zeroed() };
         let saf: settle_and_finalize::SettleAndFinalizeArgs = unsafe { core::mem::zeroed() };
-        let distribute: distribute::DistributeArgs = unsafe { core::mem::zeroed() };
+
+        let open_data = [0u8; 20 + 4];
+        let open = open::OpenArgs::load(&open_data).unwrap();
+        let distribute_data = 0u32.to_le_bytes();
+        let distribute = distribute::DistributeArgs::load(&distribute_data).unwrap();
 
         assert_eq!(
-            tag(&PaymentChannelsInstruction::Open(&open)),
+            tag(&PaymentChannelsInstruction::Open(open)),
             open::DISCRIMINATOR,
         );
         assert_eq!(
@@ -279,7 +296,7 @@ mod tests {
             finalize::DISCRIMINATOR,
         );
         assert_eq!(
-            tag(&PaymentChannelsInstruction::Distribute(&distribute)),
+            tag(&PaymentChannelsInstruction::Distribute(distribute)),
             distribute::DISCRIMINATOR,
         );
         assert_eq!(

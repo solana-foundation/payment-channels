@@ -5,7 +5,7 @@
 //! <https://github.com/codama-idl/codama>
 //!
 
-use crate::generated::types::DistributionRecipients;
+use crate::generated::types::DistributionEntry;
 use borsh::BorshDeserialize;
 use borsh::BorshSerialize;
 
@@ -14,5 +14,5 @@ pub struct OpenArgs {
     pub salt: u64,
     pub deposit: u64,
     pub grace_period: u32,
-    pub recipients: DistributionRecipients,
+    pub recipients: Vec<DistributionEntry>,
 }

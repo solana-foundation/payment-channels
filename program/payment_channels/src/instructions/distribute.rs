@@ -1,6 +1,7 @@
 #[cfg(feature = "idl")]
+use alloc::vec::Vec;
+#[cfg(feature = "idl")]
 use codama::CodamaType;
-use core::mem::size_of;
 use pinocchio::{
     AccountView, Address, ProgramResult, Resize,
     cpi::Signer,
@@ -15,11 +16,10 @@ use crate::helpers::accounts::view::{
 };
 use crate::helpers::accounts::view::{PayerAccountView, RecipientTokenAccountsView};
 use crate::instructions::helpers::{
-    DistributionEntry, DistributionRecipients, channel_signer_seeds, floor_bps_share,
+    DistributionEntry, DistributionPreimage, channel_signer_seeds, floor_bps_share,
 };
 use crate::state::channel::{Channel, ChannelStatus};
 use crate::state::closed_channel::ClosedChannel;
-use crate::state::{Transmutable, load};
 use crate::{
     errors::PaymentChannelsError,
     helpers::accounts::view::{ChannelAccountView, Checked},
@@ -28,25 +28,27 @@ use crate::{
 /// Instruction discriminator byte for `distribute`.
 pub const DISCRIMINATOR: u8 = 7;
 
-#[repr(C)]
 #[derive(Debug, Clone, Copy)]
-#[cfg_attr(feature = "idl", derive(CodamaType))]
-pub struct DistributeArgs {
+pub struct DistributeArgs<'a> {
     /// Reveal of the plan committed at `open`. Rehashed on-chain; digest must
     /// equal [`Channel::distribution_hash`](crate::Channel::distribution_hash).
-    pub recipients: DistributionRecipients,
+    pub recipients: DistributionPreimage<'a>,
 }
 
-impl DistributeArgs {
-    pub const LEN: usize = size_of::<Self>();
+#[cfg(feature = "idl")]
+#[allow(dead_code)]
+#[derive(CodamaType)]
+#[codama(name = "distribute_args")]
+pub struct DistributeArgsWire {
+    pub recipients: Vec<DistributionEntry>,
+}
 
-    pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
-        unsafe { load::<Self>(data) }.map_err(|_| ProgramError::InvalidInstructionData)
+impl<'a> DistributeArgs<'a> {
+    pub fn load(data: &'a [u8]) -> Result<Self, ProgramError> {
+        Ok(Self {
+            recipients: DistributionPreimage::load(data)?,
+        })
     }
-}
-
-unsafe impl Transmutable for DistributeArgs {
-    const LEN: usize = size_of::<Self>();
 }
 
 /// Fixed 8-slot head + dynamic recipient tail. Recipient ATAs sit in
@@ -131,7 +133,7 @@ impl<'a> TryFrom<&'a mut [AccountView]> for DistributeAccounts<'a> {
 pub fn process(
     _program_id: &Address,
     accounts: &mut [AccountView],
-    args: &DistributeArgs,
+    args: &DistributeArgs<'_>,
 ) -> ProgramResult {
     let accs = DistributeAccounts::try_from(accounts)?;
 
@@ -174,23 +176,20 @@ pub fn process(
         .check(&ch.payee, &channel_ctx.token_ctx)?;
     let treasury_token_account = accs.treasury_token_account.check(&channel_ctx.token_ctx)?;
 
-    // Hash equality is the sole plan-level gate: a matching digest proves
-    // the revealed plan is byte-identical to the one open committed, which
-    // open already validated. Anything below this point trusts the plan.
     let digest = args.recipients.preimage_hash();
     if digest != ch.distribution_hash {
         return Err(PaymentChannelsError::InvalidDistributionHash.into());
     }
 
-    let distribution = args.recipients.view_unchecked();
-
-    if accs.recipient_token_accounts.len() != distribution.entries.len() {
+    // Hash equality proves the revealed distribution matches the plan
+    // committed by `open`.
+    if accs.recipient_token_accounts.len() != args.recipients.entries.len() {
         return Err(PaymentChannelsError::RecipientAccountCountMismatch.into());
     }
 
     let recipient_token_accounts = accs
         .recipient_token_accounts
-        .check(distribution.entries, &channel_ctx.token_ctx)?;
+        .check(args.recipients.entries, &channel_ctx.token_ctx)?;
 
     // Pool = settled − paid_out.
     let pool = ch
@@ -240,8 +239,8 @@ pub fn process(
         &recipient_token_accounts,
         &channel_ctx,
         &payee_token_account,
-        distribution.entries,
-        distribution.payee_bps,
+        args.recipients.entries,
+        args.recipients.payee_bps(),
         pool,
         &signers,
     )?;

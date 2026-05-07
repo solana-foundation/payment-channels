@@ -95,6 +95,8 @@ pub enum PaymentChannelsError {
     DuplicateRecipient = 263,
     #[error("num_recipients outside [0, 32]")]
     DistributionAmountOverflow = 264,
+    #[error("Distribution preimage length calculation overflow")]
+    DistributionPreimageLengthOverflow = 265,
 
     // ix open
     #[error("Derived channel account address does not match the user provided address")]

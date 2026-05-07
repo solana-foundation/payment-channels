@@ -5,11 +5,11 @@
 //! <https://github.com/codama-idl/codama>
 //!
 
-use crate::generated::types::DistributionRecipients;
+use crate::generated::types::DistributionEntry;
 use borsh::BorshDeserialize;
 use borsh::BorshSerialize;
 
 #[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Eq, PartialEq)]
 pub struct DistributeArgs {
-    pub recipients: DistributionRecipients,
+    pub recipients: Vec<DistributionEntry>,
 }
