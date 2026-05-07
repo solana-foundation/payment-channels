@@ -148,7 +148,7 @@ fn wrong_escrow_ata_rejected() {
         }
         .run(),
         ProgramResult::Failure(ProgramError::Custom(
-            PaymentChannelsError::EscrowAddressMismatch as u32
+            PaymentChannelsError::ChannelAccountMismatch as u32
         )),
     );
 }
@@ -379,7 +379,7 @@ fn unsupported_token_2022_mint_extensions_reject_before_channel_creation() {
 
         expect_custom_err(
             svm.send_transaction(tx),
-            PaymentChannelsError::UnsupportedTokenExtensions,
+            PaymentChannelsError::MalformedMintTokenExtensions,
         );
         assert!(svm.get_account(&channel).is_none());
         assert_eq!(token_balance(&svm, &payer_token_account), DEPOSIT);
@@ -423,7 +423,7 @@ fn unsupported_token_2022_payer_account_extensions_reject_before_channel_creatio
 
         expect_custom_err(
             svm.send_transaction(tx),
-            PaymentChannelsError::UnsupportedTokenExtensions,
+            PaymentChannelsError::InvalidPayerTokenExtensions,
         );
         assert!(svm.get_account(&channel).is_none());
         assert_eq!(token_balance(&svm, &payer_token_account), DEPOSIT);

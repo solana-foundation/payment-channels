@@ -150,18 +150,17 @@ pub fn process(
 
     // Identity.
     if accs.payer.address() != &ch.payer {
-        return Err(PaymentChannelsError::PayerAccountMismatch.into());
+        return Err(PaymentChannelsError::InvalidChannelPayer.into());
     }
     if accs.mint.address() != &ch.mint {
-        return Err(PaymentChannelsError::MintAccountMismatch.into());
+        return Err(PaymentChannelsError::InvalidChannelMint.into());
     }
 
     // drop initial ch
     drop(ch);
 
     let token_ctx = TokenContext::new(accs.mint, accs.token_program)?;
-    let mut channel_ctx = ChannelContext::new(accs.channel, accs.channel_token_account, token_ctx)
-        .map_err(|_| PaymentChannelsError::InvalidChannelTokenAccount)?;
+    let mut channel_ctx = ChannelContext::new(accs.channel, accs.channel_token_account, token_ctx)?;
     let mut payer_ctx =
         PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)?;
 
@@ -172,12 +171,8 @@ pub fn process(
     // Validate the fixed token accounts first.
     let payee_token_account = accs
         .payee_token_account
-        .check(&ch.payee, &channel_ctx.token_ctx)
-        .map_err(|_| PaymentChannelsError::InvalidPayeeTokenAccount)?;
-    let treasury_token_account = accs
-        .treasury_token_account
-        .check(&channel_ctx.token_ctx)
-        .map_err(|_| PaymentChannelsError::TreasuryAddressMismatch)?;
+        .check(&ch.payee, &channel_ctx.token_ctx)?;
+    let treasury_token_account = accs.treasury_token_account.check(&channel_ctx.token_ctx)?;
 
     // Hash equality is the sole plan-level gate: a matching digest proves
     // the revealed plan is byte-identical to the one open committed, which
@@ -201,7 +196,7 @@ pub fn process(
     let pool = ch
         .settled()
         .checked_sub(ch.paid_out())
-        .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+        .ok_or(PaymentChannelsError::DistributePoolOverflow)?;
     if pool == 0 && status == ChannelStatus::Open {
         return Err(PaymentChannelsError::NothingToDistribute.into());
     }
@@ -369,12 +364,12 @@ fn tombstone_finalized_channel(
     let current = channel_ctx.channel.lamports();
     let delta = current
         .checked_sub(new_min)
-        .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+        .ok_or(PaymentChannelsError::DistributeBalanceCalculationOverflow)?;
     let new_payer_bal = payer_ctx
         .payer
         .lamports()
         .checked_add(delta)
-        .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+        .ok_or(PaymentChannelsError::DistributePayerBalanceOverflow)?;
     channel_ctx.channel.set_lamports(new_min);
     payer_ctx.payer.set_lamports(new_payer_bal);
     Ok(())

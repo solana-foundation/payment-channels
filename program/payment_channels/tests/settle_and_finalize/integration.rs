@@ -93,7 +93,7 @@ fn wrong_merchant_rejects() {
         )
         .run(),
         ProgramResult::Failure(ProgramError::Custom(
-            PaymentChannelsError::UnauthorizedPayee as u32
+            PaymentChannelsError::InvalidChannelPayee as u32
         )),
     );
 }
@@ -150,7 +150,7 @@ fn closing_wrong_merchant_rejects() {
         )
         .run(),
         ProgramResult::Failure(ProgramError::Custom(
-            PaymentChannelsError::UnauthorizedPayee as u32
+            PaymentChannelsError::InvalidChannelPayee as u32
         )),
     );
 }

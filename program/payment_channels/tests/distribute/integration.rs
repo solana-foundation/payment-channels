@@ -61,7 +61,7 @@ fn wrong_mint_rejects() {
         )
         .run(),
         ProgramResult::Failure(ProgramError::Custom(
-            PaymentChannelsError::MintAccountMismatch as u32
+            PaymentChannelsError::InvalidChannelMint as u32
         )),
     );
 }

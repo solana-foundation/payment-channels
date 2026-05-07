@@ -227,7 +227,7 @@ fn top_up_wrong_payer_rejects() {
     );
     expect_custom_err(
         svm.send_transaction(tx),
-        PaymentChannelsError::UnauthorizedPayer,
+        PaymentChannelsError::InvalidChannelPayer,
     );
 }
 
@@ -289,7 +289,7 @@ fn top_up_wrong_mint_rejects() {
     );
     expect_custom_err(
         svm.send_transaction(tx),
-        PaymentChannelsError::MintAccountMismatch,
+        PaymentChannelsError::InvalidChannelMint,
     );
 }
 
@@ -349,7 +349,7 @@ fn top_up_wrong_escrow_rejects() {
     );
     expect_custom_err(
         svm.send_transaction(tx),
-        PaymentChannelsError::EscrowAddressMismatch,
+        PaymentChannelsError::ChannelAccountMismatch,
     );
 }
 
@@ -572,7 +572,7 @@ fn top_up_unsupported_token_2022_mint_extension_rejects_without_state_changes() 
     );
     expect_custom_err(
         svm.send_transaction(tx),
-        PaymentChannelsError::UnsupportedTokenExtensions,
+        PaymentChannelsError::MalformedMintTokenExtensions,
     );
 
     assert_eq!(read_deposit(&svm, &channel), deposit);
@@ -636,6 +636,6 @@ fn top_up_wrong_escrow_rejects_token_2022() {
     );
     expect_custom_err(
         svm.send_transaction(tx),
-        PaymentChannelsError::EscrowAddressMismatch,
+        PaymentChannelsError::ChannelAccountMismatch,
     );
 }

@@ -884,7 +884,7 @@ fn unsupported_token_2022_mint_extensions_reject_without_state_changes() {
 
         let res = s.send(s.distribute_ix());
 
-        expect_custom_err(res, PaymentChannelsError::UnsupportedTokenExtensions);
+        expect_custom_err(res, PaymentChannelsError::MalformedMintTokenExtensions);
         assert_eq!(read_paid_out(&s.svm, &s.channel), paid_out_before);
         assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
         assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
@@ -907,7 +907,7 @@ fn unsupported_token_2022_account_extensions_reject_without_state_changes() {
 
         let res = s.send(s.distribute_ix());
 
-        expect_custom_err(res, PaymentChannelsError::UnsupportedTokenExtensions);
+        expect_custom_err(res, PaymentChannelsError::InvalidRecipientTokenExtensions);
         assert_eq!(read_paid_out(&s.svm, &s.channel), paid_out_before);
         assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
         assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
@@ -959,7 +959,7 @@ fn wrong_recipient_ata() {
         &[rogue_ata],
         s.recipients(),
     );
-    expect_custom_err(s.send(ix), PaymentChannelsError::InvalidRecipientAccount);
+    expect_custom_err(s.send(ix), PaymentChannelsError::RecipientAccountMismatch);
 }
 
 #[test]
@@ -991,7 +991,7 @@ fn wrong_treasury_ata() {
         &s.recipient_atas,
         s.recipients(),
     );
-    expect_custom_err(s.send(ix), PaymentChannelsError::TreasuryAddressMismatch);
+    expect_custom_err(s.send(ix), PaymentChannelsError::TreasuryAccountMismatch);
 }
 
 #[test]
@@ -1017,7 +1017,7 @@ fn wrong_token_program() {
         &s.recipient_atas,
         s.recipients(),
     );
-    expect_custom_err(s.send(ix), PaymentChannelsError::InvalidTokenProgram);
+    expect_custom_err(s.send(ix), PaymentChannelsError::InvalidMintTokenProgram);
 }
 
 #[test]
@@ -1160,7 +1160,7 @@ fn bps_sum_equals_10000_still_validates_payee_ata() {
         &s.recipient_atas,
         s.recipients(),
     );
-    expect_custom_err(s.send(ix), PaymentChannelsError::InvalidPayeeTokenAccount);
+    expect_custom_err(s.send(ix), PaymentChannelsError::PayeeAccountMismatch);
 }
 
 #[test]
@@ -1192,7 +1192,7 @@ fn wrong_payee_ata() {
         &s.recipient_atas,
         s.recipients(),
     );
-    expect_custom_err(s.send(ix), PaymentChannelsError::InvalidPayeeTokenAccount);
+    expect_custom_err(s.send(ix), PaymentChannelsError::PayeeAccountMismatch);
 }
 
 #[test]

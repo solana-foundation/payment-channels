@@ -71,7 +71,7 @@ impl<'a> TryFrom<&'a mut [AccountView]> for TopUpAccounts<'a> {
             token_program,
         ] = accounts
         else {
-            return Err(ProgramError::NotEnoughAccountKeys);
+            return Err(PaymentChannelsError::NotEnoughAccountKeys.into());
         };
         Ok(Self {
             payer: payer.into(),
@@ -95,7 +95,7 @@ pub fn process(
     let accs = TopUpAccounts::try_from(accounts)?;
 
     if !accs.payer.is_signer() {
-        return Err(ProgramError::MissingRequiredSignature);
+        return Err(PaymentChannelsError::MissingRequiredSignature.into());
     }
 
     let amount = args.amount();
@@ -109,28 +109,24 @@ pub fn process(
             return Err(PaymentChannelsError::InvalidChannelStatus.into());
         }
         if accs.payer.address() != &ch.payer {
-            return Err(PaymentChannelsError::UnauthorizedPayer.into());
+            return Err(PaymentChannelsError::InvalidChannelPayer.into());
         }
         if accs.mint.address() != &ch.mint {
-            return Err(PaymentChannelsError::MintAccountMismatch.into());
+            return Err(PaymentChannelsError::InvalidChannelMint.into());
         }
     }
 
     let token_ctx = TokenContext::new(accs.mint, accs.token_program)?;
-    let mut channel_ctx = ChannelContext::new(accs.channel, accs.channel_token_account, token_ctx)
-        .map_err(|_| PaymentChannelsError::EscrowAddressMismatch)?;
-    let payer_ctx = PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)
-        .map_err(|e| match e {
-            PaymentChannelsError::AddressMismatch => PaymentChannelsError::InvalidPayerTokenAccount,
-            other => other,
-        })?;
+    let mut channel_ctx = ChannelContext::new(accs.channel, accs.channel_token_account, token_ctx)?;
+    let payer_ctx =
+        PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)?;
 
     {
         let mut ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
         let new_deposit = ch
             .deposit()
             .checked_add(amount)
-            .ok_or(ProgramError::ArithmeticOverflow)?;
+            .ok_or(PaymentChannelsError::TopUpDepositOverflow)?;
         ch.set_deposit(new_deposit);
     }
 

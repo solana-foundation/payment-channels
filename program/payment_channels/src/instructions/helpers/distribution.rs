@@ -93,7 +93,7 @@ impl DistributionRecipients {
             }
             bps_sum = bps_sum
                 .checked_add(bps as u32)
-                .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+                .ok_or(PaymentChannelsError::DistributionPartsOverflow)?;
             for prior in &entries[..i] {
                 if prior.recipient == entry.recipient {
                     return Err(PaymentChannelsError::DuplicateRecipient.into());
@@ -158,7 +158,7 @@ const _: () = assert!(size_of::<DistributionEntry>() == 34);
 pub fn floor_bps_share(pool: u64, bps: u32) -> Result<u64, ProgramError> {
     let prod = (pool as u128)
         .checked_mul(bps as u128)
-        .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+        .ok_or(PaymentChannelsError::DistributionAmountOverflow)?;
     Ok((prod / (BPS_DENOMINATOR as u128)) as u64)
 }
 

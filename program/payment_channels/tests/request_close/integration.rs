@@ -41,7 +41,7 @@ fn wrong_payer_rejects() {
         )
         .run(),
         ProgramResult::Failure(ProgramError::Custom(
-            PaymentChannelsError::UnauthorizedPayer as u32
+            PaymentChannelsError::InvalidChannelPayer as u32
         )),
     );
 }
