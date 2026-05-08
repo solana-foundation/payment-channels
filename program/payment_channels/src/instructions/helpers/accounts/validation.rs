@@ -3,16 +3,15 @@ use pinocchio::{AccountView, Address};
 use crate::helpers::{
     accounts::view::TokenContext,
     token::{
-        TokenAccountExtensionPolicy, TokenExtensionError, base_layout, scan_tlv_extensions, tlv,
+        base_layout, scan_tlv_extensions, tlv, TokenAccountExtensionPolicy, TokenExtensionError,
     },
 };
 
-#[allow(dead_code)] // TokenExtensionError is currently not read anywhere
 pub(crate) enum AccountValidationError {
     AddressMismatch,
     MalformedTokenAccountData,
     InvalidTokenProgram,
-    TokenExtensionError(TokenExtensionError),
+    TokenExtensionError,
 }
 
 pub(crate) trait AccountValidator {
@@ -112,7 +111,7 @@ impl AccountValidator for AccountView {
 }
 
 impl From<TokenExtensionError> for AccountValidationError {
-    fn from(value: TokenExtensionError) -> Self {
-        AccountValidationError::TokenExtensionError(value)
+    fn from(_value: TokenExtensionError) -> Self {
+        AccountValidationError::TokenExtensionError
     }
 }

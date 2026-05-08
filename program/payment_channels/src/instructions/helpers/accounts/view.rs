@@ -3,15 +3,15 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
-use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer};
+use pinocchio::{cpi::Signer, AccountView, Address, ProgramResult};
 
 use crate::{
-    PaymentChannelsError, TREASURY_OWNER,
     helpers::{
-        DistributionEntry,
         accounts::validation::{AccountValidationError, AccountValidator},
-        token::{MintExtensionPolicy, TokenExtensionError, base_layout, scan_tlv_extensions, tlv},
+        token::{base_layout, scan_tlv_extensions, tlv, MintExtensionPolicy, TokenExtensionError},
+        DistributionEntry,
     },
+    PaymentChannelsError, TREASURY_OWNER,
 };
 
 pub struct Unchecked;
@@ -128,7 +128,7 @@ impl<'a> TreasuryTokenAccountView<'a, Unchecked> {
                 | AccountValidationError::InvalidTokenProgram => {
                     PaymentChannelsError::InvalidTreasuryTokenAccount
                 }
-                AccountValidationError::TokenExtensionError(_) => {
+                AccountValidationError::TokenExtensionError => {
                     PaymentChannelsError::InvalidTreasuryTokenExtensions
                 }
             })?;
@@ -156,7 +156,7 @@ impl<'a> PayeeTokenAccountView<'a, Unchecked> {
                 | AccountValidationError::InvalidTokenProgram => {
                     PaymentChannelsError::InvalidPayeeTokenAccount
                 }
-                AccountValidationError::TokenExtensionError(_) => {
+                AccountValidationError::TokenExtensionError => {
                     PaymentChannelsError::InvalidPayeeTokenExtensions
                 }
             })?;
@@ -192,7 +192,7 @@ impl<'a> RecipientTokenAccountsView<'a, Unchecked> {
                     | AccountValidationError::InvalidTokenProgram => {
                         PaymentChannelsError::InvalidRecipientTokenAccount
                     }
-                    AccountValidationError::TokenExtensionError(_) => {
+                    AccountValidationError::TokenExtensionError => {
                         PaymentChannelsError::InvalidRecipientTokenExtensions
                     }
                 })?;
@@ -321,7 +321,7 @@ impl<'a> ChannelContext<'a> {
                 | AccountValidationError::InvalidTokenProgram => {
                     PaymentChannelsError::InvalidChannelTokenAccount
                 }
-                AccountValidationError::TokenExtensionError(_) => {
+                AccountValidationError::TokenExtensionError => {
                     PaymentChannelsError::InvalidChannelTokenExtensions
                 }
             })?;
@@ -406,7 +406,7 @@ impl<'a> PayerContext<'a> {
                 | AccountValidationError::InvalidTokenProgram => {
                     PaymentChannelsError::InvalidPayerTokenAccount
                 }
-                AccountValidationError::TokenExtensionError(_) => {
+                AccountValidationError::TokenExtensionError => {
                     PaymentChannelsError::InvalidPayerTokenExtensions
                 }
             })?;
