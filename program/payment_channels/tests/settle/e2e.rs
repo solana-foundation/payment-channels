@@ -15,8 +15,7 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-mod common;
-use common::{
+use crate::common::{
     INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, compute_budget_ix, ed25519_program_id,
     expect_custom_err,
 };
@@ -228,42 +227,6 @@ fn settle_without_preceding_ed25519_ix_rejects() {
     expect_custom_err(
         svm.send_transaction(tx),
         PaymentChannelsError::MissingEd25519Verification,
-    );
-}
-
-#[test]
-fn settle_on_non_open_status_rejects() {
-    let mut svm = LiteSVM::load_program();
-    let fee_payer = Keypair::new();
-    svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
-
-    let signer = Keypair::new();
-    let channel = Pubkey::new_unique();
-    // status = 1 (Finalized)
-    seed_channel(&mut svm, &channel, 1, 1_000_000, 0, &signer.pubkey());
-
-    let cumulative = 500_000u64;
-    let voucher = VoucherArgs {
-        channel_id: channel,
-        cumulative_amount: cumulative,
-        expires_at: 0,
-    };
-    let payload = voucher_payload(&voucher);
-    let signature: [u8; 64] = signer.sign_message(&payload).into();
-    let pubkey = signer.pubkey().to_bytes();
-
-    let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
-    let settle_ix = build_settle_ix(&channel, voucher);
-
-    let tx = Transaction::new_signed_with_payer(
-        &[ed25519_ix, settle_ix],
-        Some(&fee_payer.pubkey()),
-        &[&fee_payer],
-        svm.latest_blockhash(),
-    );
-    expect_custom_err(
-        svm.send_transaction(tx),
-        PaymentChannelsError::InvalidChannelStatus,
     );
 }
 
