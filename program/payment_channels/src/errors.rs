@@ -11,6 +11,7 @@ impl From<PaymentChannelsError> for ProgramError {
 
 #[derive(Debug, Copy, Clone, Error)]
 #[cfg_attr(feature = "idl", derive(CodamaErrors))]
+#[repr(u32)]
 pub enum PaymentChannelsError {
     // generel channel validation errors
     #[error("Not implemented")]
