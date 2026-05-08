@@ -13,120 +13,174 @@ pub enum PaymentChannelsError {
     /// 0 - Not implemented
     #[error("Not implemented")]
     NotImplemented = 0x0,
-    /// 1 - Invalid channel status
+    /// 1 - A signature was required but not found
+    #[error("A signature was required but not found")]
+    MissingRequiredSignature = 0x1,
+    /// 2 - Invalid channel status
     #[error("Invalid channel status")]
-    InvalidChannelStatus = 0x1,
-    /// 2 - Invalid event authority
-    #[error("Invalid event authority")]
-    InvalidEventAuthority = 0x2,
+    InvalidChannelStatus = 0x2,
     /// 3 - Invalid account discriminator
     #[error("Invalid account discriminator")]
     InvalidAccountDiscriminator = 0x3,
     /// 4 - Unsupported channel version
     #[error("Unsupported channel version")]
     UnsupportedChannelVersion = 0x4,
-    /// 5 - Voucher channel_id does not match channel PDA
-    #[error("Voucher channel_id does not match channel PDA")]
-    VoucherChannelMismatch = 0x5,
-    /// 6 - Voucher expired
-    #[error("Voucher expired")]
-    VoucherExpired = 0x6,
-    /// 7 - Voucher watermark not strictly monotonic
-    #[error("Voucher watermark not strictly monotonic")]
-    VoucherWatermarkNotMonotonic = 0x7,
-    /// 8 - Voucher cumulative_amount exceeds channel deposit
-    #[error("Voucher cumulative_amount exceeds channel deposit")]
-    VoucherOverDeposit = 0x8,
-    /// 9 - Missing Ed25519 precompile ix at current-1
-    #[error("Missing Ed25519 precompile ix at current-1")]
-    MissingEd25519Verification = 0x9,
-    /// 10 - Malformed Ed25519 precompile instruction
-    #[error("Malformed Ed25519 precompile instruction")]
-    MalformedEd25519Instruction = 0xA,
-    /// 11 - Ed25519 message does not match Borsh voucher payload
-    #[error("Ed25519 message does not match Borsh voucher payload")]
-    VoucherMessageMismatch = 0xB,
-    /// 12 - Voucher signer does not match channel authorized_signer
-    #[error("Voucher signer does not match channel authorized_signer")]
-    VoucherSignerMismatch = 0xC,
-    /// 13 - Distribution hash mismatch
-    #[error("Distribution hash mismatch")]
-    InvalidDistributionHash = 0xD,
-    /// 14 - Deposit must be non-zero
-    #[error("Deposit must be non-zero")]
-    DepositMustBeNonZero = 0xE,
-    /// 15 - num_recipients outside [0, 32]
-    #[error("num_recipients outside [0, 32]")]
-    InvalidRecipientCount = 0xF,
-    /// 16 - Channel account does not match derived PDA
+    /// 5 - Account does not match channel payer
+    #[error("Account does not match channel payer")]
+    InvalidChannelPayer = 0x5,
+    /// 6 - Account does not match channel payee
+    #[error("Account does not match channel payee")]
+    InvalidChannelPayee = 0x6,
+    /// 7 - Account does not match channel mint
+    #[error("Account does not match channel mint")]
+    InvalidChannelMint = 0x7,
+    /// 8 - Invalid event authority
+    #[error("Invalid event authority")]
+    InvalidEventAuthority = 0x8,
+    /// 9 - Not enough accounts were provided
+    #[error("Not enough accounts were provided")]
+    NotEnoughAccountKeys = 0x9,
+    /// 50 - Channel account does not match derived PDA
     #[error("Channel account does not match derived PDA")]
-    ChannelAddressMismatch = 0x10,
-    /// 17 - Escrow account does not match derived ATA
-    #[error("Escrow account does not match derived ATA")]
-    EscrowAddressMismatch = 0x11,
-    /// 18 - Payer and payee must be different accounts
-    #[error("Payer and payee must be different accounts")]
-    PayerPayeeMustDiffer = 0x12,
-    /// 19 - Each shareBps must be non-zero and Σbps must be at most 10_000
-    #[error("Each shareBps must be non-zero and Σbps must be at most 10_000")]
-    InvalidSplitConfig = 0x13,
-    /// 20 - Recipient token account is not the expected ATA
-    #[error("Recipient token account is not the expected ATA")]
-    InvalidRecipientAccount = 0x14,
-    /// 21 - Mint account does not match channel.mint
-    #[error("Mint account does not match channel.mint")]
-    MintAccountMismatch = 0x15,
-    /// 22 - Payer account does not match channel.payer
-    #[error("Payer account does not match channel.payer")]
-    PayerAccountMismatch = 0x16,
-    /// 23 - Token program must be SPL Token or Token-2022
-    #[error("Token program must be SPL Token or Token-2022")]
-    InvalidTokenProgram = 0x17,
-    /// 24 - Treasury token account is not ATA(TREASURY_OWNER, mint, token_program)
-    #[error("Treasury token account is not ATA(TREASURY_OWNER, mint, token_program)")]
-    TreasuryAddressMismatch = 0x18,
-    /// 25 - Arithmetic overflow
-    #[error("Arithmetic overflow")]
-    ArithmeticOverflow = 0x19,
-    /// 26 - Channel is not in OPEN or FINALIZED
-    #[error("Channel is not in OPEN or FINALIZED")]
-    ChannelNotDistributable = 0x1A,
-    /// 27 - Channel token account is not ATA(channel, mint, token_program)
+    ChannelAccountMismatch = 0x32,
+    /// 51 - Channel token account is not ATA(channel, mint, token_program)
     #[error("Channel token account is not ATA(channel, mint, token_program)")]
-    InvalidChannelTokenAccount = 0x1B,
-    /// 28 - Payer token account is not ATA(payer, mint, token_program)
-    #[error("Payer token account is not ATA(payer, mint, token_program)")]
-    InvalidPayerTokenAccount = 0x1C,
-    /// 29 - Token-2022 mint or token account uses unsupported extensions for exact distribution
-    #[error("Token-2022 mint or token account uses unsupported extensions for exact distribution")]
-    UnsupportedTokenExtensions = 0x1D,
-    /// 30 - No newly settled funds to distribute
-    #[error("No newly settled funds to distribute")]
-    NothingToDistribute = 0x1E,
-    /// 31 - Payee token account is not ATA(payee, mint, token_program)
-    #[error("Payee token account is not ATA(payee, mint, token_program)")]
-    InvalidPayeeTokenAccount = 0x1F,
-    /// 32 - Distribution plan contains a duplicate recipient address
-    #[error("Distribution plan contains a duplicate recipient address")]
-    DuplicateRecipient = 0x20,
-    /// 33 - Recipient ATA tail length does not match the committed plan's entry count
-    #[error("Recipient ATA tail length does not match the committed plan's entry count")]
-    RecipientAccountCountMismatch = 0x21,
-    /// 34 - Caller is not the channel payer
-    #[error("Caller is not the channel payer")]
-    UnauthorizedPayer = 0x22,
-    /// 35 - Token account or mint TLV trailer is malformed
+    InvalidChannelTokenAccount = 0x33,
+    /// 52 - Channel token account has invalid extensions
+    #[error("Channel token account has invalid extensions")]
+    InvalidChannelTokenExtensions = 0x34,
+    /// 53 - Mint account does not match channel.mint
+    #[error("Mint account does not match channel.mint")]
+    MintAccountMismatch = 0x35,
+    /// 54 - Token program must be SPL Token or Token-2022
+    #[error("Token program must be SPL Token or Token-2022")]
+    InvalidMintTokenProgram = 0x36,
+    /// 55 - Token account or mint TLV trailer is malformed
     #[error("Token account or mint TLV trailer is malformed")]
-    MalformedTokenAccountData = 0x23,
-    /// 36 - Caller is not the channel payee
-    #[error("Caller is not the channel payee")]
-    UnauthorizedPayee = 0x24,
-    /// 37 - Account address mismatch
-    #[error("Account address mismatch")]
-    AddressMismatch = 0x25,
-    /// 38 - Payer refund has already been claimed
+    MalformedMintTokenAccountData = 0x37,
+    /// 56 - Token account or mint TLV trailer is malformed
+    #[error("Token account or mint TLV trailer is malformed")]
+    MalformedMintTokenExtensions = 0x38,
+    /// 57 - Payer token account is not ATA(payer, token_program, mint)
+    #[error("Payer token account is not ATA(payer, token_program, mint)")]
+    PayerAccountMismatch = 0x39,
+    /// 58 - Payer token account is invalid
+    #[error("Payer token account is invalid")]
+    InvalidPayerTokenAccount = 0x3A,
+    /// 59 - Payer token account has invalid extensions
+    #[error("Payer token account has invalid extensions")]
+    InvalidPayerTokenExtensions = 0x3B,
+    /// 60 - Payee token account is not ATA(payee, token_program, mint)
+    #[error("Payee token account is not ATA(payee, token_program, mint)")]
+    PayeeAccountMismatch = 0x3C,
+    /// 61 - Payee token account is invalid
+    #[error("Payee token account is invalid")]
+    InvalidPayeeTokenAccount = 0x3D,
+    /// 62 - Payee token account has invalid extensions
+    #[error("Payee token account has invalid extensions")]
+    InvalidPayeeTokenExtensions = 0x3E,
+    /// 200 - Deposit must be non-zero
+    #[error("Deposit must be non-zero")]
+    DepositMustBeNonZero = 0xC8,
+    /// 230 - Missing Ed25519 precompile ix at current-1
+    #[error("Missing Ed25519 precompile ix at current-1")]
+    MissingEd25519Verification = 0xE6,
+    /// 231 - Malformed Ed25519 precompile instruction
+    #[error("Malformed Ed25519 precompile instruction")]
+    MalformedEd25519Instruction = 0xE7,
+    /// 232 - Voucher channel_id does not match channel PDA
+    #[error("Voucher channel_id does not match channel PDA")]
+    VoucherChannelMismatch = 0xE8,
+    /// 233 - Voucher expired
+    #[error("Voucher expired")]
+    VoucherExpired = 0xE9,
+    /// 234 - Voucher watermark not strictly monotonic
+    #[error("Voucher watermark not strictly monotonic")]
+    VoucherWatermarkNotMonotonic = 0xEA,
+    /// 235 - Voucher cumulative_amount exceeds channel deposit
+    #[error("Voucher cumulative_amount exceeds channel deposit")]
+    VoucherOverDeposit = 0xEB,
+    /// 236 - Ed25519 message does not match Borsh voucher payload
+    #[error("Ed25519 message does not match Borsh voucher payload")]
+    VoucherMessageMismatch = 0xEC,
+    /// 237 - Voucher signer does not match channel authorized_signer
+    #[error("Voucher signer does not match channel authorized_signer")]
+    VoucherSignerMismatch = 0xED,
+    /// 260 - num_recipients outside [0, 32]
+    #[error("num_recipients outside [0, 32]")]
+    InvalidRecipientCount = 0x104,
+    /// 261 - Each shareBps must be non-zero and Σbps must be at most 10_000
+    #[error("Each shareBps must be non-zero and Σbps must be at most 10_000")]
+    InvalidSplitConfig = 0x105,
+    /// 262 - num_recipients outside [0, 32]
+    #[error("num_recipients outside [0, 32]")]
+    DistributionPartsOverflow = 0x106,
+    /// 263 - Distribution plan contains a duplicate recipient address
+    #[error("Distribution plan contains a duplicate recipient address")]
+    DuplicateRecipient = 0x107,
+    /// 264 - num_recipients outside [0, 32]
+    #[error("num_recipients outside [0, 32]")]
+    DistributionAmountOverflow = 0x108,
+    /// 265 - Distribution preimage length calculation overflow
+    #[error("Distribution preimage length calculation overflow")]
+    DistributionPreimageLengthOverflow = 0x109,
+    /// 2000 - Derived channel account address does not match the user provided address
+    #[error("Derived channel account address does not match the user provided address")]
+    ChannelAddressMismatch = 0x7D0,
+    /// 2001 - Payer and payee must be different accounts
+    #[error("Payer and payee must be different accounts")]
+    PayerPayeeMustDiffer = 0x7D1,
+    /// 2100 - Deposit must be non-zero
+    #[error("Deposit must be non-zero")]
+    TopUpDepositOverflow = 0x834,
+    /// 2200 - Deadline overflow on grace period
+    #[error("Deadline overflow on grace period")]
+    FinalizeDeadlineOverflow = 0x898,
+    /// 2300 - Payer refund has already been claimed
     #[error("Payer refund has already been claimed")]
-    PayerAlreadyWithdrawn = 0x26,
+    PayerAlreadyWithdrawn = 0x8FC,
+    /// 2301 - Payer refund amount calculation underflow
+    #[error("Payer refund amount calculation underflow")]
+    RefundCalculationOverflow = 0x8FD,
+    /// 2400 - Channel is not in OPEN or FINALIZED
+    #[error("Channel is not in OPEN or FINALIZED")]
+    ChannelNotDistributable = 0x960,
+    /// 2401 - Treasury token account is not ATA(TREASURY_OWNER, mint, token_program)
+    #[error("Treasury token account is not ATA(TREASURY_OWNER, mint, token_program)")]
+    TreasuryAccountMismatch = 0x961,
+    /// 2402 - Treasury token account is invalid
+    #[error("Treasury token account is invalid")]
+    InvalidTreasuryTokenAccount = 0x962,
+    /// 2403 - Treasury token account has invalid extensions
+    #[error("Treasury token account has invalid extensions")]
+    InvalidTreasuryTokenExtensions = 0x963,
+    /// 2404 - Recipient token account is not ATA(recipient, token_program, mint)
+    #[error("Recipient token account is not ATA(recipient, token_program, mint)")]
+    RecipientAccountMismatch = 0x964,
+    /// 2405 - Recipient token account is invalid
+    #[error("Recipient token account is invalid")]
+    InvalidRecipientTokenAccount = 0x965,
+    /// 2406 - Recipient token account has invalid extensions
+    #[error("Recipient token account has invalid extensions")]
+    InvalidRecipientTokenExtensions = 0x966,
+    /// 2407 - Distribution hash mismatch
+    #[error("Distribution hash mismatch")]
+    InvalidDistributionHash = 0x967,
+    /// 2408 - No newly settled funds to distribute
+    #[error("No newly settled funds to distribute")]
+    NothingToDistribute = 0x968,
+    /// 2409 - Recipient ATA tail length does not match the committed plan's entry count
+    #[error("Recipient ATA tail length does not match the committed plan's entry count")]
+    RecipientAccountCountMismatch = 0x969,
+    /// 2410 - Distribution pool calculation underflow
+    #[error("Distribution pool calculation underflow")]
+    DistributePoolOverflow = 0x96A,
+    /// 2411 - Channel rent rebalance calculation underflow
+    #[error("Channel rent rebalance calculation underflow")]
+    DistributeBalanceCalculationOverflow = 0x96B,
+    /// 2412 - Payer lamports overflow on rent refund
+    #[error("Payer lamports overflow on rent refund")]
+    DistributePayerBalanceOverflow = 0x96C,
 }
 
 impl From<PaymentChannelsError> for solana_program_error::ProgramError {

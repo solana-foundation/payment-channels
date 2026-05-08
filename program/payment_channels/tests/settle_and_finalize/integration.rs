@@ -37,7 +37,9 @@ fn unsigned_merchant_rejects() {
             )
         }
         .run(),
-        ProgramResult::Failure(ProgramError::MissingRequiredSignature),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::MissingRequiredSignature as u32
+        )),
     );
 }
 
@@ -93,7 +95,7 @@ fn wrong_merchant_rejects() {
         )
         .run(),
         ProgramResult::Failure(ProgramError::Custom(
-            PaymentChannelsError::UnauthorizedPayee as u32
+            PaymentChannelsError::InvalidChannelPayee as u32
         )),
     );
 }
@@ -150,7 +152,7 @@ fn closing_wrong_merchant_rejects() {
         )
         .run(),
         ProgramResult::Failure(ProgramError::Custom(
-            PaymentChannelsError::UnauthorizedPayee as u32
+            PaymentChannelsError::InvalidChannelPayee as u32
         )),
     );
 }

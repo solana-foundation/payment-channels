@@ -48,7 +48,7 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
     let deadline = ch
         .closure_started_at()
         .checked_add(ch.grace_period() as i64)
-        .ok_or(ProgramError::ArithmeticOverflow)?;
+        .ok_or(PaymentChannelsError::FinalizeDeadlineOverflow)?;
 
     if now < deadline {
         return Err(PaymentChannelsError::InvalidChannelStatus.into());

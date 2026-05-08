@@ -9,7 +9,6 @@ use pinocchio_system::instructions::CreateAccount;
 use pinocchio_token_2022::instructions::TransferChecked;
 
 use crate::errors::PaymentChannelsError;
-use crate::helpers::accounts::validation::AccountValidator;
 use crate::helpers::accounts::view::ChannelAccountView;
 use crate::helpers::accounts::view::ChannelContext;
 use crate::helpers::accounts::view::ChannelTokenAccountView;
@@ -215,7 +214,7 @@ pub fn process(
     let accs = OpenAccounts::try_from(accounts)?;
 
     if !accs.payer.is_signer() {
-        return Err(ProgramError::MissingRequiredSignature);
+        return Err(PaymentChannelsError::MissingRequiredSignature.into());
     }
 
     if accs.payer.address() == accs.payee.address() {
@@ -252,23 +251,11 @@ pub fn process(
         return Err(PaymentChannelsError::ChannelAddressMismatch.into());
     }
 
-    accs.channel_token_account
-        .validate_as_ata_unchecked(
-            &channel_address,
-            accs.token_program.address(),
-            accs.mint.address(),
-        )
-        .map_err(|_| PaymentChannelsError::EscrowAddressMismatch)?;
-
     let token_ctx = TokenContext::new(accs.mint, accs.token_program)?;
     let mut channel_ctx =
-        ChannelContext::new_uninit(accs.channel, accs.channel_token_account, token_ctx)
-            .map_err(|_| PaymentChannelsError::EscrowAddressMismatch)?;
-    let payer_ctx = PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)
-        .map_err(|e| match e {
-            PaymentChannelsError::AddressMismatch => PaymentChannelsError::InvalidPayerTokenAccount,
-            other => other,
-        })?;
+        ChannelContext::new_uninit(accs.channel, accs.channel_token_account, token_ctx)?;
+    let payer_ctx =
+        PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)?;
 
     // Allocate the channel PDA. The runtime verifies the seeds match
     // accs.channel.address(); mismatched account → CPI failure.

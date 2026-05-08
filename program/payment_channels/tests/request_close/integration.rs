@@ -23,7 +23,9 @@ fn unsigned_payer_rejects() {
             )
         }
         .run(),
-        ProgramResult::Failure(ProgramError::MissingRequiredSignature),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::MissingRequiredSignature as u32
+        )),
     );
 }
 
@@ -41,7 +43,7 @@ fn wrong_payer_rejects() {
         )
         .run(),
         ProgramResult::Failure(ProgramError::Custom(
-            PaymentChannelsError::UnauthorizedPayer as u32
+            PaymentChannelsError::InvalidChannelPayer as u32
         )),
     );
 }

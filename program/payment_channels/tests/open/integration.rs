@@ -85,7 +85,9 @@ fn unsigned_payer_rejected() {
             ..OpenRun::new(SALT, DEPOSIT, GRACE, 1)
         }
         .run(),
-        ProgramResult::Failure(ProgramError::MissingRequiredSignature),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::MissingRequiredSignature as u32
+        )),
     );
 }
 
@@ -124,31 +126,6 @@ fn wrong_channel_pda_rejected() {
         .run(),
         ProgramResult::Failure(ProgramError::Custom(
             PaymentChannelsError::ChannelAddressMismatch as u32
-        )),
-    );
-}
-
-#[test]
-fn wrong_escrow_ata_rejected() {
-    let payer = Pubkey::new_unique();
-    let payee = Pubkey::new_unique();
-    let mint = Pubkey::new_unique();
-    let authorized_signer = Pubkey::new_unique();
-    let (channel, _) = derive_pdas(&payer, &payee, &mint, &authorized_signer, SALT);
-    let wrong_ata = Pubkey::new_unique();
-    assert_eq!(
-        OpenRun {
-            payer,
-            payee,
-            mint,
-            authorized_signer,
-            channel,
-            channel_ata: wrong_ata,
-            ..OpenRun::new(SALT, DEPOSIT, GRACE, 1)
-        }
-        .run(),
-        ProgramResult::Failure(ProgramError::Custom(
-            PaymentChannelsError::EscrowAddressMismatch as u32
         )),
     );
 }
@@ -283,7 +260,7 @@ fn non_ata_payer_token_account_rejected() {
     let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
     expect_custom_err(
         svm.send_transaction(tx),
-        PaymentChannelsError::InvalidPayerTokenAccount,
+        PaymentChannelsError::PayerAccountMismatch,
     );
 }
 
@@ -379,7 +356,7 @@ fn unsupported_token_2022_mint_extensions_reject_before_channel_creation() {
 
         expect_custom_err(
             svm.send_transaction(tx),
-            PaymentChannelsError::UnsupportedTokenExtensions,
+            PaymentChannelsError::MalformedMintTokenExtensions,
         );
         assert!(svm.get_account(&channel).is_none());
         assert_eq!(token_balance(&svm, &payer_token_account), DEPOSIT);
@@ -423,7 +400,7 @@ fn unsupported_token_2022_payer_account_extensions_reject_before_channel_creatio
 
         expect_custom_err(
             svm.send_transaction(tx),
-            PaymentChannelsError::UnsupportedTokenExtensions,
+            PaymentChannelsError::InvalidPayerTokenExtensions,
         );
         assert!(svm.get_account(&channel).is_none());
         assert_eq!(token_balance(&svm, &payer_token_account), DEPOSIT);

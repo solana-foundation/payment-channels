@@ -17,7 +17,9 @@ use super::{
     derive_pdas, derive_pdas_with_token_program, open_ix, open_ix_with_token_program,
     setup_funded_svm, setup_funded_svm_with_token_program,
 };
-use crate::common::{ProgramLoader, TOKEN_2022};
+use payment_channels::PaymentChannelsError;
+
+use crate::common::{ProgramLoader, TOKEN_2022, expect_custom_err};
 
 const SALT: u64 = 42;
 const DEPOSIT: u64 = 5_000_000;
@@ -154,6 +156,37 @@ fn open_with_no_splits_succeeds() {
 
     let expected: [u8; 32] = blake3::hash(&0u32.to_le_bytes()).into();
     assert_eq!(&channel_data[56..88], &expected, "distribution_hash");
+}
+
+#[test]
+fn wrong_channel_token_account_rejected() {
+    let mut svm = LiteSVM::load_program();
+
+    let payee = Pubkey::new_unique();
+    let authorized_signer = Pubkey::new_unique();
+    let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
+    let (channel, _) = derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
+    let wrong_channel_ata = Pubkey::new_unique();
+
+    let ix = open_ix(
+        &payer.pubkey(),
+        &payee,
+        &mint,
+        &authorized_signer,
+        &channel,
+        &payer_token_account,
+        &wrong_channel_ata,
+        SALT,
+        DEPOSIT,
+        GRACE_PERIOD,
+        1,
+    );
+    let msg = Message::new(&[ix], Some(&payer.pubkey()));
+    let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::ChannelAccountMismatch,
+    );
 }
 
 #[test]

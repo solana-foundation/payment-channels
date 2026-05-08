@@ -2,25 +2,22 @@
 
 #![allow(clippy::result_large_err)]
 
+use crate::common::token_2022::{EXT_TRANSFER_FEE_CONFIG, add_mint_extension};
+use crate::common::{
+    PROGRAM_ID, ProgramLoader, SPL_TOKEN, TOKEN_2022, expect_custom_err, open_channel,
+    token_balance,
+};
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 use payment_channels::PaymentChannelsError;
 use payment_channels_client::instructions::{TopUp, TopUpInstructionArgs};
 use payment_channels_client::types::TopUpArgs;
 use solana_account::Account;
-use solana_instruction::error::InstructionError;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
-use solana_transaction_error::TransactionError;
-
-use crate::common::token_2022::{EXT_TRANSFER_FEE_CONFIG, add_mint_extension};
-use crate::common::{
-    PROGRAM_ID, ProgramLoader, SPL_TOKEN, TOKEN_2022, expect_custom_err, open_channel,
-    token_balance,
-};
 
 /// Inject a 216-byte Channel at `channel` owned by `PROGRAM_ID`.
 fn seed_channel(svm: &mut LiteSVM, channel: &Pubkey, status: u8, deposit: u64, payer: &Pubkey) {
@@ -227,7 +224,7 @@ fn top_up_wrong_payer_rejects() {
     );
     expect_custom_err(
         svm.send_transaction(tx),
-        PaymentChannelsError::UnauthorizedPayer,
+        PaymentChannelsError::InvalidChannelPayer,
     );
 }
 
@@ -289,7 +286,7 @@ fn top_up_wrong_mint_rejects() {
     );
     expect_custom_err(
         svm.send_transaction(tx),
-        PaymentChannelsError::MintAccountMismatch,
+        PaymentChannelsError::InvalidChannelMint,
     );
 }
 
@@ -349,7 +346,7 @@ fn top_up_wrong_escrow_rejects() {
     );
     expect_custom_err(
         svm.send_transaction(tx),
-        PaymentChannelsError::EscrowAddressMismatch,
+        PaymentChannelsError::ChannelAccountMismatch,
     );
 }
 
@@ -383,11 +380,10 @@ fn top_up_unsigned_payer_rejects() {
         &[&fee_payer],
         svm.latest_blockhash(),
     );
-    let err = svm.send_transaction(tx).expect_err("should fail");
-    match err.err {
-        TransactionError::InstructionError(_, InstructionError::MissingRequiredSignature) => {}
-        other => panic!("unexpected error: {other:?}"),
-    }
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::MissingRequiredSignature,
+    );
 }
 
 #[test]
@@ -572,7 +568,7 @@ fn top_up_unsupported_token_2022_mint_extension_rejects_without_state_changes() 
     );
     expect_custom_err(
         svm.send_transaction(tx),
-        PaymentChannelsError::UnsupportedTokenExtensions,
+        PaymentChannelsError::MalformedMintTokenExtensions,
     );
 
     assert_eq!(read_deposit(&svm, &channel), deposit);
@@ -636,6 +632,6 @@ fn top_up_wrong_escrow_rejects_token_2022() {
     );
     expect_custom_err(
         svm.send_transaction(tx),
-        PaymentChannelsError::EscrowAddressMismatch,
+        PaymentChannelsError::ChannelAccountMismatch,
     );
 }

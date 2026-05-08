@@ -45,7 +45,9 @@ fn unsigned_payer_rejects() {
             )
         }
         .run(),
-        ProgramResult::Failure(ProgramError::MissingRequiredSignature),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::MissingRequiredSignature as u32
+        )),
     );
 }
 
@@ -85,7 +87,7 @@ fn wrong_payer_rejects() {
         )
         .run(),
         ProgramResult::Failure(ProgramError::Custom(
-            PaymentChannelsError::UnauthorizedPayer as u32
+            PaymentChannelsError::InvalidChannelPayer as u32
         )),
     );
 }
@@ -111,7 +113,7 @@ fn wrong_mint_rejects() {
         }
         .run(),
         ProgramResult::Failure(ProgramError::Custom(
-            PaymentChannelsError::MintAccountMismatch as u32
+            PaymentChannelsError::InvalidChannelMint as u32
         )),
     );
 }
@@ -153,7 +155,7 @@ fn unknown_token_program_rejects() {
         }
         .run(),
         ProgramResult::Failure(ProgramError::Custom(
-            PaymentChannelsError::InvalidTokenProgram as u32
+            PaymentChannelsError::InvalidMintTokenProgram as u32
         )),
     );
 }

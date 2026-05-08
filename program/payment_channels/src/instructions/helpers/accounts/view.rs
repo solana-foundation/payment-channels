@@ -9,8 +9,8 @@ use crate::{
     PaymentChannelsError, TREASURY_OWNER,
     helpers::{
         DistributionEntry,
-        accounts::validation::AccountValidator,
-        token::{MintExtensionPolicy, base_layout, scan_tlv_extensions, tlv},
+        accounts::validation::{AccountValidationError, AccountValidator},
+        token::{MintExtensionPolicy, TokenExtensionError, base_layout, scan_tlv_extensions, tlv},
     },
 };
 
@@ -99,16 +99,16 @@ impl<'a> TokenProgramAccountView<'a, Checked> {
     ) -> Result<u64, PaymentChannelsError> {
         if self.address() == &pinocchio_token::ID {
             Ok(pinocchio_token::state::Account::from_account_view(account)
-                .map_err(|_| PaymentChannelsError::InvalidChannelTokenAccount)?
+                .map_err(|_| PaymentChannelsError::MalformedMintTokenAccountData)?
                 .amount())
         } else if self.address() == &pinocchio_token_2022::ID {
             Ok(
                 pinocchio_token_2022::state::Account::from_account_view(account)
-                    .map_err(|_| PaymentChannelsError::InvalidChannelTokenAccount)?
+                    .map_err(|_| PaymentChannelsError::MalformedMintTokenAccountData)?
                     .amount(),
             )
         } else {
-            Err(PaymentChannelsError::InvalidTokenProgram)
+            Err(PaymentChannelsError::InvalidMintTokenProgram)
         }
     }
 }
@@ -119,7 +119,19 @@ impl<'a> TreasuryTokenAccountView<'a, Unchecked> {
         token_ctx: &TokenContext<'a>,
     ) -> Result<TreasuryTokenAccountView<'a, Checked>, PaymentChannelsError> {
         self.inner
-            .validate_as_ata_checked(&TREASURY_OWNER, token_ctx)?;
+            .validate_as_ata_checked(&TREASURY_OWNER, token_ctx)
+            .map_err(|err| match err {
+                AccountValidationError::AddressMismatch => {
+                    PaymentChannelsError::TreasuryAccountMismatch
+                }
+                AccountValidationError::MalformedTokenAccountData
+                | AccountValidationError::InvalidTokenProgram => {
+                    PaymentChannelsError::InvalidTreasuryTokenAccount
+                }
+                AccountValidationError::TokenExtensionError => {
+                    PaymentChannelsError::InvalidTreasuryTokenExtensions
+                }
+            })?;
 
         Ok(TreasuryTokenAccountView {
             inner: self.inner,
@@ -134,7 +146,20 @@ impl<'a> PayeeTokenAccountView<'a, Unchecked> {
         payee: &Address,
         token_ctx: &TokenContext<'a>,
     ) -> Result<PayeeTokenAccountView<'a, Checked>, PaymentChannelsError> {
-        self.inner.validate_as_ata_checked(payee, token_ctx)?;
+        self.inner
+            .validate_as_ata_checked(payee, token_ctx)
+            .map_err(|err| match err {
+                AccountValidationError::AddressMismatch => {
+                    PaymentChannelsError::PayeeAccountMismatch
+                }
+                AccountValidationError::MalformedTokenAccountData
+                | AccountValidationError::InvalidTokenProgram => {
+                    PaymentChannelsError::InvalidPayeeTokenAccount
+                }
+                AccountValidationError::TokenExtensionError => {
+                    PaymentChannelsError::InvalidPayeeTokenExtensions
+                }
+            })?;
 
         Ok(PayeeTokenAccountView {
             inner: self.inner,
@@ -159,11 +184,17 @@ impl<'a> RecipientTokenAccountsView<'a, Unchecked> {
         for (entry, account) in entries.iter().zip(self.inner.iter()) {
             account
                 .validate_as_ata_checked(&entry.recipient, token_ctx)
-                .map_err(|e| match e {
-                    PaymentChannelsError::AddressMismatch => {
-                        PaymentChannelsError::InvalidRecipientAccount
+                .map_err(|err| match err {
+                    AccountValidationError::AddressMismatch => {
+                        PaymentChannelsError::RecipientAccountMismatch
                     }
-                    other => other,
+                    AccountValidationError::MalformedTokenAccountData
+                    | AccountValidationError::InvalidTokenProgram => {
+                        PaymentChannelsError::InvalidRecipientTokenAccount
+                    }
+                    AccountValidationError::TokenExtensionError => {
+                        PaymentChannelsError::InvalidRecipientTokenExtensions
+                    }
                 })?;
         }
 
@@ -225,7 +256,7 @@ impl<'a> TokenContext<'a> {
                 .map_err(|_| PaymentChannelsError::MintAccountMismatch)?
                 .decimals()
         } else {
-            return Err(PaymentChannelsError::InvalidTokenProgram);
+            return Err(PaymentChannelsError::InvalidMintTokenProgram);
         };
 
         if token_program.address() == &pinocchio_token_2022::ID {
@@ -241,9 +272,16 @@ impl<'a> TokenContext<'a> {
                     .iter()
                     .all(|b| *b == 0);
                 if !all_zero {
-                    return Err(PaymentChannelsError::MalformedTokenAccountData);
+                    return Err(PaymentChannelsError::MalformedMintTokenAccountData);
                 }
-                scan_tlv_extensions::<MintExtensionPolicy>(&data[tlv::START..])?;
+                scan_tlv_extensions::<MintExtensionPolicy>(&data[tlv::START..]).map_err(|err| {
+                    match err {
+                        TokenExtensionError::MalformedTokenAccountData
+                        | TokenExtensionError::UnsupportedTokenExtension => {
+                            PaymentChannelsError::MalformedMintTokenExtensions
+                        }
+                    }
+                })?;
             }
         }
 
@@ -273,7 +311,20 @@ impl<'a> ChannelContext<'a> {
         channel_token_account: ChannelTokenAccountView<'a, Unchecked>,
         token_ctx: TokenContext<'a>,
     ) -> Result<Self, PaymentChannelsError> {
-        channel_token_account.validate_as_ata_checked(channel.address(), &token_ctx)?;
+        channel_token_account
+            .validate_as_ata_checked(channel.address(), &token_ctx)
+            .map_err(|err| match err {
+                AccountValidationError::AddressMismatch => {
+                    PaymentChannelsError::ChannelAccountMismatch
+                }
+                AccountValidationError::MalformedTokenAccountData
+                | AccountValidationError::InvalidTokenProgram => {
+                    PaymentChannelsError::InvalidChannelTokenAccount
+                }
+                AccountValidationError::TokenExtensionError => {
+                    PaymentChannelsError::InvalidChannelTokenExtensions
+                }
+            })?;
 
         Ok(Self {
             channel,
@@ -292,11 +343,13 @@ impl<'a> ChannelContext<'a> {
         channel_token_account: ChannelTokenAccountView<'a, Unchecked>,
         token_ctx: TokenContext<'a>,
     ) -> Result<Self, PaymentChannelsError> {
-        channel_token_account.validate_as_ata_unchecked(
-            channel.address(),
-            token_ctx.token_program.address(),
-            token_ctx.mint.address(),
-        )?;
+        channel_token_account
+            .validate_as_ata_unchecked(
+                channel.address(),
+                token_ctx.token_program.address(),
+                token_ctx.mint.address(),
+            )
+            .map_err(|_| PaymentChannelsError::ChannelAccountMismatch)?;
 
         Ok(Self {
             channel,
@@ -343,7 +396,20 @@ impl<'a> PayerContext<'a> {
         payer_token_account: PayerTokenAccountView<'a, Unchecked>,
         token_ctx: &TokenContext<'a>,
     ) -> Result<Self, PaymentChannelsError> {
-        payer_token_account.validate_as_ata_checked(payer.address(), token_ctx)?;
+        payer_token_account
+            .validate_as_ata_checked(payer.address(), token_ctx)
+            .map_err(|err| match err {
+                AccountValidationError::AddressMismatch => {
+                    PaymentChannelsError::PayerAccountMismatch
+                }
+                AccountValidationError::MalformedTokenAccountData
+                | AccountValidationError::InvalidTokenProgram => {
+                    PaymentChannelsError::InvalidPayerTokenAccount
+                }
+                AccountValidationError::TokenExtensionError => {
+                    PaymentChannelsError::InvalidPayerTokenExtensions
+                }
+            })?;
 
         Ok(Self {
             payer: PayerAccountView {

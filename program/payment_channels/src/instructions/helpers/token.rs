@@ -1,4 +1,8 @@
-use crate::errors::PaymentChannelsError;
+#[derive(Debug)]
+pub(crate) enum TokenExtensionError {
+    MalformedTokenAccountData,
+    UnsupportedTokenExtension,
+}
 
 pub(crate) mod base_layout {
     use pinocchio_token_2022::state::{Account as TokenAccount, Mint as TokenMint};
@@ -58,7 +62,7 @@ pub(crate) enum ExtensionType {
 }
 
 impl TryFrom<u16> for ExtensionType {
-    type Error = PaymentChannelsError;
+    type Error = TokenExtensionError;
 
     fn try_from(value: u16) -> Result<Self, Self::Error> {
         const IMMUTABLE_OWNER: u16 = ExtensionType::ImmutableOwner as u16;
@@ -77,7 +81,7 @@ impl TryFrom<u16> for ExtensionType {
             TOKEN_GROUP => Ok(Self::TokenGroup),
             GROUP_MEMBER_POINTER => Ok(Self::GroupMemberPointer),
             TOKEN_GROUP_MEMBER => Ok(Self::TokenGroupMember),
-            _ => Err(PaymentChannelsError::UnsupportedTokenExtensions),
+            _ => Err(TokenExtensionError::UnsupportedTokenExtension),
         }
     }
 }
@@ -123,13 +127,13 @@ impl<'a> ExtensionTlv<'a> {
         Self { remaining: trailer }
     }
 
-    fn advance_one(&mut self) -> Result<Option<ExtensionType>, PaymentChannelsError> {
+    fn advance_one(&mut self) -> Result<Option<ExtensionType>, TokenExtensionError> {
         if self.remaining.len() < tlv::TYPE_LEN {
             // A trailing slice shorter than a `type` field can only be
             // legitimate if it's all zero (terminator pad). A stray nonzero
             // byte is a wire-format violation.
             if self.remaining.iter().any(|&b| b != 0) {
-                return Err(PaymentChannelsError::MalformedTokenAccountData);
+                return Err(TokenExtensionError::MalformedTokenAccountData);
             }
             return Ok(None);
         }
@@ -140,19 +144,19 @@ impl<'a> ExtensionTlv<'a> {
         }
 
         // Type whitelist is checked before the header-length probe so a
-        // forbidden 2-byte tail surfaces as `UnsupportedTokenExtensions`
+        // forbidden 2-byte tail surfaces as `UnsupportedTokenExtension`
         // rather than `MalformedTokenAccountData`.
         let kind = ExtensionType::try_from(raw_type)?;
 
         if self.remaining.len() < tlv::HEADER_LEN {
-            return Err(PaymentChannelsError::MalformedTokenAccountData);
+            return Err(TokenExtensionError::MalformedTokenAccountData);
         }
         let value_len = u16::from_le_bytes([self.remaining[2], self.remaining[3]]) as usize;
         let next_offset = tlv::HEADER_LEN
             .checked_add(value_len)
-            .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+            .ok_or(TokenExtensionError::MalformedTokenAccountData)?;
         if next_offset > self.remaining.len() {
-            return Err(PaymentChannelsError::MalformedTokenAccountData);
+            return Err(TokenExtensionError::MalformedTokenAccountData);
         }
 
         self.remaining = &self.remaining[next_offset..];
@@ -161,7 +165,7 @@ impl<'a> ExtensionTlv<'a> {
 }
 
 impl<'a> Iterator for ExtensionTlv<'a> {
-    type Item = Result<ExtensionType, PaymentChannelsError>;
+    type Item = Result<ExtensionType, TokenExtensionError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.advance_one() {
@@ -180,10 +184,10 @@ impl<'a> Iterator for ExtensionTlv<'a> {
 /// `P`. Extension uniqueness is enforced by the upstream initializer.
 pub(crate) fn scan_tlv_extensions<P: ExtensionPolicy>(
     trailer: &[u8],
-) -> Result<(), PaymentChannelsError> {
+) -> Result<(), TokenExtensionError> {
     for kind in ExtensionTlv::new(trailer) {
         if !P::allows(kind?) {
-            return Err(PaymentChannelsError::UnsupportedTokenExtensions);
+            return Err(TokenExtensionError::UnsupportedTokenExtension);
         }
     }
     Ok(())
@@ -238,7 +242,7 @@ mod tlv_tests {
         [t[0], t[1], l[0], l[1]]
     }
 
-    fn expect_err(result: Result<(), PaymentChannelsError>, expected: PaymentChannelsError) {
+    fn expect_err(result: Result<(), TokenExtensionError>, expected: TokenExtensionError) {
         match result {
             Ok(()) => panic!("expected error, got Ok"),
             Err(e) => assert_eq!(e as u32, expected as u32),
@@ -290,8 +294,8 @@ mod tlv_tests {
     #[test]
     fn extension_type_try_from_unknown_id_is_unsupported() {
         match ExtensionType::try_from(0xFFFFu16) {
-            Err(PaymentChannelsError::UnsupportedTokenExtensions) => {}
-            other => panic!("expected UnsupportedTokenExtensions, got {other:?}"),
+            Err(TokenExtensionError::UnsupportedTokenExtension) => {}
+            other => panic!("expected UnsupportedTokenExtension, got {other:?}"),
         }
     }
 
@@ -340,7 +344,7 @@ mod tlv_tests {
         let bytes = [0x12, 0x00, 0x01];
         expect_err(
             scan_tlv_extensions::<MintExtensionPolicy>(&bytes),
-            PaymentChannelsError::MalformedTokenAccountData,
+            TokenExtensionError::MalformedTokenAccountData,
         );
     }
 
@@ -355,7 +359,7 @@ mod tlv_tests {
         // Below the 2-byte type field but nonzero — wire-format violation.
         expect_err(
             scan_tlv_extensions::<MintExtensionPolicy>(&[0xFF]),
-            PaymentChannelsError::MalformedTokenAccountData,
+            TokenExtensionError::MalformedTokenAccountData,
         );
     }
 
@@ -365,7 +369,7 @@ mod tlv_tests {
         let bytes = [0x12, 0x00];
         expect_err(
             scan_tlv_extensions::<MintExtensionPolicy>(&bytes),
-            PaymentChannelsError::MalformedTokenAccountData,
+            TokenExtensionError::MalformedTokenAccountData,
         );
     }
 
@@ -375,7 +379,7 @@ mod tlv_tests {
         let bytes = [0x01, 0x00];
         expect_err(
             scan_tlv_extensions::<MintExtensionPolicy>(&bytes),
-            PaymentChannelsError::UnsupportedTokenExtensions,
+            TokenExtensionError::UnsupportedTokenExtension,
         );
     }
 
@@ -393,7 +397,7 @@ mod tlv_tests {
         let bytes: [u8; 8] = [h[0], h[1], h[2], h[3], 0, 0, 0, 0];
         expect_err(
             scan_tlv_extensions::<MintExtensionPolicy>(&bytes),
-            PaymentChannelsError::MalformedTokenAccountData,
+            TokenExtensionError::MalformedTokenAccountData,
         );
     }
 
@@ -402,7 +406,7 @@ mod tlv_tests {
         let bytes = header(0xFFFF, 0);
         expect_err(
             scan_tlv_extensions::<MintExtensionPolicy>(&bytes),
-            PaymentChannelsError::UnsupportedTokenExtensions,
+            TokenExtensionError::UnsupportedTokenExtension,
         );
     }
 
@@ -411,7 +415,7 @@ mod tlv_tests {
         let bytes = header(ExtensionType::MetadataPointer as u16, 0);
         expect_err(
             scan_tlv_extensions::<TokenAccountExtensionPolicy>(&bytes),
-            PaymentChannelsError::UnsupportedTokenExtensions,
+            TokenExtensionError::UnsupportedTokenExtension,
         );
     }
 

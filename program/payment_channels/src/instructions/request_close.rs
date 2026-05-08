@@ -25,7 +25,7 @@ impl<'a> TryFrom<&'a mut [AccountView]> for RequestCloseAccounts<'a> {
 
     fn try_from(accounts: &'a mut [AccountView]) -> Result<Self, Self::Error> {
         let [payer, channel] = accounts else {
-            return Err(ProgramError::NotEnoughAccountKeys);
+            return Err(PaymentChannelsError::NotEnoughAccountKeys.into());
         };
         Ok(Self { payer, channel })
     }
@@ -38,7 +38,7 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
     let accs = RequestCloseAccounts::try_from(accounts)?;
 
     if !accs.payer.is_signer() {
-        return Err(ProgramError::MissingRequiredSignature);
+        return Err(PaymentChannelsError::MissingRequiredSignature.into());
     }
 
     let now = Clock::get()?.unix_timestamp;
@@ -50,7 +50,7 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
     }
 
     if accs.payer.address() != &ch.payer {
-        return Err(PaymentChannelsError::UnauthorizedPayer.into());
+        return Err(PaymentChannelsError::InvalidChannelPayer.into());
     }
 
     ch.set_closure_started_at(now);

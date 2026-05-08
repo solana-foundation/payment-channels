@@ -107,9 +107,9 @@ impl<'a> DistributionPreimage<'a> {
         let expected_len = DistributionPreimageHeader::LEN
             .checked_add(
                 n.checked_mul(DistributionEntry::LEN)
-                    .ok_or(PaymentChannelsError::ArithmeticOverflow)?,
+                    .ok_or(PaymentChannelsError::DistributionPreimageLengthOverflow)?,
             )
-            .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+            .ok_or(PaymentChannelsError::DistributionPreimageLengthOverflow)?;
         if data.len() != expected_len {
             return Err(ProgramError::InvalidInstructionData);
         }
@@ -130,7 +130,7 @@ impl<'a> DistributionPreimage<'a> {
             }
             bps_sum = bps_sum
                 .checked_add(bps as u32)
-                .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+                .ok_or(PaymentChannelsError::DistributionPartsOverflow)?;
             for prior in &entries[..i] {
                 if prior.recipient == entry.recipient {
                     return Err(PaymentChannelsError::DuplicateRecipient.into());
@@ -172,7 +172,7 @@ impl<'a> DistributionPreimage<'a> {
 pub fn floor_bps_share(pool: u64, bps: u32) -> Result<u64, ProgramError> {
     let prod = (pool as u128)
         .checked_mul(bps as u128)
-        .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+        .ok_or(PaymentChannelsError::DistributionAmountOverflow)?;
     Ok((prod / (BPS_DENOMINATOR as u128)) as u64)
 }
 

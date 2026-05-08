@@ -41,7 +41,7 @@ impl<'a> TryFrom<&'a mut [AccountView]> for WithdrawPayerAccounts<'a> {
             token_program,
         ] = accounts
         else {
-            return Err(ProgramError::NotEnoughAccountKeys);
+            return Err(PaymentChannelsError::NotEnoughAccountKeys.into());
         };
         Ok(Self {
             payer: payer.into(),
@@ -64,7 +64,7 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
 
     // Signer check before any account reads.
     if !accs.payer.is_signer() {
-        return Err(ProgramError::MissingRequiredSignature);
+        return Err(PaymentChannelsError::MissingRequiredSignature.into());
     }
 
     // Owner / discriminator / version checks.
@@ -77,13 +77,13 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
 
     // Identity + one-shot guard (all channel-state checks before token validation).
     if accs.payer.address() != &ch.payer {
-        return Err(PaymentChannelsError::UnauthorizedPayer.into());
+        return Err(PaymentChannelsError::InvalidChannelPayer.into());
     }
     if ch.payer_withdrawn_at() != 0 {
         return Err(PaymentChannelsError::PayerAlreadyWithdrawn.into());
     }
     if accs.mint.address() != &ch.mint {
-        return Err(PaymentChannelsError::MintAccountMismatch.into());
+        return Err(PaymentChannelsError::InvalidChannelMint.into());
     }
 
     // Snapshot accounting + PDA seed material before dropping ch.
@@ -99,13 +99,9 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
 
     // Validate token contexts + ATA derivations.
     let token_ctx = TokenContext::new(accs.mint, accs.token_program)?;
-    let mut channel_ctx = ChannelContext::new(accs.channel, accs.channel_token_account, token_ctx)
-        .map_err(|_| PaymentChannelsError::InvalidChannelTokenAccount)?;
-    let payer_ctx = PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)
-        .map_err(|e| match e {
-            PaymentChannelsError::AddressMismatch => PaymentChannelsError::InvalidPayerTokenAccount,
-            other => other,
-        })?;
+    let mut channel_ctx = ChannelContext::new(accs.channel, accs.channel_token_account, token_ctx)?;
+    let payer_ctx =
+        PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)?;
 
     // Stamp before CPI — runtime rolls back on failure.
     {
@@ -125,7 +121,7 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
 
     let refund = deposit
         .checked_sub(settled)
-        .ok_or(PaymentChannelsError::ArithmeticOverflow)?;
+        .ok_or(PaymentChannelsError::RefundCalculationOverflow)?;
     channel_ctx.transfer_checked_signed(
         &payer_ctx.payer_token_account.as_any(),
         refund,

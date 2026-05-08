@@ -61,7 +61,7 @@ impl<'a> TryFrom<&'a mut [AccountView]> for SettleAndFinalizeAccounts<'a> {
 
     fn try_from(accounts: &'a mut [AccountView]) -> Result<Self, Self::Error> {
         let [merchant, channel, instructions_sysvar] = accounts else {
-            return Err(ProgramError::NotEnoughAccountKeys);
+            return Err(PaymentChannelsError::NotEnoughAccountKeys.into());
         };
         Ok(Self {
             merchant,
@@ -84,7 +84,7 @@ pub fn process(
     let accs = SettleAndFinalizeAccounts::try_from(accounts)?;
 
     if !accs.merchant.is_signer() {
-        return Err(ProgramError::MissingRequiredSignature);
+        return Err(PaymentChannelsError::MissingRequiredSignature.into());
     }
 
     // Capture before mutable borrow of channel below.
@@ -110,7 +110,7 @@ pub fn process(
     }
 
     if accs.merchant.address() != &ch.payee {
-        return Err(PaymentChannelsError::UnauthorizedPayee.into());
+        return Err(PaymentChannelsError::InvalidChannelPayee.into());
     }
 
     if args.has_voucher != 0 {
