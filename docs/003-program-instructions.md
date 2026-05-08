@@ -192,7 +192,114 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 
 ## Error Codes
 
-_TBD._
+`PaymentChannelsError` is surfaced to clients as `ProgramError::Custom(code)`. Codes are grouped by category and each variant maps 1:1 to a numeric value below. The canonical source is `program/payment_channels/src/errors.rs`; this table mirrors it for client integrators.
+
+### General channel validation
+
+| Code | Variant | Meaning |
+|---|---|---|
+| 0 | `NotImplemented` | Reserved sentinel; unused on the current dispatch surface. |
+| 1 | `MissingRequiredSignature` | A required transaction signature was not present. |
+| 2 | `InvalidChannelStatus` | Channel is not in the `ChannelStatus` the instruction expects. |
+| 3 | `InvalidAccountDiscriminator` | Channel account's first byte is not `AccountDiscriminator::Channel`. |
+| 4 | `UnsupportedChannelVersion` | Channel `version` byte does not match `CURRENT_CHANNEL_VERSION`. |
+| 5 | `InvalidChannelPayer` | Provided `payer` account does not equal `Channel.payer`. |
+| 6 | `InvalidChannelPayee` | Provided merchant/payee account does not equal `Channel.payee`. |
+| 7 | `InvalidChannelMint` | Provided `mint` account does not equal `Channel.mint`. |
+| 8 | `InvalidEventAuthority` | `event_authority` account does not match the program-derived event-authority PDA. |
+| 9 | `NotEnoughAccountKeys` | The instruction received fewer accounts than required. |
+
+### Account validation
+
+| Code | Variant | Meaning |
+|---|---|---|
+| 50 | `ChannelAccountMismatch` | Channel account does not match the PDA derived from the seeds. |
+| 51 | `InvalidChannelTokenAccount` | Escrow ATA is not `ATA(channel, mint, token_program)`. |
+| 52 | `InvalidChannelTokenExtensions` | Escrow ATA carries a Token-2022 extension outside the allow-list. |
+| 53 | `MintAccountMismatch` | Provided mint cannot be parsed for the supplied token program. |
+| 54 | `InvalidMintTokenProgram` | Token program is neither SPL Token nor Token-2022. |
+| 55 | `MalformedMintTokenAccountData` | Token-2022 mint account base/TLV layout is malformed. |
+| 56 | `MalformedMintTokenExtensions` | Token-2022 mint TLV trailer is malformed. |
+| 57 | `PayerAccountMismatch` | Payer ATA is not `ATA(payer, token_program, mint)`. |
+| 58 | `InvalidPayerTokenAccount` | Payer ATA fails state/owner/mint validation. |
+| 59 | `InvalidPayerTokenExtensions` | Payer ATA carries a Token-2022 extension outside the allow-list. |
+| 60 | `PayeeAccountMismatch` | Payee ATA is not `ATA(payee, token_program, mint)`. |
+| 61 | `InvalidPayeeTokenAccount` | Payee ATA fails state/owner/mint validation. |
+| 62 | `InvalidPayeeTokenExtensions` | Payee ATA carries a Token-2022 extension outside the allow-list. |
+
+### General object validation
+
+| Code | Variant | Meaning |
+|---|---|---|
+| 200 | `DepositMustBeNonZero` | Deposit (`open`) or top-up amount (`topUp`) is zero. |
+
+### Voucher validation
+
+| Code | Variant | Meaning |
+|---|---|---|
+| 230 | `MissingEd25519Verification` | No Ed25519 precompile instruction at `current_index − 1`, or wrong program id. |
+| 231 | `MalformedEd25519Instruction` | Ed25519 precompile data fails the canonical-layout parser (length, padding, offsets, message size, cross-instruction guards). |
+| 232 | `VoucherChannelMismatch` | `voucher.channel_id` does not equal the channel PDA address. |
+| 233 | `VoucherExpired` | `voucher.expires_at != 0` and `now ≥ voucher.expires_at`. |
+| 234 | `VoucherWatermarkNotMonotonic` | `voucher.cumulative_amount ≤ Channel.settled` (must be strictly greater). |
+| 235 | `VoucherOverDeposit` | `voucher.cumulative_amount > Channel.deposit`. |
+| 236 | `VoucherMessageMismatch` | Ed25519-signed message bytes do not equal the voucher payload. |
+| 237 | `VoucherSignerMismatch` | Ed25519 pubkey does not equal `Channel.authorized_signer`. |
+
+### Distribution validation
+
+| Code | Variant | Meaning |
+|---|---|---|
+| 260 | `InvalidRecipientCount` | Preimage `count` is outside `[0, MAX_DISTRIBUTION_RECIPIENTS]`. |
+| 261 | `InvalidSplitConfig` | Per-entry `bps == 0`, `Σ bps > 10_000`, or a recipient equals the channel PDA. |
+| 262 | `DistributionPartsOverflow` | Overflow while accumulating `Σ bps` (defensive — bounded by 10_000 in practice). |
+| 263 | `DuplicateRecipient` | Distribution preimage contains the same recipient address twice. |
+| 264 | `DistributionAmountOverflow` | Overflow inside `floor_bps_share` when computing a recipient's share. |
+| 265 | `DistributionPreimageLengthOverflow` | Overflow when computing the expected preimage length from `count`. |
+
+### `open` (instruction 1)
+
+| Code | Variant | Meaning |
+|---|---|---|
+| 2000 | `ChannelAddressMismatch` | Provided `channel` account address does not match `find_pda(payer, payee, mint, authorized_signer, salt)`. |
+| 2001 | `PayerPayeeMustDiffer` | `payer` and `payee` accounts are equal. |
+
+### `topUp` (instruction 3)
+
+| Code | Variant | Meaning |
+|---|---|---|
+| 2100 | `TopUpDepositOverflow` | `deposit + amount` would overflow `u64`. |
+
+### `finalize` (instruction 6)
+
+| Code | Variant | Meaning |
+|---|---|---|
+| 2200 | `FinalizeDeadlineOverflow` | `closure_started_at + grace_period` would overflow `i64`. |
+
+### `withdrawPayer` (instruction 8)
+
+| Code | Variant | Meaning |
+|---|---|---|
+| 2300 | `PayerAlreadyWithdrawn` | `Channel.payer_withdrawn_at != 0`; the one-shot refund has already been claimed. |
+| 2301 | `RefundCalculationOverflow` | `deposit − settled` underflowed (defensive — `settled ≤ deposit` invariant). |
+
+### `distribute` (instruction 7)
+
+| Code | Variant | Meaning |
+|---|---|---|
+| 2400 | `ChannelNotDistributable` | Channel status is neither `OPEN` nor `FINALIZED`. |
+| 2401 | `TreasuryAccountMismatch` | Treasury ATA is not `ATA(TREASURY_OWNER, mint, token_program)`. |
+| 2402 | `InvalidTreasuryTokenAccount` | Treasury ATA fails state/owner/mint validation. |
+| 2403 | `InvalidTreasuryTokenExtensions` | Treasury ATA carries a Token-2022 extension outside the allow-list. |
+| 2404 | `RecipientAccountMismatch` | A recipient ATA is not `ATA(recipient, token_program, mint)`. |
+| 2405 | `InvalidRecipientTokenAccount` | A recipient ATA fails state/owner/mint validation. |
+| 2406 | `InvalidRecipientTokenExtensions` | A recipient ATA carries a Token-2022 extension outside the allow-list. |
+| 2407 | `InvalidDistributionHash` | Blake3 of the revealed preimage does not equal `Channel.distribution_hash`. |
+| 2408 | `NothingToDistribute` | `pool == 0` while channel is `OPEN` (no newly settled funds). |
+| 2409 | `RecipientAccountCountMismatch` | Number of recipient ATAs in the account tail does not equal the preimage entry count. |
+| 2410 | `DistributePoolOverflow` | `settled − paid_out` underflowed (defensive — `paid_out ≤ settled` invariant). |
+| 2411 | `DistributeBalanceCalculationOverflow` | `current_lamports − new_min` underflowed during tombstone rent rebalance. |
+| 2412 | `DistributePayerBalanceOverflow` | Payer lamports `+ delta` would overflow `u64` during tombstone rent refund. |
 
 ## Appendix
 
