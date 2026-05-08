@@ -72,6 +72,26 @@ fn non_open_status_rejects() {
 }
 
 #[test]
+fn closing_status_rejects() {
+    let payer = Pubkey::new_unique();
+    assert_eq!(
+        TopUpRun::new(
+            payer,
+            ChannelBuilder::new()
+                .status(ChannelStatus::Closing)
+                .deposit(DEPOSIT)
+                .payer(payer)
+                .build(),
+            DEPOSIT,
+        )
+        .run(),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::InvalidChannelStatus as u32
+        )),
+    );
+}
+
+#[test]
 fn wrong_payer_rejects() {
     let alice = Pubkey::new_unique(); // channel.payer
     let bob = Pubkey::new_unique(); // unauthorized caller
