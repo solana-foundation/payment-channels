@@ -3,7 +3,7 @@ use pinocchio::{AccountView, Address};
 use crate::helpers::{
     accounts::view::TokenContext,
     token::{
-        base_layout, scan_tlv_extensions, tlv, TokenAccountExtensionPolicy, TokenExtensionError,
+        TokenAccountExtensionPolicy, TokenExtensionError, base_layout, scan_tlv_extensions, tlv,
     },
 };
 
