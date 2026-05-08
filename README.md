@@ -24,11 +24,11 @@ The program escrows SPL Token or Token-2022 deposits. A payer signs off-chain Ed
 ## Repo Layout
 
 - `program/payment_channels`: Pinocchio program.
-  - `program/payment_channels/src/instructions`: instruction processors and helpers.
-  - `program/payment_channels/src/state`: channel account state.
-  - `program/payment_channels/src/events`: program events.
-  - `program/payment_channels/tests`: program tests.
-  - `program/payment_channels/idl`: generated IDL.
+  - `src/instructions`: instruction processors and helpers.
+  - `src/state`: channel account state.
+  - `src/events`: program events.
+  - `tests`: program tests.
+  - `idl`: generated IDL.
 - `clients/typescript`: generated TypeScript client.
 - `clients/rust`: generated Rust client.
 - `docs`: protocol ADRs and diagrams.
