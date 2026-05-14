@@ -1,10 +1,7 @@
-use pinocchio::{
-    AccountView, Address, ProgramResult,
-    error::ProgramError,
-    sysvars::{Sysvar, clock::Clock},
-};
+use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 
 use crate::errors::PaymentChannelsError;
+use crate::instructions::helpers::sysvars::unix_timestamp;
 use crate::state::Channel;
 use crate::state::channel::ChannelStatus;
 
@@ -37,7 +34,7 @@ impl<'a> TryFrom<&'a mut [AccountView]> for FinalizeAccounts<'a> {
 pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
     let accs = FinalizeAccounts::try_from(accounts)?;
 
-    let now = Clock::get()?.unix_timestamp;
+    let now = unix_timestamp()?;
 
     let mut ch = Channel::from_account_mut(accs.channel)?;
 

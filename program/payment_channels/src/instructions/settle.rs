@@ -1,14 +1,11 @@
 #[cfg(feature = "idl")]
 use codama::CodamaType;
 use core::mem::size_of;
-use pinocchio::{
-    AccountView, Address, ProgramResult,
-    error::ProgramError,
-    sysvars::{Sysvar, clock::Clock},
-};
+use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 
 use crate::errors::PaymentChannelsError;
 use crate::instructions::VoucherArgs;
+use crate::instructions::helpers::sysvars::unix_timestamp;
 use crate::instructions::helpers::voucher::verify_voucher;
 use crate::state::channel::{Channel, ChannelStatus};
 use crate::state::{Transmutable, load};
@@ -72,7 +69,7 @@ pub fn process(
     let accs = SettleAccounts::try_from(accounts)?;
 
     let channel_address = *accs.channel.address();
-    let now = Clock::get()?.unix_timestamp;
+    let now = unix_timestamp()?;
 
     let mut ch = Channel::from_account_mut(accs.channel)?;
 

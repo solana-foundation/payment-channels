@@ -2,12 +2,7 @@
 use alloc::vec::Vec;
 #[cfg(feature = "idl")]
 use codama::CodamaType;
-use pinocchio::{
-    AccountView, Address, ProgramResult, Resize,
-    cpi::Signer,
-    error::ProgramError,
-    sysvars::{Sysvar, clock::Clock, rent::Rent},
-};
+use pinocchio::{AccountView, Address, ProgramResult, Resize, cpi::Signer, error::ProgramError};
 use pinocchio_token_2022::instructions::CloseAccount;
 
 use crate::helpers::accounts::view::{
@@ -15,6 +10,7 @@ use crate::helpers::accounts::view::{
     PayerTokenAccountView, TokenContext, TokenProgramAccountView, TreasuryTokenAccountView,
 };
 use crate::helpers::accounts::view::{PayerAccountView, RecipientTokenAccountsView};
+use crate::instructions::helpers::sysvars::{minimum_balance, unix_timestamp};
 use crate::instructions::helpers::{
     DistributionEntry, DistributionPreimage, channel_signer_seeds, floor_bps_share,
 };
@@ -139,7 +135,7 @@ pub fn process(
 
     // Load and validate the channel identity before inspecting token accounts.
     // The channel address is captured first because `ch` borrows its data.
-    let now = Clock::get()?.unix_timestamp;
+    let now = unix_timestamp()?;
 
     // Owner / discriminator / version checks.
     let ch = Channel::from_account(&accs.channel)?;
@@ -358,8 +354,7 @@ fn tombstone_finalized_channel(
     // Rebalance lamports to the new rent-exempt minimum and refund the
     // delta to the payer. The PDA must remain rent-exempt so the runtime
     // never garbage-collects it, which is what keeps the address reserved.
-    let rent = Rent::get()?;
-    let new_min = rent.try_minimum_balance(ClosedChannel::LEN)?;
+    let new_min = minimum_balance(ClosedChannel::LEN)?;
     let current = channel_ctx.channel.lamports();
     let delta = current
         .checked_sub(new_min)

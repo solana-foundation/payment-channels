@@ -4,6 +4,7 @@ pub mod accounts;
 pub mod distribution;
 pub mod ed25519;
 pub mod hash;
+pub mod sysvars;
 pub mod token;
 pub mod voucher;
 

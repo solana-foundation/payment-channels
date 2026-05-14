@@ -1,9 +1,4 @@
-use pinocchio::{
-    AccountView, Address, ProgramResult,
-    cpi::Signer,
-    error::ProgramError,
-    sysvars::{Sysvar, clock::Clock},
-};
+use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer, error::ProgramError};
 
 use crate::errors::PaymentChannelsError;
 use crate::helpers::accounts::view::{
@@ -11,6 +6,7 @@ use crate::helpers::accounts::view::{
     PayerContext, PayerTokenAccountView, TokenContext, TokenProgramAccountView,
 };
 use crate::instructions::helpers::channel_signer_seeds;
+use crate::instructions::helpers::sysvars::unix_timestamp;
 use crate::state::channel::{Channel, ChannelStatus};
 
 /// Instruction discriminator byte for `withdrawPayer`.
@@ -60,7 +56,7 @@ impl<'a> TryFrom<&'a mut [AccountView]> for WithdrawPayerAccounts<'a> {
 /// does **not** tombstone the PDA.
 pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
     let accs = WithdrawPayerAccounts::try_from(accounts)?;
-    let now = Clock::get()?.unix_timestamp;
+    let now = unix_timestamp()?;
 
     // Signer check before any account reads.
     if !accs.payer.is_signer() {

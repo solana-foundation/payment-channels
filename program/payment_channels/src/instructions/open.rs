@@ -27,6 +27,7 @@ use crate::events::Opened;
 #[cfg(feature = "idl")]
 use crate::instructions::helpers::DistributionEntry;
 pub use crate::instructions::helpers::MAX_DISTRIBUTION_RECIPIENTS;
+use crate::instructions::helpers::sysvars::minimum_balance;
 use crate::instructions::helpers::{DistributionPreimage, channel_signer_seeds};
 
 /// Instruction discriminator byte for `open`.
@@ -271,13 +272,13 @@ pub fn process(
     );
     let channel_signer = Signer::from(&seeds);
 
-    CreateAccount::with_minimum_balance(
-        &payer_ctx.payer,
-        &channel_ctx.channel,
-        Channel::LEN as u64,
-        &crate::ID,
-        Some(accs.rent),
-    )?
+    CreateAccount {
+        from: &payer_ctx.payer,
+        to: &channel_ctx.channel,
+        lamports: minimum_balance(Channel::LEN)?,
+        space: Channel::LEN as u64,
+        owner: &crate::ID,
+    }
     .invoke_signed(&[channel_signer])?;
 
     // Create the escrow ATA owned by the channel PDA.
