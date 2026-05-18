@@ -41,6 +41,7 @@ Actors: **C** = client (payer). **S** = server (merchant).
   - `distribute`: Permissionless in `OPEN` and `FINALIZED`. Caller supplies splits preimage; program verifies hash against `Channel.distribution_hash`. From `OPEN`, advances `paid_out` by paying `settled - paid_out` to recipients and leaves flooring residual in escrow (channel stays OPEN). From `FINALIZED`, also refunds `deposit - settled` to the payer (if `payerWithdrawnAt == 0`), sweeps residual to treasury, and tombstones the PDA.
 - **Escape-route self-sufficiency:** Clients persist the 402 challenge and `channelId` to independently invoke escape routes.
 - **Distribution commitment:** The PDA stores a 32-byte Blake3 digest of the splits preimage. Splits are passed to `open` and hashed on-chain, making them publicly recoverable from instruction data. `distribute` requires the caller to supply the preimage for hash verification.
+- **PDA-canonical bump:** The `open` instruction data does not carry a client-supplied bump byte; the on-chain program derives the canonical bump via `find_program_address` and validates the channel PDA address directly. Clients MUST NOT include a `bump` field in the `POST /channel/open` payload, and servers MUST accept payloads that omit it. Implementations whose deserializers currently require `bump` SHOULD relax that field (e.g. make it optional with a default) so spec-conformant clients are accepted; any value still present on the wire MUST be ignored by the server.
 - **Vouchers are purely off-chain:** No on-chain transactions during metered requests.
 
 ### Server-Side Validation
@@ -238,7 +239,6 @@ Content-Type: application/json
     "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "authorizedSigner": "PayerAbcdef1234567890abcdef1234567890abcde",
     "salt": "42",
-    "bump": 254,
     "depositAmount": "1000000",
     "distributionSplits": [
       { "recipient": "PayeeMerchant1234567890abcdefghijklmnop", "shareBps": 9500 },
