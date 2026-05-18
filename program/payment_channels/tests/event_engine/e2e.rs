@@ -2,21 +2,16 @@
 //!
 //! Exercises the self-CPI path by invoking `open` (which emits an `Opened`
 //! event) and inspecting the resulting inner instruction against an
-//! Anchor-style decoder. Negative tests defend the `emit_event` authority
-//! validation surface.
+//! Anchor-style decoder. Pre-CPI guards on the `emit_event` authority
+//! validation surface are exercised via Mollusk in [`super::integration`].
 
 // `FailedTransactionMetadata` from litesvm is large by design; boxing it
 // in our test harness is churn for no benefit.
 #![allow(clippy::result_large_err)]
-// `InstructionError::NotEnoughAccountKeys` is marked deprecated upstream
-// but is still the variant the runtime emits when the program returns
-// `ProgramError::NotEnoughAccountKeys`, so we match on it directly.
-#![allow(deprecated)]
 
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
-use payment_channels::PaymentChannelsError;
-use payment_channels::event_engine::{EMIT_EVENT_IX_DISC, EVENT_AUTHORITY_SEED, EVENT_IX_TAG_LE};
+use payment_channels::event_engine::{EVENT_AUTHORITY_SEED, EVENT_IX_TAG_LE};
 use payment_channels::events::Opened;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
@@ -24,7 +19,7 @@ use solana_pubkey::{Pubkey, pubkey};
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-use crate::common::{PROGRAM_ID, ProgramLoader, cu_tracker, expect_custom_err};
+use crate::common::{PROGRAM_ID, ProgramLoader, cu_tracker};
 
 const SPL_TOKEN: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const ATA_PROGRAM: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
@@ -161,111 +156,4 @@ fn open_emits_opened_event_with_anchor_compatible_wire_format() {
     // indexers are the consumers and will add their own deserialization.
     let channel_bytes: [u8; 32] = body.try_into().expect("32-byte borsh body");
     assert_eq!(channel_bytes, channel.to_bytes());
-}
-
-fn build_direct_emit_event_ix(
-    authority: &Pubkey,
-    signed: bool,
-    extra_accounts: &[Pubkey],
-) -> Instruction {
-    let mut accounts = vec![AccountMeta {
-        pubkey: *authority,
-        is_signer: signed,
-        is_writable: false,
-    }];
-    for extra in extra_accounts {
-        accounts.push(AccountMeta::new_readonly(*extra, false));
-    }
-    Instruction {
-        program_id: PROGRAM_ID,
-        accounts,
-        data: vec![EMIT_EVENT_IX_DISC],
-    }
-}
-
-#[test]
-fn emit_event_rejects_bad_authority() {
-    let mut svm = LiteSVM::load_program();
-    let payer = Keypair::new();
-    fund(&mut svm, &payer.pubkey(), 1_000_000_000);
-    let attacker = Keypair::new();
-
-    // Send with attacker as signer + sole account — not the event PDA.
-    let ix = build_direct_emit_event_ix(&attacker.pubkey(), true, &[]);
-    let tx = Transaction::new_signed_with_payer(
-        &[ix],
-        Some(&payer.pubkey()),
-        &[&payer, &attacker],
-        svm.latest_blockhash(),
-    );
-    expect_custom_err(
-        cu_tracker::send_and_record(&mut svm, tx),
-        PaymentChannelsError::InvalidEventAuthority,
-    );
-}
-
-#[test]
-fn emit_event_rejects_non_signer_authority() {
-    let mut svm = LiteSVM::load_program();
-    let payer = Keypair::new();
-    fund(&mut svm, &payer.pubkey(), 1_000_000_000);
-    let (pda, _bump) = event_authority();
-
-    // Correct PDA address but not marked signer.
-    let ix = build_direct_emit_event_ix(&pda, false, &[]);
-    let tx = Transaction::new_signed_with_payer(
-        &[ix],
-        Some(&payer.pubkey()),
-        &[&payer],
-        svm.latest_blockhash(),
-    );
-    expect_custom_err(
-        cu_tracker::send_and_record(&mut svm, tx),
-        PaymentChannelsError::MissingRequiredSignature,
-    );
-}
-
-#[test]
-fn emit_event_rejects_zero_accounts() {
-    let mut svm = LiteSVM::load_program();
-    let payer = Keypair::new();
-    fund(&mut svm, &payer.pubkey(), 1_000_000_000);
-
-    let ix = Instruction {
-        program_id: PROGRAM_ID,
-        accounts: vec![],
-        data: vec![EMIT_EVENT_IX_DISC],
-    };
-    let tx = Transaction::new_signed_with_payer(
-        &[ix],
-        Some(&payer.pubkey()),
-        &[&payer],
-        svm.latest_blockhash(),
-    );
-    expect_custom_err(
-        cu_tracker::send_and_record(&mut svm, tx),
-        PaymentChannelsError::NotEnoughAccountKeys,
-    );
-}
-
-#[test]
-fn emit_event_rejects_extra_accounts() {
-    let mut svm = LiteSVM::load_program();
-    let payer = Keypair::new();
-    fund(&mut svm, &payer.pubkey(), 1_000_000_000);
-    let (pda, _bump) = event_authority();
-
-    // Two accounts (PDA + something else); slice pattern `[event_authority]`
-    // matches only exactly 1, so this must fail.
-    let ix = build_direct_emit_event_ix(&pda, false, &[Pubkey::new_unique()]);
-    let tx = Transaction::new_signed_with_payer(
-        &[ix],
-        Some(&payer.pubkey()),
-        &[&payer],
-        svm.latest_blockhash(),
-    );
-    expect_custom_err(
-        cu_tracker::send_and_record(&mut svm, tx),
-        PaymentChannelsError::NotEnoughAccountKeys,
-    );
 }

@@ -44,13 +44,11 @@ where
 
 macro_rules! decl_account_view {
     ($($T:ident),+ $(,)?) => {$(
-        #[allow(dead_code)]
         pub struct $T<'a, S: State = Unchecked> {
             inner: &'a mut AccountView,
             _s: PhantomData<S>,
         }
 
-        #[allow(dead_code)]
         impl<'a> $T<'a, Checked> {
             pub fn as_any(&self) -> AnyTokenAccountView<'_, Checked> {
                 AnyTokenAccountView { inner: self.inner, _s: PhantomData }

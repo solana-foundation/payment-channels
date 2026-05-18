@@ -1,10 +1,10 @@
 mod common;
 mod distribute;
-mod event_engine_e2e;
+mod event_engine;
 mod finalize;
 mod open;
 mod request_close;
+mod settle;
 mod settle_and_finalize;
-mod settle_e2e;
 mod top_up;
 mod withdraw_payer;

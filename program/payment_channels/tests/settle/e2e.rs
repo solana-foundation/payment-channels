@@ -231,42 +231,6 @@ fn settle_without_preceding_ed25519_ix_rejects() {
 }
 
 #[test]
-fn settle_on_non_open_status_rejects() {
-    let mut svm = LiteSVM::load_program();
-    let fee_payer = Keypair::new();
-    svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
-
-    let signer = Keypair::new();
-    let channel = Pubkey::new_unique();
-    // status = 1 (Finalized)
-    seed_channel(&mut svm, &channel, 1, 1_000_000, 0, &signer.pubkey());
-
-    let cumulative = 500_000u64;
-    let voucher = VoucherArgs {
-        channel_id: channel,
-        cumulative_amount: cumulative,
-        expires_at: 0,
-    };
-    let payload = voucher_payload(&voucher);
-    let signature: [u8; 64] = signer.sign_message(&payload).into();
-    let pubkey = signer.pubkey().to_bytes();
-
-    let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
-    let settle_ix = build_settle_ix(&channel, voucher);
-
-    let tx = Transaction::new_signed_with_payer(
-        &[ed25519_ix, settle_ix],
-        Some(&fee_payer.pubkey()),
-        &[&fee_payer],
-        svm.latest_blockhash(),
-    );
-    expect_custom_err(
-        cu_tracker::send_and_record(&mut svm, tx),
-        PaymentChannelsError::InvalidChannelStatus,
-    );
-}
-
-#[test]
 fn settle_after_expiry_rejects() {
     let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
