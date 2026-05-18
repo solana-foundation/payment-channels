@@ -1,8 +1,7 @@
 //! Compute-unit profiler for LiteSVM tests.
 //!
 //! Gated on `CU_REPORT=1`. The aggregate test binary's `#[ctor::dtor]` writes
-//! a single `cu_report.md` next to `Cargo.toml` on process exit; CI posts it
-//! as a PR comment.
+//! a single `cu_report.md` next to `Cargo.toml` on process exit.
 //!
 //! Use [`send_and_record`] at every site that builds and sends a
 //! `Transaction`. The helper sends, then — only when `CU_REPORT=1` — derives
