@@ -24,8 +24,7 @@ use solana_pubkey::{Pubkey, pubkey};
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-mod common;
-use common::{PROGRAM_ID, ProgramLoader, expect_custom_err};
+use crate::common::{PROGRAM_ID, ProgramLoader, cu_tracker, expect_custom_err};
 
 const SPL_TOKEN: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const ATA_PROGRAM: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
@@ -118,7 +117,7 @@ fn open_emits_opened_event_with_anchor_compatible_wire_format() {
         &[&payer],
         svm.latest_blockhash(),
     );
-    let meta = svm.send_transaction(tx).expect("tx ok");
+    let meta = cu_tracker::send_and_record(&mut svm, tx).expect("tx ok");
 
     // Exactly one outer instruction → exactly one inner-ix list.
     assert_eq!(meta.inner_instructions.len(), 1, "expected 1 outer ix");
@@ -200,7 +199,7 @@ fn emit_event_rejects_bad_authority() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        svm.send_transaction(tx),
+        cu_tracker::send_and_record(&mut svm, tx),
         PaymentChannelsError::InvalidEventAuthority,
     );
 }
@@ -221,7 +220,7 @@ fn emit_event_rejects_non_signer_authority() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        svm.send_transaction(tx),
+        cu_tracker::send_and_record(&mut svm, tx),
         PaymentChannelsError::MissingRequiredSignature,
     );
 }
@@ -244,7 +243,7 @@ fn emit_event_rejects_zero_accounts() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        svm.send_transaction(tx),
+        cu_tracker::send_and_record(&mut svm, tx),
         PaymentChannelsError::NotEnoughAccountKeys,
     );
 }
@@ -266,7 +265,7 @@ fn emit_event_rejects_extra_accounts() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        svm.send_transaction(tx),
+        cu_tracker::send_and_record(&mut svm, tx),
         PaymentChannelsError::NotEnoughAccountKeys,
     );
 }

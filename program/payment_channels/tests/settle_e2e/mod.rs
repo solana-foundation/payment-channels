@@ -15,10 +15,9 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-mod common;
-use common::{
-    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, compute_budget_ix, ed25519_program_id,
-    expect_custom_err,
+use crate::common::{
+    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, compute_budget_ix, cu_tracker,
+    ed25519_program_id, expect_custom_err,
 };
 
 /// Seed a `Channel` PDA (208-byte `#[repr(C, packed)]` layout) owned by the
@@ -147,7 +146,7 @@ fn settle_advances_watermark_on_valid_voucher() {
         &[&fee_payer],
         svm.latest_blockhash(),
     );
-    svm.send_transaction(tx).expect("tx ok");
+    cu_tracker::send_and_record(&mut svm, tx).expect("tx ok");
 
     assert_eq!(read_settled(&svm, &channel), cumulative);
 }
@@ -195,7 +194,7 @@ fn settle_batches_two_paired_ix_advance_watermark() {
         &[&fee_payer],
         svm.latest_blockhash(),
     );
-    svm.send_transaction(tx).expect("tx ok");
+    cu_tracker::send_and_record(&mut svm, tx).expect("tx ok");
 
     assert_eq!(read_settled(&svm, &channel), 500_000);
 }
@@ -226,7 +225,7 @@ fn settle_without_preceding_ed25519_ix_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        svm.send_transaction(tx),
+        cu_tracker::send_and_record(&mut svm, tx),
         PaymentChannelsError::MissingEd25519Verification,
     );
 }
@@ -262,7 +261,7 @@ fn settle_on_non_open_status_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        svm.send_transaction(tx),
+        cu_tracker::send_and_record(&mut svm, tx),
         PaymentChannelsError::InvalidChannelStatus,
     );
 }
@@ -304,7 +303,7 @@ fn settle_after_expiry_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        svm.send_transaction(tx),
+        cu_tracker::send_and_record(&mut svm, tx),
         PaymentChannelsError::VoucherExpired,
     );
 }
@@ -339,7 +338,7 @@ fn settle_voucher_channel_mismatch_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        svm.send_transaction(tx),
+        cu_tracker::send_and_record(&mut svm, tx),
         PaymentChannelsError::VoucherChannelMismatch,
     );
 }
@@ -373,7 +372,7 @@ fn settle_voucher_over_deposit_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        svm.send_transaction(tx),
+        cu_tracker::send_and_record(&mut svm, tx),
         PaymentChannelsError::VoucherOverDeposit,
     );
 }
@@ -407,7 +406,7 @@ fn settle_voucher_not_monotonic_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        svm.send_transaction(tx),
+        cu_tracker::send_and_record(&mut svm, tx),
         PaymentChannelsError::VoucherWatermarkNotMonotonic,
     );
 }
@@ -448,7 +447,7 @@ fn settle_voucher_message_mismatch_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        svm.send_transaction(tx),
+        cu_tracker::send_and_record(&mut svm, tx),
         PaymentChannelsError::VoucherMessageMismatch,
     );
 }
@@ -483,7 +482,7 @@ fn settle_voucher_signer_mismatch_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        svm.send_transaction(tx),
+        cu_tracker::send_and_record(&mut svm, tx),
         PaymentChannelsError::VoucherSignerMismatch,
     );
 }
@@ -521,7 +520,7 @@ fn settle_malformed_ed25519_ix_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        svm.send_transaction(tx),
+        cu_tracker::send_and_record(&mut svm, tx),
         PaymentChannelsError::MalformedEd25519Instruction,
     );
 }
@@ -554,7 +553,7 @@ fn settle_preceding_compute_budget_ix_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        svm.send_transaction(tx),
+        cu_tracker::send_and_record(&mut svm, tx),
         PaymentChannelsError::MissingEd25519Verification,
     );
 }
@@ -596,7 +595,7 @@ fn settle_with_invalid_signature_rejects_before_settle_runs() {
         &[&fee_payer],
         svm.latest_blockhash(),
     );
-    let failed = svm.send_transaction(tx).expect_err("tx should fail");
+    let failed = cu_tracker::send_and_record(&mut svm, tx).expect_err("tx should fail");
 
     // Pin the failure at instruction index 0 (precompile). A failure at
     // index 1 would mean our program ran — exactly what this test rules

@@ -94,7 +94,7 @@ pub(crate) struct EventAuthority;
 #[derive(Debug)]
 #[cfg_attr(feature = "idl", derive(CodamaInstructions))]
 #[repr(u8)]
-pub(crate) enum PaymentChannelsInstruction<'a> {
+pub enum PaymentChannelsInstruction<'a> {
     /// Payer-signed; creates the channel PDA, locks the deposit, and
     /// commits the distribution hash. `NONEXISTENT → OPEN`.
     #[cfg_attr(
@@ -225,7 +225,27 @@ pub(crate) enum PaymentChannelsInstruction<'a> {
 }
 
 impl<'a> PaymentChannelsInstruction<'a> {
-    pub(crate) fn from_bytes(data: &'a [u8]) -> Result<Self, ProgramError> {
+    /// Stable, lowercase-snake-case label for this variant. Used by the
+    /// integration test CU tracker so report labels are derived from the
+    /// instruction enum (the same source of truth as on-chain dispatch)
+    /// rather than a hand-rolled mapping in test code. The exhaustive
+    /// `match` here means adding a variant without extending this method
+    /// fails to compile.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Open(_) => "open",
+            Self::Settle(_) => "settle",
+            Self::TopUp(_) => "top_up",
+            Self::SettleAndFinalize(_) => "settle_and_finalize",
+            Self::RequestClose => "request_close",
+            Self::Finalize => "finalize",
+            Self::Distribute(_) => "distribute",
+            Self::WithdrawPayer => "withdraw_payer",
+            Self::EmitEvent => "emit_event",
+        }
+    }
+
+    pub fn from_bytes(data: &'a [u8]) -> Result<Self, ProgramError> {
         let (disc, rest) = data
             .split_first()
             .ok_or(ProgramError::InvalidInstructionData)?;

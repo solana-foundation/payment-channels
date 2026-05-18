@@ -12,6 +12,9 @@ test-ledger/
 **/test-ledger/
 *.log
 
+# CU benchmark reports (regenerated per PR)
+**/cu_report.md
+
 # Local env / config
 .env
 config.json

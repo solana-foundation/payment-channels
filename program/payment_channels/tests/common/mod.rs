@@ -2,6 +2,7 @@
 
 #![allow(dead_code)]
 
+pub mod cu_tracker;
 pub mod token_2022;
 
 use litesvm::LiteSVM;
@@ -115,7 +116,7 @@ pub fn open_channel(
         &[payer],
         svm.latest_blockhash(),
     );
-    svm.send_transaction(tx).expect("open ok");
+    cu_tracker::send_and_record(svm, tx).expect("open ok");
 
     (channel, channel_ata)
 }

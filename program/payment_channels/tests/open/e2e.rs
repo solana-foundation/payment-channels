@@ -19,7 +19,7 @@ use super::{
 };
 use payment_channels::PaymentChannelsError;
 
-use crate::common::{ProgramLoader, TOKEN_2022, expect_custom_err};
+use crate::common::{ProgramLoader, TOKEN_2022, cu_tracker, expect_custom_err};
 
 const SALT: u64 = 42;
 const DEPOSIT: u64 = 5_000_000;
@@ -62,7 +62,7 @@ fn open_sets_channel_fields() {
     );
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
     let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
-    svm.send_transaction(tx).expect("open should succeed");
+    cu_tracker::send_and_record(&mut svm, tx).expect("open should succeed");
 
     let channel_data = svm
         .get_account(&channel)
@@ -143,8 +143,7 @@ fn open_with_no_splits_succeeds() {
     );
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
     let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
-    svm.send_transaction(tx)
-        .expect("open with zero splits should succeed");
+    cu_tracker::send_and_record(&mut svm, tx).expect("open with zero splits should succeed");
 
     let channel_data = svm
         .get_account(&channel)
@@ -184,7 +183,7 @@ fn wrong_channel_token_account_rejected() {
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
     let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
     expect_custom_err(
-        svm.send_transaction(tx),
+        cu_tracker::send_and_record(&mut svm, tx),
         PaymentChannelsError::ChannelAccountMismatch,
     );
 }
@@ -222,7 +221,7 @@ fn open_sets_channel_fields_token_2022() {
     );
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
     let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
-    svm.send_transaction(tx).expect("open should succeed");
+    cu_tracker::send_and_record(&mut svm, tx).expect("open should succeed");
 
     let channel_data = svm
         .get_account(&channel)
@@ -288,8 +287,7 @@ fn open_with_no_splits_succeeds_token_2022() {
     );
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
     let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
-    svm.send_transaction(tx)
-        .expect("open with zero splits should succeed");
+    cu_tracker::send_and_record(&mut svm, tx).expect("open with zero splits should succeed");
 
     let channel_data = svm
         .get_account(&channel)
