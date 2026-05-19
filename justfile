@@ -76,11 +76,18 @@ test: test-program
 test-program: generate-client
     cd {{program_dir}} && cargo test-sbf
 
+# Run tests with CU profiling enabled. The `instructions` test binary
+# writes a single `cu_report.md` next to Cargo.toml on exit; CI posts it
+# as the PR comment. Local: `cat {{program_dir}}/cu_report.md`.
+test-and-benchmark: generate-client
+    cd {{program_dir}} && \
+        CU_REPORT=1 CU_REPORT_DATE="$(date -u +%Y-%m-%d)" cargo test-sbf
+
 # Focused event-engine end-to-end run (litesvm). Loads the compiled .so
 # and exercises the self-CPI Anchor-event wire format via the `open`
 # instruction plus the `emit_event` validation surface.
 events-e2e:
-    cd {{program_dir}} && cargo test-sbf --test event_engine_e2e
+    cd {{program_dir}} && cargo test-sbf --test instructions event_engine_e2e::
 
 # ---------- quality ----------
 

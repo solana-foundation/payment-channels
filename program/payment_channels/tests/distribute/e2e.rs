@@ -35,8 +35,8 @@ use crate::common::token_2022::{
 };
 use crate::common::{
     ATA_PROGRAM, INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM,
-    SYSVAR_RENT, compute_budget_ix, ed25519_program_id, event_authority, expect_custom_err,
-    expect_instruction_err, set_clock, token_balance,
+    SYSVAR_RENT, compute_budget_ix, cu_tracker, ed25519_program_id, event_authority,
+    expect_custom_err, expect_instruction_err, set_clock, token_balance,
 };
 
 const GRACE_PERIOD: u32 = 3600;
@@ -264,7 +264,7 @@ fn open_channel(
         &[payer],
         svm.latest_blockhash(),
     );
-    svm.send_transaction(tx).expect("open should succeed");
+    cu_tracker::send_and_record(svm, tx).expect("open should succeed");
 
     OpenedChannel {
         channel,
@@ -354,7 +354,7 @@ fn settle_to(
         &[fee_payer],
         svm.latest_blockhash(),
     );
-    svm.send_transaction(tx).expect("settle should succeed");
+    cu_tracker::send_and_record(svm, tx).expect("settle should succeed");
 }
 
 // ---------------------------------------------------------------------------
@@ -519,7 +519,7 @@ impl Scenario {
             &[&self.fee_payer],
             blockhash,
         );
-        self.svm.send_transaction(tx)
+        cu_tracker::send_and_record(&mut self.svm, tx)
     }
 }
 
@@ -714,7 +714,7 @@ fn distribute_after_withdraw_payer_skips_payer_refund() {
         &[&s.payer_keypair],
         s.svm.latest_blockhash(),
     );
-    s.svm.send_transaction(tx).expect("withdraw_payer ok");
+    cu_tracker::send_and_record(&mut s.svm, tx).expect("withdraw_payer ok");
 
     assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
 
@@ -1275,7 +1275,7 @@ fn settle_on_tombstoned_channel_rejects() {
         blockhash,
     );
     expect_instruction_err(
-        s.svm.send_transaction(tx),
+        cu_tracker::send_and_record(&mut s.svm, tx),
         InstructionError::InvalidAccountData,
     );
     assert_tombstone(&s.svm, &s.channel);
@@ -1312,7 +1312,10 @@ fn reopen_at_same_seeds_rejects_across_tx() {
         &[&s.payer_keypair],
         blockhash,
     );
-    expect_instruction_err(s.svm.send_transaction(tx), InstructionError::Custom(0));
+    expect_instruction_err(
+        cu_tracker::send_and_record(&mut s.svm, tx),
+        InstructionError::Custom(0),
+    );
     // Tombstone bytes preserved — no partial reinit happened.
     assert_tombstone(&s.svm, &s.channel);
 }
@@ -1355,7 +1358,9 @@ fn reopen_at_same_seeds_rejects_same_tx() {
         &[&s.payer_keypair],
         blockhash,
     );
-    let err = s.svm.send_transaction(tx).expect_err("tx should fail").err;
+    let err = cu_tracker::send_and_record(&mut s.svm, tx)
+        .expect_err("tx should fail")
+        .err;
     // Lock down both the failing ix index (open is at index 2 — after
     // compute-budget at 0 and distribute at 1) and the variant. A regression
     // that shifts the failure to a different ix or a different system error

@@ -19,7 +19,7 @@ use solana_pubkey::{Pubkey, pubkey};
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-use crate::common::{PROGRAM_ID, ProgramLoader};
+use crate::common::{PROGRAM_ID, ProgramLoader, cu_tracker};
 
 const SPL_TOKEN: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const ATA_PROGRAM: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
@@ -112,7 +112,7 @@ fn open_emits_opened_event_with_anchor_compatible_wire_format() {
         &[&payer],
         svm.latest_blockhash(),
     );
-    let meta = svm.send_transaction(tx).expect("tx ok");
+    let meta = cu_tracker::send_and_record(&mut svm, tx).expect("tx ok");
 
     // Exactly one outer instruction → exactly one inner-ix list.
     assert_eq!(meta.inner_instructions.len(), 1, "expected 1 outer ix");

@@ -17,7 +17,8 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 
 use crate::common::{
-    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, ed25519_program_id, expect_custom_err,
+    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, cu_tracker, ed25519_program_id,
+    expect_custom_err,
 };
 
 /// Inject a 216-byte Channel owned by PROGRAM_ID.
@@ -166,7 +167,7 @@ fn open_to_finalized_with_voucher() {
         &[&fee_payer, &merchant],
         svm.latest_blockhash(),
     );
-    svm.send_transaction(tx).expect("tx ok");
+    cu_tracker::send_and_record(&mut svm, tx).expect("tx ok");
 
     assert_eq!(read_status(&svm, &channel), ChannelStatus::Finalized as u8);
     assert_eq!(read_settled(&svm, &channel), cumulative);
@@ -226,7 +227,7 @@ fn with_voucher_expired_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        svm.send_transaction(tx),
+        cu_tracker::send_and_record(&mut svm, tx),
         PaymentChannelsError::VoucherExpired,
     );
 }
@@ -278,7 +279,7 @@ fn with_voucher_wrong_authorized_signer_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        svm.send_transaction(tx),
+        cu_tracker::send_and_record(&mut svm, tx),
         PaymentChannelsError::VoucherSignerMismatch,
     );
 }

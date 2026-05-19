@@ -12,7 +12,7 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-use crate::common::{PROGRAM_ID, ProgramLoader};
+use crate::common::{PROGRAM_ID, ProgramLoader, cu_tracker};
 
 /// Inject a 216-byte Channel at `channel` owned by `PROGRAM_ID`.
 fn seed_channel(svm: &mut LiteSVM, channel: &Pubkey, status: ChannelStatus, payer: &Pubkey) {
@@ -64,7 +64,7 @@ fn request_close_marks_closing_and_stamps_now() {
         &[&payer],
         svm.latest_blockhash(),
     );
-    svm.send_transaction(tx).expect("request_close ok");
+    cu_tracker::send_and_record(&mut svm, tx).expect("request_close ok");
 
     let data = read_channel(&svm, &channel);
     assert_eq!(data[3], ChannelStatus::Closing as u8);
