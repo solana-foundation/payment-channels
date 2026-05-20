@@ -1,4 +1,4 @@
-use core::mem::MaybeUninit;
+use core::mem::{MaybeUninit, size_of};
 
 use pinocchio::{
     AccountView, ProgramResult,
@@ -132,6 +132,12 @@ fn flush_batched(transfer: Transfer<'_>) -> ProgramResult {
     const BATCH_DATA_LEN: usize = SplBatch::header_data_len(BATCH_SLOTS_PER_CHUNK)
         + BATCH_SLOTS_PER_CHUNK * SplTransferChecked::DATA_LEN;
     const BATCH_ACCOUNTS_LEN: usize = BATCH_SLOTS_PER_CHUNK * 4;
+    const _: () = assert!(
+        BATCH_DATA_LEN
+            + size_of::<[MaybeUninit<InstructionAccount<'_>>; BATCH_ACCOUNTS_LEN]>()
+            + size_of::<[MaybeUninit<CpiAccount<'_>>; BATCH_ACCOUNTS_LEN]>()
+            <= 4096
+    );
 
     const UNINIT_BYTE: MaybeUninit<u8> = MaybeUninit::<u8>::uninit();
     const UNINIT_INSTRUCTION_ACCOUNT: MaybeUninit<InstructionAccount<'_>> =

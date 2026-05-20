@@ -16,17 +16,14 @@ use crate::helpers::accounts::view::{
     PayerTokenAccountView, TokenContext, TokenProgramAccountView, TreasuryTokenAccountView,
 };
 use crate::helpers::accounts::view::{PayerAccountView, RecipientTokenAccountsView};
+#[cfg(feature = "idl")]
+use crate::instructions::helpers::DistributionEntry;
 use crate::instructions::helpers::{
     DistributionPreimage, Transfer, channel_signer_seeds, floor_bps_share,
 };
-#[cfg(feature = "idl")]
-use crate::instructions::helpers::DistributionEntry;
 use crate::state::channel::{Channel, ChannelStatus};
 use crate::state::closed_channel::ClosedChannel;
-use crate::{
-    errors::PaymentChannelsError,
-    helpers::accounts::view::ChannelAccountView,
-};
+use crate::{errors::PaymentChannelsError, helpers::accounts::view::ChannelAccountView};
 
 /// Instruction discriminator byte for `distribute`.
 pub const DISCRIMINATOR: u8 = 7;
@@ -243,7 +240,11 @@ pub fn process(
     // Collect payouts first; CPIs run in one shot at `flush` below.
     let mut transfer = Transfer::new(&channel_ctx, &signers);
 
-    for (entry, recipient) in args.recipients.entries.iter().zip(recipient_token_accounts.iter())
+    for (entry, recipient) in args
+        .recipients
+        .entries
+        .iter()
+        .zip(recipient_token_accounts.iter())
     {
         let amount = floor_bps_share(pool, entry.bps() as u32)?;
         transfer.queue(recipient, amount)?;
