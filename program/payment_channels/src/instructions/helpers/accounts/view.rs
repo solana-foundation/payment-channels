@@ -230,9 +230,9 @@ where
 /// Which SPL token program backs this channel's mint and ATAs.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TokenProgramKind {
-    /// Classic SPL Token (`TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`).
+    /// SPL Token program.
     Spl,
-    /// Token-2022 (`TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`).
+    /// Token-2022 program.
     Token2022,
 }
 
