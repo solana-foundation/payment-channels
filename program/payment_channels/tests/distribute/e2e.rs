@@ -516,6 +516,10 @@ impl Scenario {
         cu_tracker::send_and_record(&mut self.svm, tx)
     }
 
+    /// Versioned tx path for N=32 recipient ATAs: legacy messages exceed the
+    /// static account-key budget, so recipient pubkeys live in an address lookup
+    /// table. `compute_budget_ix` raises the per-tx CU cap so LiteSVM accepts
+    /// the large distribute CPI chain (not a no-op).
     fn send_v0_distribute(
         &mut self,
         recipient_atas_for_alt: Vec<Pubkey>,
@@ -1523,20 +1527,13 @@ fn spl_token_legacy_tx_rejects_max_recipients() {
             bps: 100,
         })
         .collect();
-    let mut s = Scenario::build_with_token_program(
-        splits,
-        200_000,
-        100_000,
-        0,
-        STATUS_OPEN,
-        SPL_TOKEN,
-    );
+    let mut s =
+        Scenario::build_with_token_program(splits, 200_000, 100_000, 0, STATUS_OPEN, SPL_TOKEN);
 
     // Legacy txs with 40 instruction accounts exceed the static key budget;
     // LiteSVM rejects the message during compute-budget sanitization.
-    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        s.send(s.distribute_ix())
-    }));
+    let outcome =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| s.send(s.distribute_ix())));
     match outcome {
         Err(_) => {}
         Ok(res) => assert!(res.is_err(), "legacy tx should fail at N=32 without ALT"),

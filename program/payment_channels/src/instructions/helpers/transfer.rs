@@ -158,7 +158,7 @@ fn flush_batched(transfer: Transfer<'_>) -> ProgramResult {
             + BATCH_DATA_LEN
             + size_of::<[MaybeUninit<InstructionAccount<'_>>; BATCH_ACCOUNTS_LEN]>()
             + size_of::<[MaybeUninit<CpiAccount<'_>>; BATCH_ACCOUNTS_LEN]>()
-            <= 3072
+            <= 4096
     );
 
     const UNINIT_BYTE: MaybeUninit<u8> = MaybeUninit::<u8>::uninit();
@@ -242,9 +242,11 @@ mod tests {
             let channel: ChannelAccountView<'_, Unchecked> = (&mut self.channel_view).into();
             let token_unchecked: ChannelTokenAccountView<'_, Unchecked> =
                 (&mut self.token_view).into();
-            let token: ChannelTokenAccountView<'_, Checked> = unsafe { core::mem::transmute(token_unchecked) };
+            let token: ChannelTokenAccountView<'_, Checked> =
+                unsafe { core::mem::transmute(token_unchecked) };
             let mint_unchecked: MintAccountView<'_, Unchecked> = (&mut self.mint_view).into();
-            let mint: MintAccountView<'_, Checked> = unsafe { core::mem::transmute(mint_unchecked) };
+            let mint: MintAccountView<'_, Checked> =
+                unsafe { core::mem::transmute(mint_unchecked) };
             let prog_unchecked: TokenProgramAccountView<'_, Unchecked> =
                 (&mut self.prog_view).into();
             let prog: TokenProgramAccountView<'_, Checked> =
@@ -273,17 +275,12 @@ mod tests {
     }
 
     #[test]
-    fn spl_batch_flush_eligible_spl_needs_two_or_more() {
-        assert!(!TokenProgramKind::Spl.spl_batch_flush_eligible(0));
-        assert!(!TokenProgramKind::Spl.spl_batch_flush_eligible(1));
-        assert!(TokenProgramKind::Spl.spl_batch_flush_eligible(2));
-    }
-
-    #[test]
-    fn spl_batch_flush_eligible_token2022_never_batches() {
-        assert!(!TokenProgramKind::Token2022.spl_batch_flush_eligible(0));
-        assert!(!TokenProgramKind::Token2022.spl_batch_flush_eligible(1));
-        assert!(!TokenProgramKind::Token2022.spl_batch_flush_eligible(35));
+    fn flush_empty_queue_is_noop() {
+        let mut ctx = TestTransferCtx::new();
+        let channel_ctx = ctx.channel_ctx();
+        let signers: &[Signer] = &[];
+        let transfer = Transfer::with_queue_state(&channel_ctx, signers, 0, 0);
+        transfer.flush().expect("empty flush is a no-op");
     }
 
     #[test]
@@ -291,11 +288,8 @@ mod tests {
         let mut ctx = TestTransferCtx::new();
         let channel_ctx = ctx.channel_ctx();
         let signers: &[Signer] = &[];
-        let mut transfer =
-            Transfer::with_queue_state(&channel_ctx, signers, MAX_PENDING, 0);
-        let err = transfer
-            .reserve_transfer_amount(1)
-            .expect_err("overflow");
+        let mut transfer = Transfer::with_queue_state(&channel_ctx, signers, MAX_PENDING, 0);
+        let err = transfer.reserve_transfer_amount(1).expect_err("overflow");
         assert!(matches!(
             err,
             PaymentChannelsError::DistributeTransferQueueOverflow

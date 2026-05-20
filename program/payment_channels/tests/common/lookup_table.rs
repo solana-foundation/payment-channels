@@ -77,13 +77,9 @@ pub fn build_v0_transaction_with_prefix(
     let mut ixs: Vec<Instruction> = Vec::with_capacity(prefix.len() + instructions.len());
     ixs.extend_from_slice(prefix);
     ixs.extend_from_slice(instructions);
-    let message = MessageV0::try_compile(
-        &payer.pubkey(),
-        &ixs,
-        std::slice::from_ref(alt),
-        blockhash,
-    )
-    .expect("compile v0 message");
+    let message =
+        MessageV0::try_compile(&payer.pubkey(), &ixs, std::slice::from_ref(alt), blockhash)
+            .expect("compile v0 message");
     VersionedTransaction::try_new(VersionedMessage::V0(message), &[payer])
         .expect("sign v0 transaction")
 }

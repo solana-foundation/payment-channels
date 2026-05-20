@@ -96,11 +96,11 @@ impl<'a> TokenProgramAccountView<'a, Checked> {
         account: &AnyTokenAccountView<'_, Checked>,
     ) -> Result<u64, PaymentChannelsError> {
         match TokenProgramKind::from_address(self.address())? {
-            TokenProgramKind::Spl => Ok(
-                pinocchio_token::state::Account::from_account_view(account)
+            TokenProgramKind::Spl => {
+                Ok(pinocchio_token::state::Account::from_account_view(account)
                     .map_err(|_| PaymentChannelsError::MalformedMintTokenAccountData)?
-                    .amount(),
-            ),
+                    .amount())
+            }
             TokenProgramKind::Token2022 => Ok(
                 pinocchio_token_2022::state::Account::from_account_view(account)
                     .map_err(|_| PaymentChannelsError::MalformedMintTokenAccountData)?
@@ -443,5 +443,24 @@ impl<'a> PayerContext<'a> {
                 _s: Default::default(),
             },
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TokenProgramKind;
+
+    #[test]
+    fn spl_batch_flush_eligible_spl_needs_two_or_more() {
+        assert!(!TokenProgramKind::Spl.spl_batch_flush_eligible(0));
+        assert!(!TokenProgramKind::Spl.spl_batch_flush_eligible(1));
+        assert!(TokenProgramKind::Spl.spl_batch_flush_eligible(2));
+    }
+
+    #[test]
+    fn spl_batch_flush_eligible_token2022_never_batches() {
+        assert!(!TokenProgramKind::Token2022.spl_batch_flush_eligible(0));
+        assert!(!TokenProgramKind::Token2022.spl_batch_flush_eligible(1));
+        assert!(!TokenProgramKind::Token2022.spl_batch_flush_eligible(35));
     }
 }

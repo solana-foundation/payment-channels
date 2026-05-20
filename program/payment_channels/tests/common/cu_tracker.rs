@@ -53,10 +53,7 @@ pub fn send_and_record(svm: &mut LiteSVM, tx: Transaction) -> TransactionResult 
 
 /// Versioned-transaction variant of [`send_and_record`].
 #[allow(clippy::result_large_err)]
-pub fn send_versioned_and_record(
-    svm: &mut LiteSVM,
-    tx: VersionedTransaction,
-) -> TransactionResult {
+pub fn send_versioned_and_record(svm: &mut LiteSVM, tx: VersionedTransaction) -> TransactionResult {
     if !is_enabled() {
         return svm.send_transaction(tx);
     }
