@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 pub mod cu_tracker;
+pub mod lookup_table;
 pub mod token_2022;
 
 use litesvm::LiteSVM;

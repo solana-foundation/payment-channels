@@ -357,12 +357,7 @@ fn settle_to(
     cu_tracker::send_and_record(svm, tx).expect("settle should succeed");
 }
 
-// ---------------------------------------------------------------------------
-// Scenario fixture — owns the SVM and every account a `distribute` call
-// needs. `status`, `paid_out`, and `payer_withdrawn_at` are mutated through
-// the byte-level mutators above pending real `request_close` / `finalize` /
-// `withdraw_payer` instructions.
-
+// Scenario fixture — owns the SVM and every account a `distribute` call needs.
 struct Scenario {
     svm: LiteSVM,
     fee_payer: Keypair,
@@ -1222,6 +1217,245 @@ fn many_distinct_recipients_accepted() {
         assert_eq!(token_balance(&s.svm, ata), 100);
     }
     assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
+}
+
+#[test]
+fn happy_path_spl_token_max_recipients_plus_payee() {
+    // SPL batched chunking at N=32 recipients + payee = 33 logical slots
+    // across 5 chunks (8+8+8+8+1).
+    const N: usize = MAX_DISTRIBUTION_RECIPIENTS;
+    const RECIPIENT_BPS: u16 = 100;
+    let splits: Vec<Split> = (0..N)
+        .map(|_| Split {
+            owner: Pubkey::new_unique(),
+            bps: RECIPIENT_BPS,
+        })
+        .collect();
+    let deposit = 200_000;
+    let settled = 100_000;
+    let paid_out = 0;
+    let mut s = Scenario::build_with_token_program(
+        splits,
+        deposit,
+        settled,
+        paid_out,
+        STATUS_OPEN,
+        SPL_TOKEN,
+    );
+
+    let (_alt_key, alt_account) =
+        crate::common::lookup_table::install_lookup_table(&mut s.svm, s.recipient_atas.clone());
+    let tx = crate::common::lookup_table::build_v0_transaction(
+        &s.svm,
+        &s.fee_payer,
+        &[compute_budget_ix(1_400_000), s.distribute_ix()],
+        &alt_account,
+    );
+    s.svm
+        .send_transaction(tx)
+        .expect("spl distribute max recipients ok");
+
+    assert_eq!(s.recipient_atas.len(), N);
+    let unique: std::collections::HashSet<_> = s.recipient_atas.iter().collect();
+    assert_eq!(unique.len(), N);
+    for ata in &s.recipient_atas {
+        assert_eq!(token_balance(&s.svm, ata), 1_000);
+    }
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 68_000);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.channel_ata), deposit - settled);
+    assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
+}
+
+#[test]
+fn happy_path_spl_token_finalized_max_recipients_plus_payee_refund_sweep() {
+    // Worst-case FINALIZED batched stream: every payout phase present, with
+    // N=32 recipients + payee + payer refund + sweep = 35 logical slots
+    // across 5 chunks (8+8+8+8+3), followed by a standalone escrow-close CPI
+    // in the shared tombstone tail.
+    const N: usize = MAX_DISTRIBUTION_RECIPIENTS;
+    const RECIPIENT_BPS: u16 = 100;
+    let splits: Vec<Split> = (0..N)
+        .map(|_| Split {
+            owner: Pubkey::new_unique(),
+            bps: RECIPIENT_BPS,
+        })
+        .collect();
+    let deposit: u64 = 200_000;
+    let settled: u64 = 99_999;
+    let paid_out: u64 = 0;
+    let mut s = Scenario::build_with_token_program(
+        splits,
+        deposit,
+        settled,
+        paid_out,
+        STATUS_FINALIZED,
+        SPL_TOKEN,
+    );
+
+    let escrow_before = token_balance(&s.svm, &s.channel_ata);
+    let payer_sol_before = s.svm.get_account(&s.payer).unwrap().lamports;
+    let channel_lamports_before = s.svm.get_account(&s.channel).unwrap().lamports;
+    let channel_ata_lamports_before = s.svm.get_account(&s.channel_ata).unwrap().lamports;
+
+    let (_alt_key, alt_account) =
+        crate::common::lookup_table::install_lookup_table(&mut s.svm, s.recipient_atas.clone());
+    let tx = crate::common::lookup_table::build_v0_transaction(
+        &s.svm,
+        &s.fee_payer,
+        &[compute_budget_ix(1_400_000), s.distribute_ix()],
+        &alt_account,
+    );
+    s.svm
+        .send_transaction(tx)
+        .expect("spl finalized max recipients ok");
+
+    let expected_per_recipient: u64 = 999;
+    let expected_payee: u64 = 67_999;
+    let expected_payer_refund: u64 = deposit - settled;
+    let expected_treasury_sweep: u64 =
+        escrow_before - 32 * expected_per_recipient - expected_payee - expected_payer_refund;
+    assert_eq!(expected_treasury_sweep, 32);
+
+    assert_eq!(s.recipient_atas.len(), N);
+    let unique: std::collections::HashSet<_> = s.recipient_atas.iter().collect();
+    assert_eq!(unique.len(), N);
+    for ata in &s.recipient_atas {
+        assert_eq!(token_balance(&s.svm, ata), expected_per_recipient);
+    }
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), expected_payee);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), expected_payer_refund);
+    assert_eq!(
+        token_balance(&s.svm, &s.treasury_ata),
+        expected_treasury_sweep
+    );
+
+    assert_tombstone(&s.svm, &s.channel);
+
+    // Payer recovers channel-rent delta + escrow-ATA rent on the SOL leg.
+    let payer_sol_after = s.svm.get_account(&s.payer).unwrap().lamports;
+    let channel_rent_delta = channel_lamports_before - tombstone_rent_lamports();
+    assert_eq!(
+        payer_sol_after - payer_sol_before,
+        channel_rent_delta + channel_ata_lamports_before
+    );
+}
+
+#[test]
+fn spl_token_finalized_zero_pool_still_refunds_and_tombstones() {
+    // pool == 0: recipient slots zero-skip and payee has no payable amount;
+    // only payer refund, sweep, and close phases emit work.
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 1000,
+    }];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let paid_out = 100_000;
+    let mut s = Scenario::build_with_token_program(
+        splits,
+        deposit,
+        settled,
+        paid_out,
+        STATUS_FINALIZED,
+        SPL_TOKEN,
+    );
+
+    // Simulate the post-OPEN escrow balance: just the refund headroom left.
+    set_token_balance(&mut s.svm, &s.channel_ata, deposit - settled);
+
+    s.send(s.distribute_ix())
+        .expect("spl finalized zero pool ok");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
+    assert_tombstone(&s.svm, &s.channel);
+}
+
+#[test]
+fn spl_token_finalized_already_withdrawn() {
+    // `payer_withdrawn_at != 0` means the batched stream omits payer refund.
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5000,
+    }];
+    let deposit = 200_000;
+    let settled = 150_000;
+    let paid_out = 0;
+    let mut s = Scenario::build_with_token_program(
+        splits,
+        deposit,
+        settled,
+        paid_out,
+        STATUS_FINALIZED,
+        SPL_TOKEN,
+    );
+
+    // Simulate post-`withdraw_payer` state: stamp + trim escrow accordingly.
+    set_payer_withdrawn_at(&mut s.svm, &s.channel, 1_700_000_000);
+    set_token_balance(&mut s.svm, &s.channel_ata, settled - paid_out);
+
+    s.send(s.distribute_ix())
+        .expect("spl finalized already-withdrawn ok");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
+    assert_tombstone(&s.svm, &s.channel);
+}
+
+#[test]
+fn spl_token_finalized_chunk_boundary() {
+    // N=7 recipients + payee = 8 exactly fills one chunk; the FINALIZED
+    // tail (refund + sweep) spills into a second chunk of 2, followed by a
+    // standalone escrow-close CPI in the shared tombstone tail.
+    const N: usize = 7;
+    const RECIPIENT_BPS: u16 = 1000;
+    let splits: Vec<Split> = (0..N)
+        .map(|_| Split {
+            owner: Pubkey::new_unique(),
+            bps: RECIPIENT_BPS,
+        })
+        .collect();
+    let deposit: u64 = 200_000;
+    let settled: u64 = 99_999;
+    let paid_out: u64 = 0;
+    let mut s = Scenario::build_with_token_program(
+        splits,
+        deposit,
+        settled,
+        paid_out,
+        STATUS_FINALIZED,
+        SPL_TOKEN,
+    );
+
+    let escrow_before = token_balance(&s.svm, &s.channel_ata);
+
+    s.send(s.distribute_ix())
+        .expect("spl finalized chunk-boundary ok");
+
+    let expected_per_recipient: u64 = 9_999;
+    let expected_payee: u64 = 29_999;
+    let expected_payer_refund: u64 = deposit - settled;
+    let expected_treasury_sweep: u64 = escrow_before
+        - (N as u64) * expected_per_recipient
+        - expected_payee
+        - expected_payer_refund;
+    assert_eq!(expected_treasury_sweep, 7);
+
+    for ata in &s.recipient_atas {
+        assert_eq!(token_balance(&s.svm, ata), expected_per_recipient);
+    }
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), expected_payee);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), expected_payer_refund);
+    assert_eq!(
+        token_balance(&s.svm, &s.treasury_ata),
+        expected_treasury_sweep
+    );
+    assert_tombstone(&s.svm, &s.channel);
 }
 
 // ===========================================================================

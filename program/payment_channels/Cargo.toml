@@ -53,6 +53,7 @@ solana-program-error       = "^3"
 spl-token-2022-interface   = "2.1.0"
 tabled                     = "0.17"
 ctor                       = "0.2"
+solana-address-lookup-table-interface = { version = "^3", features = ["bincode"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
