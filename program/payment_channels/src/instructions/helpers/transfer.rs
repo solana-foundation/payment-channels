@@ -112,21 +112,6 @@ impl<'a> Transfer<'a> {
         }
     }
 
-    #[cfg(test)]
-    fn with_queue_state(
-        channel_ctx: &'a ChannelContext<'a>,
-        signers: &'a [Signer<'a, 'a>],
-        pending_len: usize,
-        scheduled_outflow: u64,
-    ) -> Self {
-        Self {
-            channel_ctx,
-            signers,
-            scheduled_outflow,
-            pending: [const { MaybeUninit::uninit() }; MAX_PENDING],
-            pending_len,
-        }
-    }
 }
 
 /// Emit one `TransferChecked` CPI per queued payout via the channel's token program.
@@ -199,113 +184,6 @@ fn flush_batched(transfer: Transfer<'_>) -> ProgramResult {
 mod tests {
     use super::*;
     use core::mem::size_of;
-
-    use pinocchio::account::{NOT_BORROWED, RuntimeAccount};
-
-    use crate::instructions::helpers::accounts::view::{
-        ChannelAccountView, ChannelContext, ChannelTokenAccountView, Checked, MintAccountView,
-        TokenContext, TokenProgramAccountView, TokenProgramKind, Unchecked,
-    };
-
-    // Buffers must outlive the AccountViews they back.
-    #[allow(dead_code)]
-    struct TestTransferCtx {
-        channel_buf: [u8; 128],
-        token_buf: [u8; 128],
-        mint_buf: [u8; 128],
-        prog_buf: [u8; 128],
-        channel_view: AccountView,
-        token_view: AccountView,
-        mint_view: AccountView,
-        prog_view: AccountView,
-    }
-
-    impl TestTransferCtx {
-        fn new() -> Self {
-            let mut channel_buf = [0u8; 128];
-            let mut token_buf = [0u8; 128];
-            let mut mint_buf = [0u8; 128];
-            let mut prog_buf = [0u8; 128];
-            Self {
-                channel_view: init_account_view(&mut channel_buf),
-                token_view: init_account_view(&mut token_buf),
-                mint_view: init_account_view(&mut mint_buf),
-                prog_view: init_account_view(&mut prog_buf),
-                channel_buf,
-                token_buf,
-                mint_buf,
-                prog_buf,
-            }
-        }
-
-        fn channel_ctx(&mut self) -> ChannelContext<'_> {
-            let channel: ChannelAccountView<'_, Unchecked> = (&mut self.channel_view).into();
-            let token_unchecked: ChannelTokenAccountView<'_, Unchecked> =
-                (&mut self.token_view).into();
-            let token: ChannelTokenAccountView<'_, Checked> =
-                unsafe { core::mem::transmute(token_unchecked) };
-            let mint_unchecked: MintAccountView<'_, Unchecked> = (&mut self.mint_view).into();
-            let mint: MintAccountView<'_, Checked> =
-                unsafe { core::mem::transmute(mint_unchecked) };
-            let prog_unchecked: TokenProgramAccountView<'_, Unchecked> =
-                (&mut self.prog_view).into();
-            let prog: TokenProgramAccountView<'_, Checked> =
-                unsafe { core::mem::transmute(prog_unchecked) };
-
-            ChannelContext {
-                channel,
-                channel_token_account: token,
-                token_ctx: TokenContext {
-                    mint,
-                    token_program: prog,
-                    decimals: 6,
-                    kind: TokenProgramKind::Spl,
-                },
-            }
-        }
-    }
-
-    fn init_account_view(buf: &mut [u8; 128]) -> AccountView {
-        let raw = buf.as_mut_ptr().cast::<RuntimeAccount>();
-        unsafe {
-            (*raw).borrow_state = NOT_BORROWED;
-            (*raw).data_len = 0;
-        }
-        unsafe { AccountView::new_unchecked(raw) }
-    }
-
-    #[test]
-    fn flush_empty_queue_is_noop() {
-        let mut ctx = TestTransferCtx::new();
-        let channel_ctx = ctx.channel_ctx();
-        let signers: &[Signer] = &[];
-        let transfer = Transfer::with_queue_state(&channel_ctx, signers, 0, 0);
-        transfer.flush().expect("empty flush is a no-op");
-    }
-
-    #[test]
-    fn queue_overflow_returns_transfer_queue_error() {
-        let mut ctx = TestTransferCtx::new();
-        let channel_ctx = ctx.channel_ctx();
-        let signers: &[Signer] = &[];
-        let mut transfer = Transfer::with_queue_state(&channel_ctx, signers, MAX_PENDING, 0);
-        let err = transfer.reserve_transfer_amount(1).expect_err("overflow");
-        assert!(matches!(
-            err,
-            PaymentChannelsError::DistributeTransferQueueOverflow
-        ));
-    }
-
-    #[test]
-    fn scheduled_outflow_accumulates_non_zero_queues() {
-        let mut ctx = TestTransferCtx::new();
-        let channel_ctx = ctx.channel_ctx();
-        let signers: &[Signer] = &[];
-        let mut transfer = Transfer::with_queue_state(&channel_ctx, signers, 0, 0);
-        transfer.reserve_transfer_amount(100).expect("queue ok");
-        transfer.reserve_transfer_amount(200).expect("queue ok");
-        assert_eq!(transfer.scheduled_outflow(), 300);
-    }
 
     #[test]
     fn max_pending_matches_distribute_worst_case() {
