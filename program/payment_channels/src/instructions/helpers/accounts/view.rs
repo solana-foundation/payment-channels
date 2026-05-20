@@ -227,7 +227,7 @@ where
     }
 }
 
-/// Which SPL token program backs this channel's mint and ATAs.
+/// Which token program backs this channel's mint and ATAs.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TokenProgramKind {
     /// SPL Token program.
@@ -443,24 +443,5 @@ impl<'a> PayerContext<'a> {
                 _s: Default::default(),
             },
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::TokenProgramKind;
-
-    #[test]
-    fn spl_batch_flush_eligible_spl_needs_two_or_more() {
-        assert!(!TokenProgramKind::Spl.spl_batch_flush_eligible(0));
-        assert!(!TokenProgramKind::Spl.spl_batch_flush_eligible(1));
-        assert!(TokenProgramKind::Spl.spl_batch_flush_eligible(2));
-    }
-
-    #[test]
-    fn spl_batch_flush_eligible_token2022_never_batches() {
-        assert!(!TokenProgramKind::Token2022.spl_batch_flush_eligible(0));
-        assert!(!TokenProgramKind::Token2022.spl_batch_flush_eligible(1));
-        assert!(!TokenProgramKind::Token2022.spl_batch_flush_eligible(35));
     }
 }

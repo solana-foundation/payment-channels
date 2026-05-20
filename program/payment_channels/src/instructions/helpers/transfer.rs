@@ -93,7 +93,7 @@ impl<'a> Transfer<'a> {
     }
 
     /// Emit every queued payout as token CPIs. No-op when nothing was queued.
-    /// Classic SPL with two or more transfers uses one `Batch` CPI per chunk;
+    /// SPL with two or more transfers uses one `Batch` CPI per chunk;
     /// otherwise each payout is a separate `TransferChecked` CPI.
     pub fn flush(self) -> ProgramResult {
         if self.pending_len == 0 {
