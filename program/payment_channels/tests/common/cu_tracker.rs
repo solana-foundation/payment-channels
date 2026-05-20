@@ -23,6 +23,7 @@ use litesvm::LiteSVM;
 use litesvm::types::TransactionResult;
 use payment_channels::PaymentChannelsInstruction;
 use solana_transaction::Transaction;
+use solana_transaction::versioned::VersionedTransaction;
 use tabled::{Table, Tabled, settings::Style};
 
 const PROGRAM_ID_BYTES: [u8; 32] = *payment_channels::ID.as_array();
@@ -47,10 +48,19 @@ fn tracker() -> &'static Mutex<CuTracker> {
 /// no clone is needed even when tracking is enabled.
 #[allow(clippy::result_large_err)]
 pub fn send_and_record(svm: &mut LiteSVM, tx: Transaction) -> TransactionResult {
+    send_versioned_and_record(svm, tx.into())
+}
+
+/// Versioned-transaction variant of [`send_and_record`].
+#[allow(clippy::result_large_err)]
+pub fn send_versioned_and_record(
+    svm: &mut LiteSVM,
+    tx: VersionedTransaction,
+) -> TransactionResult {
     if !is_enabled() {
         return svm.send_transaction(tx);
     }
-    let label = first_program_ix_label(&tx);
+    let label = first_program_ix_label_versioned(&tx);
     let res = svm.send_transaction(tx);
     if let (Some(l), Ok(meta)) = (label, res.as_ref())
         && let Ok(mut t) = tracker().lock()
@@ -67,9 +77,10 @@ pub fn send_and_record(svm: &mut LiteSVM, tx: Transaction) -> TransactionResult 
 /// program, and route its data through the program's instruction enum to
 /// derive the report label. Returns `None` if the tx has no payment-channels
 /// ix or its data fails to parse.
-fn first_program_ix_label(tx: &Transaction) -> Option<&'static str> {
-    tx.message.instructions.iter().find_map(|ci| {
-        let prog = tx.message.account_keys.get(ci.program_id_index as usize)?;
+fn first_program_ix_label_versioned(tx: &VersionedTransaction) -> Option<&'static str> {
+    let keys = tx.message.static_account_keys();
+    tx.message.instructions().iter().find_map(|ci| {
+        let prog = keys.get(ci.program_id_index as usize)?;
         if prog.to_bytes() != PROGRAM_ID_BYTES {
             return None;
         }

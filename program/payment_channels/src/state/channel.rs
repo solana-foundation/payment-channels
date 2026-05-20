@@ -39,6 +39,8 @@ pub enum ChannelStatus {
 }
 
 impl ChannelStatus {
+    /// Whether the channel is in [`Finalized`](Self::Finalized), gating
+    /// refund/sweep/tombstone branches in `distribute`.
     #[inline]
     pub const fn is_finalized(&self) -> bool {
         matches!(self, Self::Finalized)

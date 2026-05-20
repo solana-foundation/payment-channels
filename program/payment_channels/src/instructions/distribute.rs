@@ -266,7 +266,8 @@ pub fn process(
             .token_program
             .amount(&channel_ctx.channel_token_account.as_any())?;
 
-        // Flooring residual left after recipient, payee, and payer payouts.
+        // Invariant: escrow_at_entry == scheduled_outflow() + treasury_sweep.
+        // Treasury captures bps flooring dust not assigned to recipients/payee.
         let treasury_sweep = escrow_at_entry
             .checked_sub(transfer.scheduled_outflow())
             .ok_or(PaymentChannelsError::DistributeBalanceCalculationOverflow)?;

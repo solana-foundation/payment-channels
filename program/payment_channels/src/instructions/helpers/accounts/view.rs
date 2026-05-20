@@ -95,18 +95,17 @@ impl<'a> TokenProgramAccountView<'a, Checked> {
         &self,
         account: &AnyTokenAccountView<'_, Checked>,
     ) -> Result<u64, PaymentChannelsError> {
-        if self.address() == &pinocchio_token::ID {
-            Ok(pinocchio_token::state::Account::from_account_view(account)
-                .map_err(|_| PaymentChannelsError::MalformedMintTokenAccountData)?
-                .amount())
-        } else if self.address() == &pinocchio_token_2022::ID {
-            Ok(
+        match TokenProgramKind::from_address(self.address())? {
+            TokenProgramKind::Spl => Ok(
+                pinocchio_token::state::Account::from_account_view(account)
+                    .map_err(|_| PaymentChannelsError::MalformedMintTokenAccountData)?
+                    .amount(),
+            ),
+            TokenProgramKind::Token2022 => Ok(
                 pinocchio_token_2022::state::Account::from_account_view(account)
                     .map_err(|_| PaymentChannelsError::MalformedMintTokenAccountData)?
                     .amount(),
-            )
-        } else {
-            Err(PaymentChannelsError::InvalidMintTokenProgram)
+            ),
         }
     }
 }
@@ -122,8 +121,7 @@ impl<'a> TreasuryTokenAccountView<'a, Unchecked> {
                 AccountValidationError::AddressMismatch => {
                     PaymentChannelsError::TreasuryAccountMismatch
                 }
-                AccountValidationError::MalformedTokenAccountData
-                | AccountValidationError::InvalidTokenProgram => {
+                AccountValidationError::MalformedTokenAccountData => {
                     PaymentChannelsError::InvalidTreasuryTokenAccount
                 }
                 AccountValidationError::TokenExtensionError => {
@@ -150,8 +148,7 @@ impl<'a> PayeeTokenAccountView<'a, Unchecked> {
                 AccountValidationError::AddressMismatch => {
                     PaymentChannelsError::PayeeAccountMismatch
                 }
-                AccountValidationError::MalformedTokenAccountData
-                | AccountValidationError::InvalidTokenProgram => {
+                AccountValidationError::MalformedTokenAccountData => {
                     PaymentChannelsError::InvalidPayeeTokenAccount
                 }
                 AccountValidationError::TokenExtensionError => {
@@ -186,8 +183,7 @@ impl<'a> RecipientTokenAccountsView<'a, Unchecked> {
                     AccountValidationError::AddressMismatch => {
                         PaymentChannelsError::RecipientAccountMismatch
                     }
-                    AccountValidationError::MalformedTokenAccountData
-                    | AccountValidationError::InvalidTokenProgram => {
+                    AccountValidationError::MalformedTokenAccountData => {
                         PaymentChannelsError::InvalidRecipientTokenAccount
                     }
                     AccountValidationError::TokenExtensionError => {
@@ -251,10 +247,10 @@ impl TokenProgramKind {
         }
     }
 
-    /// Whether [`Transfer`](crate::instructions::helpers::Transfer) may use
-    /// `pinocchio_token::Batch` (CPI target is the classic SPL program id).
-    pub const fn uses_spl_batch_cpi(self) -> bool {
-        matches!(self, Self::Spl)
+    /// Whether [`Transfer::flush`](crate::instructions::helpers::Transfer::flush)
+    /// should emit SPL `Batch` CPIs for `pending_len` queued payouts.
+    pub const fn spl_batch_flush_eligible(self, pending_len: usize) -> bool {
+        matches!(self, Self::Spl) && pending_len >= 2
     }
 }
 
@@ -293,10 +289,8 @@ impl<'a> TokenContext<'a> {
                 .try_borrow()
                 .map_err(|_| PaymentChannelsError::MintAccountMismatch)?;
             if data.len() > base_layout::MINT_LEN {
-                // Upstream's `validate_account_type` checks the discriminator at
-                // `Account::BASE_LEN` but doesn't enforce that the gap between the
-                // mint base region and that offset is zero — guard against
-                // smuggled bytes here, then walk the whitelisted TLV trailer.
+                // Require zero padding between mint base and AccountType offset,
+                // then walk the whitelisted TLV trailer.
                 let all_zero = data[base_layout::MINT_LEN..tlv::ACCOUNT_TYPE_OFFSET]
                     .iter()
                     .all(|b| *b == 0);
@@ -347,8 +341,7 @@ impl<'a> ChannelContext<'a> {
                 AccountValidationError::AddressMismatch => {
                     PaymentChannelsError::ChannelAccountMismatch
                 }
-                AccountValidationError::MalformedTokenAccountData
-                | AccountValidationError::InvalidTokenProgram => {
+                AccountValidationError::MalformedTokenAccountData => {
                     PaymentChannelsError::InvalidChannelTokenAccount
                 }
                 AccountValidationError::TokenExtensionError => {
@@ -432,8 +425,7 @@ impl<'a> PayerContext<'a> {
                 AccountValidationError::AddressMismatch => {
                     PaymentChannelsError::PayerAccountMismatch
                 }
-                AccountValidationError::MalformedTokenAccountData
-                | AccountValidationError::InvalidTokenProgram => {
+                AccountValidationError::MalformedTokenAccountData => {
                     PaymentChannelsError::InvalidPayerTokenAccount
                 }
                 AccountValidationError::TokenExtensionError => {

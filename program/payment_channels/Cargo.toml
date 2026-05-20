@@ -53,6 +53,7 @@ solana-program-error       = "^3"
 spl-token-2022-interface   = "2.1.0"
 tabled                     = "0.17"
 ctor                       = "0.2"
+# Test-only: v0 transaction + ALT helpers for distribute e2e at max recipients.
 solana-address-lookup-table-interface = { version = "^3", features = ["bincode"] }
 
 [lints.rust]

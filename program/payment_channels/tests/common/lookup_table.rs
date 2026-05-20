@@ -65,16 +65,21 @@ pub fn install_lookup_table(
 
 /// Builds and signs a v0 `VersionedTransaction` for `instructions`,
 /// packing any keys in `alt` into a single address-table lookup.
-pub fn build_v0_transaction(
+/// Optional `prefix` instructions (e.g. compute-budget) are prepended first.
+pub fn build_v0_transaction_with_prefix(
     svm: &LiteSVM,
     payer: &Keypair,
+    prefix: &[Instruction],
     instructions: &[Instruction],
     alt: &AddressLookupTableAccount,
 ) -> VersionedTransaction {
     let blockhash = svm.latest_blockhash();
+    let mut ixs: Vec<Instruction> = Vec::with_capacity(prefix.len() + instructions.len());
+    ixs.extend_from_slice(prefix);
+    ixs.extend_from_slice(instructions);
     let message = MessageV0::try_compile(
         &payer.pubkey(),
-        instructions,
+        &ixs,
         std::slice::from_ref(alt),
         blockhash,
     )

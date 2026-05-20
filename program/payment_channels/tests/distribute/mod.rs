@@ -33,7 +33,7 @@ pub(super) struct Split {
     pub bps: u16,
 }
 
-/// `constants::TREASURY_OWNER` mirror — alternating `0xBE 0xEF` × 16.
+/// Treasury owner pubkey — alternating `0xBE 0xEF` × 16.
 pub(super) fn treasury_owner() -> Pubkey {
     let mut b = [0u8; 32];
     for i in 0..16 {

@@ -58,8 +58,7 @@ fn read_paid_out(svm: &LiteSVM, channel: &Pubkey) -> u64 {
     u64::from_le_bytes(buf)
 }
 
-/// Rent-exempt lamports for the 1-byte tombstone, computed via the same
-/// canonical formula `Rent::try_minimum_balance` runs on-chain.
+/// Rent-exempt lamports for the 1-byte tombstone PDA.
 fn tombstone_rent_lamports() -> u64 {
     solana_rent::Rent::default().minimum_balance(1)
 }
@@ -515,6 +514,24 @@ impl Scenario {
             blockhash,
         );
         cu_tracker::send_and_record(&mut self.svm, tx)
+    }
+
+    fn send_v0_distribute(
+        &mut self,
+        recipient_atas_for_alt: Vec<Pubkey>,
+    ) -> litesvm::types::TransactionResult {
+        let (_alt_key, alt_account) = crate::common::lookup_table::install_lookup_table(
+            &mut self.svm,
+            recipient_atas_for_alt,
+        );
+        let tx = crate::common::lookup_table::build_v0_transaction_with_prefix(
+            &self.svm,
+            &self.fee_payer,
+            &[compute_budget_ix(1_400_000)],
+            &[self.distribute_ix()],
+            &alt_account,
+        );
+        cu_tracker::send_versioned_and_record(&mut self.svm, tx)
     }
 }
 
@@ -1243,16 +1260,7 @@ fn happy_path_spl_token_max_recipients_plus_payee() {
         SPL_TOKEN,
     );
 
-    let (_alt_key, alt_account) =
-        crate::common::lookup_table::install_lookup_table(&mut s.svm, s.recipient_atas.clone());
-    let tx = crate::common::lookup_table::build_v0_transaction(
-        &s.svm,
-        &s.fee_payer,
-        &[s.distribute_ix()],
-        &alt_account,
-    );
-    s.svm
-        .send_transaction(tx)
+    s.send_v0_distribute(s.recipient_atas.clone())
         .expect("spl distribute max recipients ok");
 
     assert_eq!(s.recipient_atas.len(), N);
@@ -1269,7 +1277,7 @@ fn happy_path_spl_token_max_recipients_plus_payee() {
 
 #[test]
 fn happy_path_spl_token_finalized_max_recipients_plus_payee_refund_sweep() {
-    // Worst-case FINALIZED batched stream: every payout phase present, with
+    // Worst-case FINALIZED distribute: every payout phase present —
     // N=32 recipients + payee + payer refund + sweep = 35 logical slots
     // across 5 chunks (8+8+8+8+3), followed by a standalone escrow-close CPI
     // in the shared tombstone tail.
@@ -1298,16 +1306,7 @@ fn happy_path_spl_token_finalized_max_recipients_plus_payee_refund_sweep() {
     let channel_lamports_before = s.svm.get_account(&s.channel).unwrap().lamports;
     let channel_ata_lamports_before = s.svm.get_account(&s.channel_ata).unwrap().lamports;
 
-    let (_alt_key, alt_account) =
-        crate::common::lookup_table::install_lookup_table(&mut s.svm, s.recipient_atas.clone());
-    let tx = crate::common::lookup_table::build_v0_transaction(
-        &s.svm,
-        &s.fee_payer,
-        &[s.distribute_ix()],
-        &alt_account,
-    );
-    s.svm
-        .send_transaction(tx)
+    s.send_v0_distribute(s.recipient_atas.clone())
         .expect("spl finalized max recipients ok");
 
     let expected_per_recipient: u64 = 999;
@@ -1344,7 +1343,7 @@ fn happy_path_spl_token_finalized_max_recipients_plus_payee_refund_sweep() {
 #[test]
 fn spl_token_finalized_zero_pool_still_refunds_and_tombstones() {
     // pool == 0: recipient slots zero-skip and payee has no payable amount;
-    // only payer refund, sweep, and close phases emit work.
+    // only payer refund, sweep, and close phases run.
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 1000,
@@ -1376,7 +1375,7 @@ fn spl_token_finalized_zero_pool_still_refunds_and_tombstones() {
 
 #[test]
 fn spl_token_finalized_already_withdrawn() {
-    // `payer_withdrawn_at != 0` means the batched stream omits payer refund.
+    // `payer_withdrawn_at != 0` skips payer refund when pool > 0.
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 5000,
@@ -1433,6 +1432,9 @@ fn spl_token_finalized_chunk_boundary() {
     );
 
     let escrow_before = token_balance(&s.svm, &s.channel_ata);
+    let payer_sol_before = s.svm.get_account(&s.payer).unwrap().lamports;
+    let channel_lamports_before = s.svm.get_account(&s.channel).unwrap().lamports;
+    let channel_ata_lamports_before = s.svm.get_account(&s.channel_ata).unwrap().lamports;
 
     s.send(s.distribute_ix())
         .expect("spl finalized chunk-boundary ok");
@@ -1456,6 +1458,89 @@ fn spl_token_finalized_chunk_boundary() {
         expected_treasury_sweep
     );
     assert_tombstone(&s.svm, &s.channel);
+
+    let payer_sol_after = s.svm.get_account(&s.payer).unwrap().lamports;
+    let channel_rent_delta = channel_lamports_before - tombstone_rent_lamports();
+    assert_eq!(
+        payer_sol_after - payer_sol_before,
+        channel_rent_delta + channel_ata_lamports_before
+    );
+}
+
+#[test]
+fn token_2022_max_recipients_plus_payee_finalized() {
+    // Token-2022 uses direct TransferChecked CPIs (no SPL Batch); worst case
+    // is 32 recipients + payee + refund + sweep = 35 CPIs before close.
+    const N: usize = MAX_DISTRIBUTION_RECIPIENTS;
+    const RECIPIENT_BPS: u16 = 100;
+    let splits: Vec<Split> = (0..N)
+        .map(|_| Split {
+            owner: Pubkey::new_unique(),
+            bps: RECIPIENT_BPS,
+        })
+        .collect();
+    let deposit: u64 = 200_000;
+    let settled: u64 = 99_999;
+    let paid_out: u64 = 0;
+    let mut s = Scenario::build_with_token_program(
+        splits,
+        deposit,
+        settled,
+        paid_out,
+        STATUS_FINALIZED,
+        TOKEN_2022,
+    );
+
+    let escrow_before = token_balance(&s.svm, &s.channel_ata);
+    s.send_v0_distribute(s.recipient_atas.clone())
+        .expect("token-2022 max recipients ok");
+
+    let expected_per_recipient: u64 = 999;
+    let expected_payee: u64 = 67_999;
+    let expected_payer_refund: u64 = deposit - settled;
+    let expected_treasury_sweep: u64 =
+        escrow_before - 32 * expected_per_recipient - expected_payee - expected_payer_refund;
+    assert_eq!(expected_treasury_sweep, 32);
+
+    for ata in &s.recipient_atas {
+        assert_eq!(token_balance(&s.svm, ata), expected_per_recipient);
+    }
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), expected_payee);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), expected_payer_refund);
+    assert_eq!(
+        token_balance(&s.svm, &s.treasury_ata),
+        expected_treasury_sweep
+    );
+    assert_tombstone(&s.svm, &s.channel);
+}
+
+#[test]
+fn spl_token_legacy_tx_rejects_max_recipients() {
+    const N: usize = MAX_DISTRIBUTION_RECIPIENTS;
+    let splits: Vec<Split> = (0..N)
+        .map(|_| Split {
+            owner: Pubkey::new_unique(),
+            bps: 100,
+        })
+        .collect();
+    let mut s = Scenario::build_with_token_program(
+        splits,
+        200_000,
+        100_000,
+        0,
+        STATUS_OPEN,
+        SPL_TOKEN,
+    );
+
+    // Legacy txs with 40 instruction accounts exceed the static key budget;
+    // LiteSVM rejects the message during compute-budget sanitization.
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        s.send(s.distribute_ix())
+    }));
+    match outcome {
+        Err(_) => {}
+        Ok(res) => assert!(res.is_err(), "legacy tx should fail at N=32 without ALT"),
+    }
 }
 
 // ===========================================================================
