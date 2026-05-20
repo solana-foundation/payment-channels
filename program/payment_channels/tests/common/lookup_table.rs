@@ -1,11 +1,12 @@
 //! Address Lookup Table helpers for v0-transaction tests.
 //!
-//! Legacy transactions cap at ~1232 bytes (~32 keys); `distribute` at
-//! `MAX_DISTRIBUTION_RECIPIENTS = 32` needs 32 recipient ATAs + 8 fixed
-//! accounts + 2 program IDs, so tests exercising that cap go through v0 +
-//! ALT. We inject a pre-warmed ALT directly into the LiteSVM account store
-//! rather than driving the ALT program through CPI — the goal is testing
-//! `distribute`, not the ALT lifecycle.
+//! Legacy transactions cap static account keys at ~32. Worst-case `distribute`
+//! passes 8 fixed accounts + 32 recipient ATAs = 40 instruction-meta accounts,
+//! plus the fee payer and program id (~42 static keys total), so tests at
+//! `MAX_DISTRIBUTION_RECIPIENTS = 32` must use v0 + ALT. We inject a
+//! pre-warmed ALT directly into the LiteSVM account store rather than driving
+//! the ALT program through CPI — the goal is testing `distribute`, not the ALT
+//! lifecycle.
 
 use std::borrow::Cow;
 

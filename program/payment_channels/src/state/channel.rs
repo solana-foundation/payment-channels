@@ -38,6 +38,13 @@ pub enum ChannelStatus {
     Closing = 2,
 }
 
+impl ChannelStatus {
+    #[inline]
+    pub const fn is_finalized(&self) -> bool {
+        matches!(self, Self::Finalized)
+    }
+}
+
 impl TryFrom<u8> for ChannelStatus {
     type Error = ProgramError;
 

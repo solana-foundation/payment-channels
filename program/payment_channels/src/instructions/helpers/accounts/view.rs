@@ -231,10 +231,38 @@ where
     }
 }
 
+/// Which SPL token program backs this channel's mint and ATAs.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TokenProgramKind {
+    /// Classic SPL Token (`TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`).
+    Spl,
+    /// Token-2022 (`TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`).
+    Token2022,
+}
+
+impl TokenProgramKind {
+    pub fn from_address(address: &Address) -> Result<Self, PaymentChannelsError> {
+        if address == &pinocchio_token::ID {
+            Ok(Self::Spl)
+        } else if address == &pinocchio_token_2022::ID {
+            Ok(Self::Token2022)
+        } else {
+            Err(PaymentChannelsError::InvalidMintTokenProgram)
+        }
+    }
+
+    /// Whether [`Transfer`](crate::instructions::helpers::Transfer) may use
+    /// `pinocchio_token::Batch` (CPI target is the classic SPL program id).
+    pub const fn uses_spl_batch_cpi(self) -> bool {
+        matches!(self, Self::Spl)
+    }
+}
+
 pub struct TokenContext<'a> {
     pub mint: MintAccountView<'a, Checked>,
     pub token_program: TokenProgramAccountView<'a, Checked>,
     pub decimals: u8,
+    pub kind: TokenProgramKind,
 }
 
 impl<'a> TokenContext<'a> {
@@ -242,22 +270,25 @@ impl<'a> TokenContext<'a> {
         mint: MintAccountView<'a, Unchecked>,
         token_program: TokenProgramAccountView<'a, Unchecked>,
     ) -> Result<Self, PaymentChannelsError> {
-        let decimals = if token_program.address() == &pinocchio_token::ID {
-            // pinocchio_token enforces owner == SPL classic + exact length.
-            pinocchio_token::state::Mint::from_account_view(&mint)
-                .map_err(|_| PaymentChannelsError::MintAccountMismatch)?
-                .decimals()
-        } else if token_program.address() == &pinocchio_token_2022::ID {
-            // pinocchio_token_2022 enforces owner == Token-2022 and (when
-            // extensions are present) the AccountType discriminator byte.
-            pinocchio_token_2022::state::Mint::from_account_view(&mint)
-                .map_err(|_| PaymentChannelsError::MintAccountMismatch)?
-                .decimals()
-        } else {
-            return Err(PaymentChannelsError::InvalidMintTokenProgram);
+        let kind = TokenProgramKind::from_address(token_program.address())?;
+
+        let decimals = match kind {
+            TokenProgramKind::Spl => {
+                // pinocchio_token enforces owner == SPL classic + exact length.
+                pinocchio_token::state::Mint::from_account_view(&mint)
+                    .map_err(|_| PaymentChannelsError::MintAccountMismatch)?
+                    .decimals()
+            }
+            TokenProgramKind::Token2022 => {
+                // pinocchio_token_2022 enforces owner == Token-2022 and (when
+                // extensions are present) the AccountType discriminator byte.
+                pinocchio_token_2022::state::Mint::from_account_view(&mint)
+                    .map_err(|_| PaymentChannelsError::MintAccountMismatch)?
+                    .decimals()
+            }
         };
 
-        if token_program.address() == &pinocchio_token_2022::ID {
+        if kind == TokenProgramKind::Token2022 {
             let data = mint
                 .try_borrow()
                 .map_err(|_| PaymentChannelsError::MintAccountMismatch)?;
@@ -293,6 +324,7 @@ impl<'a> TokenContext<'a> {
                 _s: Default::default(),
             },
             decimals,
+            kind,
         })
     }
 }

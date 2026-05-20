@@ -1248,7 +1248,7 @@ fn happy_path_spl_token_max_recipients_plus_payee() {
     let tx = crate::common::lookup_table::build_v0_transaction(
         &s.svm,
         &s.fee_payer,
-        &[compute_budget_ix(1_400_000), s.distribute_ix()],
+        &[s.distribute_ix()],
         &alt_account,
     );
     s.svm
@@ -1303,7 +1303,7 @@ fn happy_path_spl_token_finalized_max_recipients_plus_payee_refund_sweep() {
     let tx = crate::common::lookup_table::build_v0_transaction(
         &s.svm,
         &s.fee_payer,
-        &[compute_budget_ix(1_400_000), s.distribute_ix()],
+        &[s.distribute_ix()],
         &alt_account,
     );
     s.svm
