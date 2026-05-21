@@ -79,7 +79,7 @@ impl<'a> Transfer<'a> {
 
     /// Schedule a channel-authorized `TransferChecked` from escrow to `to`.
     /// Zero `amount` is ignored and does not consume a queue slot.
-    pub fn push(&mut self, to: &'a AccountView, amount: u64) -> ProgramResult {
+    pub fn push(&mut self, to: &'a AccountView, amount: u64) -> Result<(), PaymentChannelsError> {
         if amount == 0 {
             return Ok(());
         }
