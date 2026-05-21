@@ -83,6 +83,15 @@ test-and-benchmark: generate-client
     cd {{program_dir}} && \
         CU_REPORT=1 CU_REPORT_DATE="$(date -u +%Y-%m-%d)" cargo test-sbf
 
+# Run the parameterized CU benchmark scenarios and emit bench_report.md
+# next to Cargo.toml. `--test-threads=1` keeps logs interleaved-free and
+# avoids contention; bench scenarios themselves only push to a Mutex so
+# the report is correct either way.
+bench: generate-client
+    cd {{program_dir}} && \
+        BENCH=1 BENCH_DATE="$(date -u +%Y-%m-%d)" \
+        cargo test-sbf --test instructions benchmark::scenarios:: -- --test-threads=1
+
 # Focused event-engine end-to-end run (litesvm). Loads the compiled .so
 # and exercises the self-CPI Anchor-event wire format via the `open`
 # instruction plus the `emit_event` validation surface.
