@@ -247,18 +247,18 @@ pub fn process(
         .zip(recipient_token_accounts.iter())
     {
         let amount = floor_bps_share(pool, entry.bps() as u32)?;
-        transfer.queue(recipient, amount)?;
+        transfer.push(recipient, amount)?;
     }
 
     if payee_bps != 0 {
         let payee_share = floor_bps_share(pool, payee_bps)?;
-        transfer.queue(&payee_token_account, payee_share)?;
+        transfer.push(&payee_token_account, payee_share)?;
     }
 
     if is_finalized {
         if payer_withdrawn_at == 0 && deposit > settled {
             let payer_refund = deposit - settled;
-            transfer.queue(&payer_ctx.payer_token_account, payer_refund)?;
+            transfer.push(&payer_ctx.payer_token_account, payer_refund)?;
         }
 
         let escrow_at_entry = channel_ctx
@@ -271,7 +271,7 @@ pub fn process(
         let treasury_sweep = escrow_at_entry
             .checked_sub(transfer.scheduled_outflow())
             .ok_or(PaymentChannelsError::DistributeBalanceCalculationOverflow)?;
-        transfer.queue(&treasury_token_account, treasury_sweep)?;
+        transfer.push(&treasury_token_account, treasury_sweep)?;
     }
 
     // Execute every queued transfer (direct CPI or batched SPL `Batch`).

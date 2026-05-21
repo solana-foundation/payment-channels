@@ -33,10 +33,13 @@ use crate::common::token_2022::{
     TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN, add_account_extension,
     add_mint_extension,
 };
+use solana_compute_budget::compute_budget_limits::MAX_COMPUTE_UNIT_LIMIT;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
+
 use crate::common::{
     ATA_PROGRAM, INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM,
-    SYSVAR_RENT, compute_budget_ix, cu_tracker, ed25519_program_id, event_authority,
-    expect_custom_err, expect_instruction_err, set_clock, token_balance,
+    SYSVAR_RENT, cu_tracker, ed25519_program_id, event_authority, expect_custom_err,
+    expect_instruction_err, set_clock, token_balance,
 };
 
 const GRACE_PERIOD: u32 = 3600;
@@ -508,7 +511,10 @@ impl Scenario {
     fn send(&mut self, ix: Instruction) -> litesvm::types::TransactionResult {
         let blockhash = self.svm.latest_blockhash();
         let tx = Transaction::new_signed_with_payer(
-            &[compute_budget_ix(1_400_000), ix],
+            &[
+                ComputeBudgetInstruction::set_compute_unit_limit(MAX_COMPUTE_UNIT_LIMIT),
+                ix,
+            ],
             Some(&self.fee_payer.pubkey()),
             &[&self.fee_payer],
             blockhash,
@@ -516,10 +522,30 @@ impl Scenario {
         cu_tracker::send_and_record(&mut self.svm, tx)
     }
 
-    /// Versioned tx path for N=32 recipient ATAs: legacy messages exceed the
-    /// static account-key budget, so recipient pubkeys live in an address lookup
-    /// table. `compute_budget_ix` raises the per-tx CU cap so LiteSVM accepts
-    /// the large distribute CPI chain (not a no-op).
+    /// Versioned-tx path used by the `N = MAX_DISTRIBUTION_RECIPIENTS` (= 32)
+    /// distribute tests. Two things would otherwise break:
+    ///
+    /// 1. **Address Lookup Table is mandatory.** The worst-case `distribute`
+    ///    instruction passes 8 fixed program accounts + 32 recipient ATAs = 40
+    ///    instruction-meta accounts, plus the fee payer and program id; legacy
+    ///    `Message::MAX_ACCOUNT_KEYS` caps a legacy tx at 32 static keys, so
+    ///    the recipient pubkeys must come from an ALT in a v0 message. The
+    ///    pre-warmed ALT lives entirely in LiteSVM (see
+    ///    `crate::common::lookup_table`); we are not testing the ALT lifecycle.
+    ///
+    /// 2. **A `SetComputeUnitLimit(MAX_COMPUTE_UNIT_LIMIT)` prefix is mandatory for the Token-2022 path.**
+    ///    The default per-tx CU cap is 200k. The pure Token-2022 inner work is
+    ///    cheap (~1961 CUs per `TransferChecked`), but pre-transfer program
+    ///    setup (account parsing, validation, distribution-hash recompute,
+    ///    signer-seed derivation) consumes ~138k CUs *before any CPI runs*,
+    ///    and each transfer CPI then costs ~3098 CUs end-to-end (inner work
+    ///    plus per-CPI overhead). For the worst-case FINALIZED Token-2022
+    ///    distribute (32 recipients + payee + payer-refund + sweep + escrow
+    ///    `CloseAccount`) the full chain measures ~236k CUs, so LiteSVM
+    ///    reports "exceeded CUs meter" partway through the transfer chain
+    ///    without the boost. The SPL batched call sites fold many transfers
+    ///    into a single `Batch` CPI and stay under 200k on their own; the
+    ///    helper keeps a uniform prefix across all v0 call sites anyway.
     fn send_v0_distribute(
         &mut self,
         recipient_atas_for_alt: Vec<Pubkey>,
@@ -531,7 +557,9 @@ impl Scenario {
         let tx = crate::common::lookup_table::build_v0_transaction_with_prefix(
             &self.svm,
             &self.fee_payer,
-            &[compute_budget_ix(1_400_000)],
+            &[ComputeBudgetInstruction::set_compute_unit_limit(
+                MAX_COMPUTE_UNIT_LIMIT,
+            )],
             &[self.distribute_ix()],
             &alt_account,
         );
@@ -1669,7 +1697,11 @@ fn reopen_at_same_seeds_rejects_same_tx() {
 
     let blockhash = s.svm.latest_blockhash();
     let tx = Transaction::new_signed_with_payer(
-        &[compute_budget_ix(1_400_000), distribute_ix, open_ix],
+        &[
+            ComputeBudgetInstruction::set_compute_unit_limit(MAX_COMPUTE_UNIT_LIMIT),
+            distribute_ix,
+            open_ix,
+        ],
         Some(&s.payer_keypair.pubkey()),
         &[&s.payer_keypair],
         blockhash,

@@ -247,10 +247,11 @@ impl TokenProgramKind {
         }
     }
 
-    /// Whether [`Transfer::flush`](crate::instructions::helpers::Transfer::flush)
-    /// should emit SPL `Batch` CPIs for `pending_len` queued payouts.
-    pub const fn spl_batch_flush_eligible(self, pending_len: usize) -> bool {
-        matches!(self, Self::Spl) && pending_len >= 2
+    /// Whether this token program exposes a `Batch` CPI for folding multiple
+    /// sub-instructions into a single invocation. SPL Token does; Token-2022
+    /// does not.
+    pub const fn supports_transfer_batching(self) -> bool {
+        matches!(self, Self::Spl)
     }
 }
 
@@ -270,7 +271,7 @@ impl<'a> TokenContext<'a> {
 
         let decimals = match kind {
             TokenProgramKind::Spl => {
-                // pinocchio_token enforces owner == SPL classic + exact length.
+                // pinocchio_token enforces owner == SPL Token + exact length.
                 pinocchio_token::state::Mint::from_account_view(&mint)
                     .map_err(|_| PaymentChannelsError::MintAccountMismatch)?
                     .decimals()

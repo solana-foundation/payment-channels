@@ -15,9 +15,11 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
+use solana_compute_budget_interface::ComputeBudgetInstruction;
+
 use crate::common::{
-    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, compute_budget_ix, cu_tracker,
-    ed25519_program_id, expect_custom_err,
+    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, cu_tracker, ed25519_program_id,
+    expect_custom_err,
 };
 
 /// Seed a `Channel` PDA (208-byte `#[repr(C, packed)]` layout) owned by the
@@ -507,7 +509,7 @@ fn settle_preceding_compute_budget_ix_rejects() {
     // Preceding ix resolves cleanly, but its program id is not the Ed25519
     // precompile — exercises the program-id branch of
     // `MissingEd25519Verification`.
-    let preceding_ix = compute_budget_ix(200_000);
+    let preceding_ix = ComputeBudgetInstruction::set_compute_unit_limit(200_000);
     let settle_ix = build_settle_ix(&channel, voucher);
 
     let tx = Transaction::new_signed_with_payer(

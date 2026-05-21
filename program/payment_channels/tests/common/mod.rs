@@ -122,20 +122,6 @@ pub fn open_channel(
     (channel, channel_ata)
 }
 
-/// `ComputeBudgetInstruction::SetComputeUnitLimit(u32)` — variant tag 2
-/// followed by the limit as little-endian `u32`. Used as a stand-in for
-/// a non-Ed25519 preceding ix.
-pub fn compute_budget_ix(units: u32) -> Instruction {
-    let mut data = Vec::with_capacity(5);
-    data.push(0x02);
-    data.extend_from_slice(&units.to_le_bytes());
-    Instruction {
-        program_id: pubkey!("ComputeBudget111111111111111111111111111111"),
-        accounts: Vec::new(),
-        data,
-    }
-}
-
 fn program_binary_path() -> String {
     std::env::var("PAYMENT_CHANNELS_SO")
         .unwrap_or_else(|_| "../../target/deploy/payment_channels.so".into())
