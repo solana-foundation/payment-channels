@@ -512,6 +512,10 @@ impl Scenario {
     }
 
     fn send(&mut self, ix: Instruction) -> litesvm::types::TransactionResult {
+        // LiteSVM doesn't auto-advance latest_blockhash, so back-to-back
+        // distribute_ix calls would collide on tx signature. Bump once per
+        // send so callers can loop without thinking about it.
+        self.svm.expire_blockhash();
         let blockhash = self.svm.latest_blockhash();
         let tx = Transaction::new_signed_with_payer(
             &[compute_budget_ix(1_400_000), ix],
@@ -561,6 +565,7 @@ fn happy_path_open_splits() {
 
 #[test]
 fn open_flooring_residual_rejects_without_advancing_paid_out() {
+    // pool=100, splits 2×3333 bps + payee 3334 bps: 33 + 33 + 33 = 99, residual=1
     let splits = vec![
         Split {
             owner: Pubkey::new_unique(),
@@ -591,6 +596,7 @@ fn open_flooring_residual_rejects_without_advancing_paid_out() {
 
 #[test]
 fn open_partial_flooring_residual_rejects_without_partial_payout() {
+    // pool=2, split 9000 bps + payee 1000 bps: 1 + 0 = 1, residual=1
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 9000,
@@ -612,50 +618,60 @@ fn open_partial_flooring_residual_rejects_without_partial_payout() {
 }
 
 #[test]
-fn repeated_open_micro_distributes_carry_residual_to_later_payouts() {
+fn open_pool_one_with_50_50_split_rejects() {
+    // pool=1, split 5000 bps + payee 5000 bps: 0 + 0 = 0, residual=1
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 5000,
     }];
-    const ROUNDS: u64 = 10;
-    let deposit = ROUNDS * 2;
-    let mut s = Scenario::build(splits, deposit, 0, 0, STATUS_OPEN);
+    let deposit = 2;
+    let settled = 1;
+    let paid_out = 0;
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
 
-    for cumulative in 1..=ROUNDS {
-        settle_to(
-            &mut s.svm,
-            &s.fee_payer,
-            &s.channel,
-            &s.authorized_signer,
-            cumulative,
-            0,
-        );
+    expect_custom_err(
+        s.send(s.distribute_ix()),
+        PaymentChannelsError::OpenDistributionWouldLeaveResidual,
+    );
 
-        s.svm.expire_blockhash();
-        let res = s.send(s.distribute_ix());
-        if cumulative % 2 == 0 {
-            res.expect("even micro distribute pays the accumulated 50/50 pool");
-        } else {
-            expect_custom_err(
-                res,
-                PaymentChannelsError::OpenDistributionWouldLeaveResidual,
-            );
-        }
-    }
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.channel_ata), deposit);
+    assert_eq!(read_paid_out(&s.svm, &s.channel), paid_out);
+}
 
-    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), ROUNDS / 2);
-    assert_eq!(token_balance(&s.svm, &s.payee_ata), ROUNDS / 2);
-    assert_eq!(read_paid_out(&s.svm, &s.channel), ROUNDS);
-    assert_eq!(token_balance(&s.svm, &s.channel_ata), deposit - ROUNDS);
+#[test]
+fn open_pool_one_rejected_then_resettle_to_two_succeeds() {
+    // pool=1 rejects; after re-settle pool=2 with 5000/5000 bps splits
+    // exactly into 1 + 1 and the watermark advances to settled.
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5000,
+    }];
+    let deposit = 2;
+    let mut s = Scenario::build(splits, deposit, 1, 0, STATUS_OPEN);
 
-    set_status(&mut s.svm, &s.channel, STATUS_FINALIZED);
-    s.svm.expire_blockhash();
+    expect_custom_err(
+        s.send(s.distribute_ix()),
+        PaymentChannelsError::OpenDistributionWouldLeaveResidual,
+    );
+
+    settle_to(
+        &mut s.svm,
+        &s.fee_payer,
+        &s.channel,
+        &s.authorized_signer,
+        2,
+        0,
+    );
+
     s.send(s.distribute_ix())
-        .expect("finalized zero-pool distribute refunds payer and tombstones");
+        .expect("pool=2 with 50/50 splits exhausts cleanly");
 
-    assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - ROUNDS);
-    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
-    assert_tombstone(&s.svm, &s.channel);
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 1);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 1);
+    assert_eq!(token_balance(&s.svm, &s.channel_ata), 0);
+    assert_eq!(read_paid_out(&s.svm, &s.channel), 2);
 }
 
 #[test]
