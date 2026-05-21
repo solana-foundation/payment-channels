@@ -6,7 +6,7 @@ use pinocchio::{
     AccountView, Address, ProgramResult, Resize,
     cpi::Signer,
     error::ProgramError,
-    sysvars::{Sysvar, clock::Clock, rent::Rent},
+    sysvars::{Sysvar, rent::Rent},
 };
 use pinocchio_token_2022::instructions::CloseAccount;
 
@@ -76,8 +76,8 @@ pub struct DistributeAccounts<'a> {
     /// Always supplied because the accounts schema is fixed; the transfer
     /// call is skipped at the call site when `Σ bps == 10_000`.
     pub payee_token_account: PayeeTokenAccountView<'a>,
-    /// Treasury destination: receives flooring residual when the channel is
-    /// finalized and ready to close.
+    /// Treasury destination: receives the final irreducible residual when the
+    /// channel is finalized and ready to close.
     pub treasury_token_account: TreasuryTokenAccountView<'a>,
     /// Mint bound into the channel and used for every token transfer.
     pub mint: MintAccountView<'a>,
@@ -122,9 +122,11 @@ impl<'a> TryFrom<&'a mut [AccountView]> for DistributeAccounts<'a> {
 
 /// Permissionless crank: verifies the committed preimage and pays
 /// [`settled`](Channel::settled) `−` [`paid_out`](Channel::paid_out) across
-/// recipients + payee's implicit remainder share. From `OPEN`, flooring
-/// residual stays in escrow. From `FINALIZED`, residual is swept to treasury.
-/// On `FINALIZED`, also refunds the payer the unspent
+/// recipients + payee's implicit remainder share. From `OPEN`, floor math that
+/// would leave residual is rejected before payout; a successful crank transfers
+/// the full pool and advances `paid_out` to `settled`. From `FINALIZED`, any
+/// final irreducible floor residual is swept to treasury before close. On
+/// `FINALIZED`, also refunds the payer the unspent
 /// [`deposit`](Channel::deposit) `−` [`settled`](Channel::settled) headroom
 /// (if not already withdrawn), closes the escrow ATA, and tombstones the
 /// Channel PDA in place via discriminator realloc to
@@ -136,10 +138,6 @@ pub fn process(
     args: &DistributeArgs<'_>,
 ) -> ProgramResult {
     let accs = DistributeAccounts::try_from(accounts)?;
-
-    // Load and validate the channel identity before inspecting token accounts.
-    // The channel address is captured first because `ch` borrows its data.
-    let now = Clock::get()?.unix_timestamp;
 
     // Owner / discriminator / version checks.
     let ch = Channel::from_account(&accs.channel)?;
@@ -166,7 +164,7 @@ pub fn process(
     let mut payer_ctx =
         PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)?;
 
-    let mut ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
+    let ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
 
     let salt = ch.salt();
 
@@ -191,13 +189,25 @@ pub fn process(
         .recipient_token_accounts
         .check(args.recipients.entries, &channel_ctx.token_ctx)?;
 
-    // Pool = settled − paid_out.
-    let pool = ch
-        .settled()
-        .checked_sub(ch.paid_out())
+    let payee_bps = args.recipients.payee_bps();
+
+    // Pool = settled − paid_out. OPEN cranks require floor math to transfer
+    // the whole pool, then advance paid_out to settled. FINALIZED cranks may
+    // leave a final floor residual that is swept to treasury before close.
+    let settled = ch.settled();
+    let paid_out = ch.paid_out();
+    let pool = settled
+        .checked_sub(paid_out)
         .ok_or(PaymentChannelsError::DistributePoolOverflow)?;
-    if pool == 0 && status == ChannelStatus::Open {
-        return Err(PaymentChannelsError::NothingToDistribute.into());
+    if status == ChannelStatus::Open {
+        if pool == 0 {
+            return Err(PaymentChannelsError::NothingToDistribute.into());
+        }
+
+        let transferable = floor_pool_total(args.recipients.entries, payee_bps, pool)?;
+        if transferable != pool {
+            return Err(PaymentChannelsError::OpenDistributionWouldLeaveResidual.into());
+        }
     }
 
     // Copy PDA seed bytes before dropping `ch`; signer seeds borrow these
@@ -209,20 +219,12 @@ pub fn process(
     let salt_bytes: [u8; 8] = salt.to_le_bytes();
     let bump_byte: [u8; 1] = [ch.bump];
 
-    // Snapshot accounting fields, then update channel state before any CPI.
-    // Runtime rollback protects these writes if a later transfer or close fails.
+    // Snapshot accounting fields needed after token CPIs. FINALIZED relies on
+    // this payer-withdrawal gate without writing back before tombstoning.
     let deposit = ch.deposit();
-    let settled = ch.settled();
     let payer_withdrawn_at = ch.payer_withdrawn_at();
 
-    if pool > 0 {
-        ch.set_paid_out(settled);
-    }
-    if status == ChannelStatus::Finalized && payer_withdrawn_at == 0 {
-        ch.set_payer_withdrawn_at(now);
-    }
-
-    // Release the data borrow so the tombstone path can close() the Channel.
+    // Release the data borrow before token CPIs and the later state update.
     drop(ch);
 
     let signer_seeds = channel_signer_seeds(
@@ -240,13 +242,19 @@ pub fn process(
         &channel_ctx,
         &payee_token_account,
         args.recipients.entries,
-        args.recipients.payee_bps(),
+        payee_bps,
         pool,
         &signers,
     )?;
 
+    if status == ChannelStatus::Open {
+        let mut ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
+        ch.set_paid_out(settled);
+        drop(ch);
+    }
+
     if status == ChannelStatus::Finalized {
-        // Payer refund branch — one-shot, gated by payer_withdrawn_at.
+        // Payer refund branch — one-shot, gated by snapshotted payer_withdrawn_at.
         if payer_withdrawn_at == 0 && deposit > settled {
             channel_ctx.transfer_checked_signed(
                 &payer_ctx.payer_token_account.as_any(),
@@ -261,9 +269,36 @@ pub fn process(
     Ok(())
 }
 
+/// Returns the total number of tokens that floor-based split math can transfer
+/// out of `pool` to merchant-side accounts.
+fn floor_pool_total(
+    entries: &[DistributionEntry],
+    payee_bps: u32,
+    pool: u64,
+) -> Result<u64, ProgramError> {
+    let mut total: u64 = 0;
+    for entry in entries {
+        total = total
+            .checked_add(floor_bps_share(pool, entry.bps() as u32)?)
+            .expect("invariant: Σ floor(pool · bpsᵢ / 10_000) ≤ pool ≤ u64::MAX");
+    }
+    if payee_bps != 0 {
+        total = total
+            .checked_add(floor_bps_share(pool, payee_bps)?)
+            .expect("invariant: Σ floor shares ≤ pool ≤ u64::MAX");
+    }
+    debug_assert!(
+        total <= pool,
+        "invariant: Σ floor shares can never exceed pool when Σ bps ≤ 10_000",
+    );
+    Ok(total)
+}
+
 /// Transfers the newly settled pool to explicit recipients and the payee's
-/// implicit remainder share. Flooring residual remains in the escrow ATA until
-/// `FINALIZED`, when it is swept to treasury just before close.
+/// implicit remainder share. The helper skips zero-amount token CPIs. OPEN
+/// callers reject before this helper whenever floor math would leave residual,
+/// so a successful OPEN payout exhausts the pool. In FINALIZED, any residual
+/// left after this last floored payout is swept to treasury by the close path.
 ///
 /// All recipient and fixed token accounts have already been validated, so this
 /// helper is only responsible for payout math and signed token CPIs.
@@ -281,32 +316,24 @@ fn transfer_pool(
         return Ok(());
     }
 
-    let mut sum_paid: u64 = 0;
     for (entry, recipient_token_account) in entries.iter().zip(recipients.iter_as_any()) {
         let amount = floor_bps_share(pool, entry.bps() as u32)?;
-        channel_ctx.transfer_checked_signed(&recipient_token_account, amount, signers)?;
-        sum_paid = sum_paid
-            .checked_add(amount)
-            .expect("invariant: Σ floor(pool · bpsᵢ / 10_000) ≤ pool ≤ u64::MAX");
+        if amount > 0 {
+            channel_ctx.transfer_checked_signed(&recipient_token_account, amount, signers)?;
+        }
     }
 
-    let payee_share = if payee_bps != 0 {
-        let share = floor_bps_share(pool, payee_bps)?;
+    if payee_bps != 0 {
+        let payee_floor = floor_bps_share(pool, payee_bps)?;
+        if payee_floor > 0 {
+            channel_ctx.transfer_checked_signed(
+                &payee_token_account.as_any(),
+                payee_floor,
+                signers,
+            )?;
+        }
+    }
 
-        channel_ctx.transfer_checked_signed(&payee_token_account.as_any(), share, signers)?;
-
-        share
-    } else {
-        0
-    };
-
-    let transferred = sum_paid
-        .checked_add(payee_share)
-        .expect("invariant: Σ shares ≤ pool ≤ u64::MAX");
-    debug_assert!(
-        transferred <= pool,
-        "invariant: Σ floor shares can never exceed pool when Σ bps ≤ 10_000",
-    );
     Ok(())
 }
 

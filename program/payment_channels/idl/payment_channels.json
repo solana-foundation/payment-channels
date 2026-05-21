@@ -790,6 +790,12 @@
         "kind": "errorNode",
         "message": "Payer lamports overflow on rent refund",
         "name": "distributePayerBalanceOverflow"
+      },
+      {
+        "code": 2413,
+        "kind": "errorNode",
+        "message": "OPEN distribution would leave flooring residual",
+        "name": "openDistributionWouldLeaveResidual"
       }
     ],
     "events": [],

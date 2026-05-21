@@ -86,9 +86,10 @@ pub struct Channel {
     /// [`Self::deposit`].
     #[cfg_attr(feature = "idl", codama(type = number(u64)))]
     settled: [u8; 8],
-    /// Cumulative tokens already paid out to merchant splits across
-    /// `distribute` calls. Invariant: `paid_out` ≤ [`Self::settled`].
-    /// Lets mid-session `distribute` run without double-paying.
+    /// Cumulative whole tokens transferred to merchant-side splits by
+    /// successful `OPEN` distributions. Invariant: `paid_out` ≤ [`Self::settled`].
+    /// OPEN cranks reject before payout when floor math would leave residual,
+    /// so successful OPEN cranks advance this watermark to [`Self::settled`].
     #[cfg_attr(feature = "idl", codama(type = number(u64)))]
     paid_out: [u8; 8],
     /// Set to `now` by `requestClose` (starts grace) and reset to 0 on

@@ -181,6 +181,9 @@ pub enum PaymentChannelsError {
     /// 2412 - Payer lamports overflow on rent refund
     #[error("Payer lamports overflow on rent refund")]
     DistributePayerBalanceOverflow = 0x96C,
+    /// 2413 - OPEN distribution would leave flooring residual
+    #[error("OPEN distribution would leave flooring residual")]
+    OpenDistributionWouldLeaveResidual = 0x96D,
 }
 
 impl From<PaymentChannelsError> for solana_program_error::ProgramError {

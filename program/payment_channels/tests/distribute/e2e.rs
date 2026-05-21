@@ -560,7 +560,7 @@ fn happy_path_open_splits() {
 }
 
 #[test]
-fn open_flooring_residual_stays_in_channel_ata() {
+fn open_flooring_residual_rejects_without_advancing_paid_out() {
     let splits = vec![
         Split {
             owner: Pubkey::new_unique(),
@@ -576,14 +576,86 @@ fn open_flooring_residual_stays_in_channel_ata() {
     let paid_out = 0;
     let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
 
-    s.send(s.distribute_ix()).expect("distribute ok");
+    expect_custom_err(
+        s.send(s.distribute_ix()),
+        PaymentChannelsError::OpenDistributionWouldLeaveResidual,
+    );
 
-    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 33);
-    assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 33);
-    assert_eq!(token_balance(&s.svm, &s.payee_ata), 33);
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 0);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
-    assert_eq!(token_balance(&s.svm, &s.channel_ata), 101);
-    assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
+    assert_eq!(token_balance(&s.svm, &s.channel_ata), deposit);
+    assert_eq!(read_paid_out(&s.svm, &s.channel), paid_out);
+}
+
+#[test]
+fn open_partial_flooring_residual_rejects_without_partial_payout() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 9000,
+    }];
+    let deposit = 20;
+    let settled = 2;
+    let paid_out = 0;
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+
+    expect_custom_err(
+        s.send(s.distribute_ix()),
+        PaymentChannelsError::OpenDistributionWouldLeaveResidual,
+    );
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.channel_ata), deposit);
+    assert_eq!(read_paid_out(&s.svm, &s.channel), paid_out);
+}
+
+#[test]
+fn repeated_open_micro_distributes_carry_residual_to_later_payouts() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5000,
+    }];
+    const ROUNDS: u64 = 10;
+    let deposit = ROUNDS * 2;
+    let mut s = Scenario::build(splits, deposit, 0, 0, STATUS_OPEN);
+
+    for cumulative in 1..=ROUNDS {
+        settle_to(
+            &mut s.svm,
+            &s.fee_payer,
+            &s.channel,
+            &s.authorized_signer,
+            cumulative,
+            0,
+        );
+
+        s.svm.expire_blockhash();
+        let res = s.send(s.distribute_ix());
+        if cumulative % 2 == 0 {
+            res.expect("even micro distribute pays the accumulated 50/50 pool");
+        } else {
+            expect_custom_err(
+                res,
+                PaymentChannelsError::OpenDistributionWouldLeaveResidual,
+            );
+        }
+    }
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), ROUNDS / 2);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), ROUNDS / 2);
+    assert_eq!(read_paid_out(&s.svm, &s.channel), ROUNDS);
+    assert_eq!(token_balance(&s.svm, &s.channel_ata), deposit - ROUNDS);
+
+    set_status(&mut s.svm, &s.channel, STATUS_FINALIZED);
+    s.svm.expire_blockhash();
+    s.send(s.distribute_ix())
+        .expect("finalized zero-pool distribute refunds payer and tombstones");
+
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - ROUNDS);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
+    assert_tombstone(&s.svm, &s.channel);
 }
 
 #[test]
@@ -751,7 +823,7 @@ fn finalized_zero_pool_still_refunds_and_tombstones() {
 }
 
 #[test]
-fn finalized_sweeps_accumulated_flooring_residual_to_treasury() {
+fn finalized_sweeps_final_flooring_residual_to_treasury() {
     let splits = vec![
         Split {
             owner: Pubkey::new_unique(),

@@ -10,7 +10,7 @@ This ADR specifies the channel lifecycle, instruction set, and on-chain PDA layo
 
 The program implements unidirectional payment channels. Channels are PDAs holding escrowed tokens. Payer-signed off-chain vouchers carry a cumulative amount committed to a `settled` watermark. The split config (a list of `(recipient, bps)` entries with `0 ≤ sum(bps) ≤ 10000`) is passed to `open`. The program stores the 32-byte Blake3 digest in `Channel.distribution_hash`. Splits are recoverable from the `open` instruction data. Token movement occurs at closure via two paths:
 
-- **Happy path (`settleAndFinalize` + `distribute`)**: Merchant commits the final voucher (transitions to `FINALIZED`) and runs `distribute` with the splits preimage. The program verifies the Blake3 hash, pays `settled - paid_out` proportionally across recipients, pays the payee's implicit remainder share, sweeps residual dust to the treasury ATA, refunds `deposit - settled` to the payer, and tombstones the PDA. These instructions SHOULD be bundled.
+- **Happy path (`settleAndFinalize` + `distribute`)**: Merchant commits the final voucher (transitions to `FINALIZED`) and runs `distribute` with the splits preimage. The program verifies the Blake3 hash, pays `settled - paid_out` proportionally across recipients, pays the payee's implicit remainder share, sweeps final irreducible residual dust to the treasury ATA, refunds `deposit - settled` to the payer, and tombstones the PDA. These instructions SHOULD be bundled.
 - **Unhappy path (post-grace permissionless crank)**: If the merchant fails to submit a voucher after `requestClose` starts the grace period, anyone can call `finalize` post-grace to transition to `FINALIZED`. Anyone can then call `distribute` using the publicly recoverable splits preimage. The payer can also pull their refund early during `FINALIZED` via `withdrawPayer`.
 
 Instructions determined by on-chain state are permissionless cranks. Authority is encoded in the channel state, not the signer.
@@ -54,7 +54,7 @@ pub struct Channel {
     pub salt:               u64,      // [  4..12 )  PDA disambiguator; stored so `distribute` / `withdrawPayer` can re-derive seeds and self-sign without off-chain data
     pub deposit:            u64,      // [ 12..20 )  escrow amount (mutated by `topUp`)
     pub settled:            u64,      // [ 20..28 )  cumulative authorized watermark
-    pub paid_out:           u64,      // [ 28..36 )  paid_out ≤ settled
+    pub paid_out:           u64,      // [ 28..36 )  actual merchant transfers; paid_out ≤ settled
     pub closure_started_at: i64,      // [ 36..44 )  unix ts; set by `requestClose`, gates `finalize`
     pub payer_withdrawn_at: i64,      // [ 44..52 )  unix ts; 0 = not yet withdrawn
     pub grace_period:       u32,      // [ 52..56 )  seconds; set at `open`
@@ -144,8 +144,8 @@ Total 48 bytes, stored align-1 (`[u8; 8]` arrays for the two ints). Field order 
 | `requestClose` | `OPEN → CLOSING` | payer signer equals channel `payer`; channel is `OPEN`; sets `closureStartedAt = now` |
 | `settleAndFinalize` | `CLOSING → FINALIZED` | merchant signer equals channel `payee`; `now < closureStartedAt + GRACE`; voucher optional (if present: preceding Ed25519 ix, signer equals `authorized_signer`, voucher fresh†, `settled < voucher.cumulative ≤ deposit`) |
 | `finalize` | `CLOSING → FINALIZED` | channel is `CLOSING`; `now ≥ closureStartedAt + GRACE` |
-| `distribute` | `OPEN → OPEN` | channel is `OPEN`; parsed preimage hash matches `distribution_hash`; recipient account tail length/order matches preimage; `settled > paid_out` |
-| `distribute` | `FINALIZED → CLOSED` | channel is `FINALIZED`; parsed preimage hash matches `distribution_hash`; recipient account tail length/order matches preimage; pays any remaining pool, performs any pending payer refund, sweeps residual, closes escrow, and tombstones the PDA |
+| `distribute` | `OPEN → OPEN` | channel is `OPEN`; parsed preimage hash matches `distribution_hash`; recipient account tail length/order matches preimage; `settled > paid_out`; floor math transfers the full pool with no residual |
+| `distribute` | `FINALIZED → CLOSED` | channel is `FINALIZED`; parsed preimage hash matches `distribution_hash`; recipient account tail length/order matches preimage; pays any remaining merchant pool, performs any pending payer refund, sweeps final irreducible residual dust to treasury, closes escrow, and tombstones the PDA |
 | `withdrawPayer` | `FINALIZED → FINALIZED` | payer signer equals channel `payer`; channel is `FINALIZED`; `payerWithdrawnAt == 0`; mint/escrow/refund ATAs match channel |
 
 † **voucher fresh** = `voucher.expires_at == 0` OR `now < voucher.expires_at`. Expired vouchers MUST be rejected to prevent merchants from settling stale authorizations after the payer's TTL has passed.
@@ -169,7 +169,8 @@ count (u32 LE) || [ recipient (32 bytes) || bps (u16 LE) ] × count
 - `0 ≤ Σ bps[0..count] ≤ 10000` and duplicate-recipient rejection are checked when the preimage is parsed. `distribute` additionally verifies that the submitted preimage's Blake3 digest matches the immutable hash commitment before using the bps values for payout math.
 - Recipient `i` receives `floor((settled - paid_out) * bps[i] / 10000)`.
 - The payee receives the implicit remainder share `floor((settled - paid_out) * (10000 - Σ bps) / 10000)`.
-- During `OPEN`, residual dust from flooring remains in the channel ATA. During `FINALIZED`, residual dust is swept to the treasury ATA before the escrow ATA is closed.
+- During `OPEN`, `distribute` only succeeds when floor math transfers the full `settled - paid_out` pool with no residual. If flooring would leave any residual dust, the instruction rejects with `OpenDistributionWouldLeaveResidual` without moving tokens or advancing `paid_out`, so the pool remains claimable later.
+- During `FINALIZED`, the final floored merchant payout runs once, then unresolved residual dust is swept to the treasury ATA before the escrow ATA is closed.
 - Default `MAX_DISTRIBUTION_RECIPIENTS = 32`. Program-level constant; tunable per deployment.
 
 ## Token Program Support
