@@ -522,44 +522,27 @@ impl Scenario {
         cu_tracker::send_and_record(&mut self.svm, tx)
     }
 
-    /// Versioned-tx path used by the `N = MAX_DISTRIBUTION_RECIPIENTS` (= 32)
-    /// distribute tests. Two things would otherwise break:
-    ///
-    /// 1. **Address Lookup Table is mandatory.** The worst-case `distribute`
-    ///    instruction passes 8 fixed program accounts + 32 recipient ATAs = 40
-    ///    instruction-meta accounts, plus the fee payer and program id; legacy
-    ///    `Message::MAX_ACCOUNT_KEYS` caps a legacy tx at 32 static keys, so
-    ///    the recipient pubkeys must come from an ALT in a v0 message. The
-    ///    pre-warmed ALT lives entirely in LiteSVM (see
-    ///    `crate::common::lookup_table`); we are not testing the ALT lifecycle.
-    ///
-    /// 2. **A `SetComputeUnitLimit(MAX_COMPUTE_UNIT_LIMIT)` prefix is mandatory for the Token-2022 path.**
-    ///    The default per-tx CU cap is 200k. The pure Token-2022 inner work is
-    ///    cheap (~1961 CUs per `TransferChecked`), but pre-transfer program
-    ///    setup (account parsing, validation, distribution-hash recompute,
-    ///    signer-seed derivation) consumes ~138k CUs *before any CPI runs*,
-    ///    and each transfer CPI then costs ~3098 CUs end-to-end (inner work
-    ///    plus per-CPI overhead). For the worst-case FINALIZED Token-2022
-    ///    distribute (32 recipients + payee + payer-refund + sweep + escrow
-    ///    `CloseAccount`) the full chain measures ~236k CUs, so LiteSVM
-    ///    reports "exceeded CUs meter" partway through the transfer chain
-    ///    without the boost. The SPL batched call sites fold many transfers
-    ///    into a single `Batch` CPI and stay under 200k on their own; the
-    ///    helper keeps a uniform prefix across all v0 call sites anyway.
+    /// Versioned-tx path for the N=32 distribute tests. An ALT is always
+    /// installed because the worst-case ix exceeds the 32 static-key legacy
+    /// limit. `compute_unit_limit` is per-call-site: SPL batched paths fit in
+    /// the default 200k cap (`None`); Token-2022 paths overrun it and need
+    /// to increase it to `Some(MAX_COMPUTE_UNIT_LIMIT)`.
     fn send_v0_distribute(
         &mut self,
         recipient_atas_for_alt: Vec<Pubkey>,
+        compute_unit_limit: Option<u32>,
     ) -> litesvm::types::TransactionResult {
         let (_alt_key, alt_account) = crate::common::lookup_table::install_lookup_table(
             &mut self.svm,
             recipient_atas_for_alt,
         );
+        let prefix: Vec<Instruction> = compute_unit_limit
+            .map(|units| vec![ComputeBudgetInstruction::set_compute_unit_limit(units)])
+            .unwrap_or_default();
         let tx = crate::common::lookup_table::build_v0_transaction_with_prefix(
             &self.svm,
             &self.fee_payer,
-            &[ComputeBudgetInstruction::set_compute_unit_limit(
-                MAX_COMPUTE_UNIT_LIMIT,
-            )],
+            &prefix,
             &[self.distribute_ix()],
             &alt_account,
         );
@@ -1292,7 +1275,7 @@ fn happy_path_spl_token_max_recipients_plus_payee() {
         SPL_TOKEN,
     );
 
-    s.send_v0_distribute(s.recipient_atas.clone())
+    s.send_v0_distribute(s.recipient_atas.clone(), None)
         .expect("spl distribute max recipients ok");
 
     assert_eq!(s.recipient_atas.len(), N);
@@ -1338,7 +1321,7 @@ fn happy_path_spl_token_finalized_max_recipients_plus_payee_refund_sweep() {
     let channel_lamports_before = s.svm.get_account(&s.channel).unwrap().lamports;
     let channel_ata_lamports_before = s.svm.get_account(&s.channel_ata).unwrap().lamports;
 
-    s.send_v0_distribute(s.recipient_atas.clone())
+    s.send_v0_distribute(s.recipient_atas.clone(), None)
         .expect("spl finalized max recipients ok");
 
     let expected_per_recipient: u64 = 999;
@@ -1524,7 +1507,8 @@ fn token_2022_max_recipients_plus_payee_finalized() {
     );
 
     let escrow_before = token_balance(&s.svm, &s.channel_ata);
-    s.send_v0_distribute(s.recipient_atas.clone())
+    // Token-2022 FINALIZED at N=32 needs to increase compute budget limit; default CU cap (200k) is too low.
+    s.send_v0_distribute(s.recipient_atas.clone(), Some(MAX_COMPUTE_UNIT_LIMIT))
         .expect("token-2022 max recipients ok");
 
     let expected_per_recipient: u64 = 999;
