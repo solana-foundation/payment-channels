@@ -141,10 +141,11 @@ pub fn process(
     let ch = Channel::from_account(&accs.channel)?;
 
     // Status gate.
-    let status = ChannelStatus::try_from(ch.status)?;
-    if !matches!(status, ChannelStatus::Open | ChannelStatus::Finalized) {
-        return Err(PaymentChannelsError::ChannelNotDistributable.into());
-    }
+    let status = match ChannelStatus::try_from(ch.status)? {
+        ChannelStatus::Open => ChannelStatus::Open,
+        ChannelStatus::Finalized => ChannelStatus::Finalized,
+        ChannelStatus::Closing => return Err(PaymentChannelsError::ChannelNotDistributable.into()),
+    };
 
     // Identity.
     if accs.payer.address() != &ch.payer {
