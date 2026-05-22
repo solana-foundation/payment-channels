@@ -252,6 +252,7 @@ pub fn process(
             sweep_finalized_residual(&channel_ctx, &treasury_token_account, &signers)?;
             tombstone_finalized_channel(&mut channel_ctx, &mut payer_ctx, &signers)?;
         }
+        // Unreachable: status gate already passed
         ChannelStatus::Closing => return Err(PaymentChannelsError::ChannelNotDistributable.into()),
     }
 
