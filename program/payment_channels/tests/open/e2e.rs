@@ -19,7 +19,7 @@ use super::{
 };
 use payment_channels::PaymentChannelsError;
 
-use crate::common::{ProgramLoader, TOKEN_2022, cu_tracker, expect_custom_err};
+use crate::common::{ProgramLoader, TOKEN_2022, cu_tracker, expect_custom_err, token_balance};
 
 const SALT: u64 = 42;
 const DEPOSIT: u64 = 5_000_000;
@@ -155,6 +155,40 @@ fn open_with_no_splits_succeeds() {
 
     let expected: [u8; 32] = blake3::hash(&0u32.to_le_bytes()).into();
     assert_eq!(&channel_data[56..88], &expected, "distribution_hash");
+}
+
+#[test]
+fn zero_grace_period_rejects_before_channel_creation() {
+    let mut svm = LiteSVM::load_program();
+
+    let payee = Pubkey::new_unique();
+    let authorized_signer = Pubkey::new_unique();
+    let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
+    let (channel, channel_token_account) =
+        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
+
+    let ix = open_ix(
+        &payer.pubkey(),
+        &payee,
+        &mint,
+        &authorized_signer,
+        &channel,
+        &payer_token_account,
+        &channel_token_account,
+        SALT,
+        DEPOSIT,
+        0,
+        1,
+    );
+    let msg = Message::new(&[ix], Some(&payer.pubkey()));
+    let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
+    expect_custom_err(
+        cu_tracker::send_and_record(&mut svm, tx),
+        PaymentChannelsError::GracePeriodMustBeNonZero,
+    );
+
+    assert!(svm.get_account(&channel).is_none());
+    assert_eq!(token_balance(&svm, &payer_token_account), DEPOSIT);
 }
 
 #[test]
