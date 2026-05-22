@@ -16,7 +16,7 @@ Quick reference for every instruction exposed by the payment-channels program: d
 | 4 | `settleAndFinalize` | merchant/payee | merchant/payee, optional Ed25519 voucher | `OPEN/CLOSING → FINALIZED` | Optional final settle, then lock the channel for distribution/refund. |
 | 5 | `requestClose` | payer | payer | `OPEN → CLOSING` | Start the grace-period close window. |
 | 6 | `finalize` | permissionless | — | `CLOSING → FINALIZED` | Finalize after the grace period expires. |
-| 7 | `distribute` | permissionless | — | `OPEN → OPEN` or `FINALIZED → CLOSED` | Pay the newly settled pool to recipients/payee; on `FINALIZED`, refund/sweep/close/tombstone. Channel PDA signs token CPIs internally. |
+| 7 | `distribute` | permissionless | — | `OPEN → OPEN` or `FINALIZED → CLOSED` | Pay cumulative floor deltas to recipients/payee; on `FINALIZED`, refund/sweep/close/tombstone. Channel PDA signs token CPIs internally. |
 | 8 | `withdrawPayer` | payer | payer | `FINALIZED → FINALIZED` | One-shot payer refund of `deposit - settled` without tombstoning. Channel PDA signs the refund CPI internally. |
 | 228 | `emitEvent` | program self-CPI | event authority PDA | — | Internal Anchor-compatible event emission target. |
 
@@ -143,7 +143,7 @@ Permissionless post-grace crank.
 
 ## `distribute` (7)
 
-Permissionless crank. Verifies the committed splits preimage (Blake3) against `Channel.distribution_hash`, then pays `pool = settled − paid_out` to the merchant side: each recipient gets `floor(pool * bps[i] / 10000)` and the **payee** gets the implicit remainder `floor(pool * (10000 − Σ bps) / 10000)`. From `OPEN`, the instruction only succeeds when those floored shares add up to the full pool; if flooring would leave any residual dust, it rejects with `OpenDistributionWouldLeaveResidual` without moving tokens or advancing `paid_out`. From `FINALIZED`, the final floored merchant payout runs before the payer receives the unspent `deposit − settled` headroom (gated by `payer_withdrawn_at == 0`); unresolved residual dust is swept to treasury, and the escrow ATA + Channel PDA are tombstoned.
+Permissionless crank. Verifies the committed splits preimage (Blake3) against `Channel.distribution_hash`, then pays cumulative floor deltas between `payout_watermark` and `settled` to the merchant side: each recipient gets `floor(settled * bps[i] / 10000) - floor(payout_watermark * bps[i] / 10000)` and the **payee** gets the implicit remainder delta using `10000 - sum(bps)`. From `OPEN`, zero-delta shares are skipped, residual dust remains in escrow for later cumulative deltas, and `payout_watermark` advances to `settled` as the accounted watermark. From `FINALIZED`, the final cumulative merchant payout runs before the payer receives the unspent `deposit - settled` headroom (gated by `payer_withdrawn_at == 0`); final irreducible residual dust is swept to treasury, and the escrow ATA + Channel PDA are tombstoned.
 
 **Args**
 
@@ -159,7 +159,7 @@ Permissionless crank. Verifies the committed splits preimage (Blake3) against `C
 | 1 | `payer` | — | yes | Payer SOL account. Writable so escrow / PDA rent can flow back on tombstone. |
 | 2 | `channel_token_account` | — | yes | Escrow ATA owned by `channel`. Source for all transfers; closed on tombstone. |
 | 3 | `payer_token_account` | — | yes | `ATA(payer, mint, token_program)`. Used **only** by the FINALIZED refund branch. |
-| 4 | `payee_token_account` | — | yes | `ATA(payee, mint, token_program)`. Receives `floor(pool * (10000 − Σ bps) / 10000)` whenever `pool > 0`. The transfer is skipped when `Σ bps == 10000`; the account is still validated. |
+| 4 | `payee_token_account` | — | yes | `ATA(payee, mint, token_program)`. Receives the cumulative floor delta for the implicit `10000 - sum(bps)` remainder share. The transfer is skipped when the delta is zero; the account is still validated. |
 | 5 | `treasury_token_account` | — | yes | `ATA(TREASURY_OWNER, mint, token_program)`. Receives final irreducible residual dust when `distribute` runs from `FINALIZED`. |
 | 6 | `mint` | — | — | Token mint bound at `open`. |
 | 7 | `token_program` | — | — | SPL Token or Token-2022, must equal the program that owns the mint and ATAs. |
@@ -254,7 +254,7 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | 261 | `InvalidSplitConfig` | Per-entry `bps == 0`, `Σ bps > 10_000`, or a recipient equals the channel PDA. |
 | 262 | `DistributionPartsOverflow` | Overflow while accumulating `Σ bps` (defensive — bounded by 10_000 in practice). |
 | 263 | `DuplicateRecipient` | Distribution preimage contains the same recipient address twice. |
-| 264 | `DistributionAmountOverflow` | Overflow inside `floor_bps_share` when computing a recipient's share. |
+| 264 | `DistributionAmountOverflow` | Overflow inside basis-point share math when computing a recipient's share. |
 | 265 | `DistributionPreimageLengthOverflow` | Overflow when computing the expected preimage length from `count`. |
 
 ### `open` (instruction 1)
@@ -295,9 +295,9 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | 2405 | `InvalidRecipientTokenAccount` | A recipient ATA fails state/owner/mint validation. |
 | 2406 | `InvalidRecipientTokenExtensions` | A recipient ATA carries a Token-2022 extension outside the allow-list. |
 | 2407 | `InvalidDistributionHash` | Blake3 of the revealed preimage does not equal `Channel.distribution_hash`. |
-| 2408 | `NothingToDistribute` | `pool == 0` while channel is `OPEN` (no newly settled funds). |
+| 2408 | `NothingToDistribute` | `settled == payout_watermark` while channel is `OPEN` (no newly settled watermark to account). |
 | 2409 | `RecipientAccountCountMismatch` | Number of recipient ATAs in the account tail does not equal the preimage entry count. |
-| 2410 | `DistributePoolOverflow` | `settled − paid_out` underflowed (defensive — `paid_out ≤ settled` invariant). |
+| 2410 | `DistributePoolOverflow` | `settled - payout_watermark` underflowed (defensive: `payout_watermark <= settled`). |
 | 2411 | `DistributeBalanceCalculationOverflow` | `current_lamports − new_min` underflowed during tombstone rent rebalance. |
 | 2412 | `DistributePayerBalanceOverflow` | Payer lamports `+ delta` would overflow `u64` during tombstone rent refund. |
 

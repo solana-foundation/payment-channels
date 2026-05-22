@@ -78,8 +78,8 @@ fn open_sets_channel_fields() {
     //   3: status             (u8)
     //   4: salt               ([u8;8])
     //  12: deposit            ([u8;8])
-    //  20: settled            ([u8;8])
-    //  28: paid_out           ([u8;8])
+    //  20: settlement.settled          ([u8;8])
+    //  28: settlement.payout_watermark ([u8;8])
     //  36: closure_started_at ([u8;8])
     //  44: payer_withdrawn_at ([u8;8])
     //  52: grace_period       ([u8;4])
@@ -94,8 +94,12 @@ fn open_sets_channel_fields() {
     assert_eq!(channel_data[3], ChannelStatus::Open as u8);
     assert_eq!(read_u64(&channel_data, 4), SALT, "salt");
     assert_eq!(read_u64(&channel_data, 12), DEPOSIT, "deposit");
-    assert_eq!(read_u64(&channel_data, 20), 0, "settled");
-    assert_eq!(read_u64(&channel_data, 28), 0, "paid_out");
+    assert_eq!(read_u64(&channel_data, 20), 0, "settlement.settled");
+    assert_eq!(
+        read_u64(&channel_data, 28),
+        0,
+        "settlement.payout_watermark"
+    );
     assert_eq!(read_i64(&channel_data, 36), 0, "closure_started_at");
     assert_eq!(read_i64(&channel_data, 44), 0, "payer_withdrawn_at");
     assert_eq!(read_u32(&channel_data, 52), GRACE_PERIOD);
@@ -234,8 +238,12 @@ fn open_sets_channel_fields_token_2022() {
     assert_eq!(channel_data[3], ChannelStatus::Open as u8);
     assert_eq!(read_u64(&channel_data, 4), SALT, "salt");
     assert_eq!(read_u64(&channel_data, 12), DEPOSIT, "deposit");
-    assert_eq!(read_u64(&channel_data, 20), 0, "settled");
-    assert_eq!(read_u64(&channel_data, 28), 0, "paid_out");
+    assert_eq!(read_u64(&channel_data, 20), 0, "settlement.settled");
+    assert_eq!(
+        read_u64(&channel_data, 28),
+        0,
+        "settlement.payout_watermark"
+    );
     assert_eq!(read_i64(&channel_data, 36), 0, "closure_started_at");
     assert_eq!(read_i64(&channel_data, 44), 0, "payer_withdrawn_at");
     assert_eq!(read_u32(&channel_data, 52), GRACE_PERIOD);

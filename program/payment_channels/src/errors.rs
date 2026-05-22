@@ -146,6 +146,4 @@ pub enum PaymentChannelsError {
     DistributeBalanceCalculationOverflow = 2411,
     #[error("Payer lamports overflow on rent refund")]
     DistributePayerBalanceOverflow = 2412,
-    #[error("OPEN distribution would leave flooring residual")]
-    OpenDistributionWouldLeaveResidual = 2413,
 }

@@ -15,10 +15,8 @@ use crate::helpers::accounts::view::{
     PayerTokenAccountView, TokenContext, TokenProgramAccountView, TreasuryTokenAccountView,
 };
 use crate::helpers::accounts::view::{PayerAccountView, RecipientTokenAccountsView};
-use crate::instructions::helpers::{
-    DistributionEntry, DistributionPreimage, channel_signer_seeds, floor_bps_share,
-};
-use crate::state::channel::{Channel, ChannelStatus};
+use crate::instructions::helpers::{DistributionEntry, DistributionPreimage, channel_signer_seeds};
+use crate::state::channel::{Channel, ChannelStatus, SettlementWatermarks};
 use crate::state::closed_channel::ClosedChannel;
 use crate::{
     errors::PaymentChannelsError,
@@ -71,10 +69,10 @@ pub struct DistributeAccounts<'a> {
     /// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `== 0` and
     /// `deposit > settled`.
     pub payer_token_account: PayerTokenAccountView<'a>,
-    /// Implicit-remainder destination: receives
-    /// `floor(pool * (10_000 − Σ bps) / 10_000)` whenever `payee_bps > 0`.
-    /// Always supplied because the accounts schema is fixed; the transfer
-    /// call is skipped at the call site when `Σ bps == 10_000`.
+    /// Implicit-remainder destination: receives the cumulative floor delta for
+    /// `10_000 - sum(bps)`. Always supplied because the accounts schema is
+    /// fixed; the transfer call is skipped at the call site when the delta is
+    /// zero.
     pub payee_token_account: PayeeTokenAccountView<'a>,
     /// Treasury destination: receives the final irreducible residual when the
     /// channel is finalized and ready to close.
@@ -120,13 +118,13 @@ impl<'a> TryFrom<&'a mut [AccountView]> for DistributeAccounts<'a> {
     }
 }
 
-/// Permissionless crank: verifies the committed preimage and pays
-/// [`settled`](Channel::settled) `−` [`paid_out`](Channel::paid_out) across
-/// recipients + payee's implicit remainder share. From `OPEN`, floor math that
-/// would leave residual is rejected before payout; a successful crank transfers
-/// the full pool and advances `paid_out` to `settled`. From `FINALIZED`, any
-/// final irreducible floor residual is swept to treasury before close. On
-/// `FINALIZED`, also refunds the payer the unspent
+/// Permissionless crank: verifies the committed preimage and pays cumulative
+/// floor deltas across recipients + payee's implicit remainder share:
+/// `floor(settled * bps / 10_000) - floor(payout_watermark * bps / 10_000)`.
+/// In `OPEN`, residual dust stays in escrow and is automatically carried into
+/// later cumulative deltas; `payout_watermark` advances to `settled` as an
+/// accounted watermark. From `FINALIZED`, any final irreducible floor residual
+/// is swept to treasury before close. On `FINALIZED`, also refunds the payer the unspent
 /// [`deposit`](Channel::deposit) `−` [`settled`](Channel::settled) headroom
 /// (if not already withdrawn), closes the escrow ATA, and tombstones the
 /// Channel PDA in place via discriminator realloc to
@@ -191,24 +189,13 @@ pub fn process(
 
     let payee_bps = args.recipients.payee_bps();
 
-    // Pool = settled − paid_out. OPEN cranks require floor math to transfer
-    // the whole pool, then advance paid_out to settled. FINALIZED cranks may
-    // leave a final floor residual that is swept to treasury before close.
-    let settled = ch.settled();
-    let paid_out = ch.paid_out();
-    let pool = settled
-        .checked_sub(paid_out)
-        .ok_or(PaymentChannelsError::DistributePoolOverflow)?;
-    if status == ChannelStatus::Open {
-        if pool == 0 {
-            return Err(PaymentChannelsError::NothingToDistribute.into());
-        }
-
-        let transferable = floor_pool_total(args.recipients.entries, payee_bps, pool)?;
-        if transferable != pool {
-            return Err(PaymentChannelsError::OpenDistributionWouldLeaveResidual.into());
-        }
+    // SettlementWatermarks owns the invariant between the authorized settled
+    // watermark and the already-accounted payout watermark.
+    let settlement = ch.settlement();
+    if status == ChannelStatus::Open && settlement.is_fully_accounted()? {
+        return Err(PaymentChannelsError::NothingToDistribute.into());
     }
+    let settled = settlement.settled();
 
     // Copy PDA seed bytes before dropping `ch`; signer seeds borrow these
     // arrays and must stay alive for every CPI below.
@@ -243,13 +230,13 @@ pub fn process(
         &payee_token_account,
         args.recipients.entries,
         payee_bps,
-        pool,
+        settlement,
         &signers,
     )?;
 
     if status == ChannelStatus::Open {
         let mut ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
-        ch.set_paid_out(settled);
+        ch.settlement_mut().account_settled();
         drop(ch);
     }
 
@@ -269,36 +256,11 @@ pub fn process(
     Ok(())
 }
 
-/// Returns the total number of tokens that floor-based split math can transfer
-/// out of `pool` to merchant-side accounts.
-fn floor_pool_total(
-    entries: &[DistributionEntry],
-    payee_bps: u32,
-    pool: u64,
-) -> Result<u64, ProgramError> {
-    let mut total: u64 = 0;
-    for entry in entries {
-        total = total
-            .checked_add(floor_bps_share(pool, entry.bps() as u32)?)
-            .expect("invariant: Σ floor(pool · bpsᵢ / 10_000) ≤ pool ≤ u64::MAX");
-    }
-    if payee_bps != 0 {
-        total = total
-            .checked_add(floor_bps_share(pool, payee_bps)?)
-            .expect("invariant: Σ floor shares ≤ pool ≤ u64::MAX");
-    }
-    debug_assert!(
-        total <= pool,
-        "invariant: Σ floor shares can never exceed pool when Σ bps ≤ 10_000",
-    );
-    Ok(total)
-}
-
-/// Transfers the newly settled pool to explicit recipients and the payee's
-/// implicit remainder share. The helper skips zero-amount token CPIs. OPEN
-/// callers reject before this helper whenever floor math would leave residual,
-/// so a successful OPEN payout exhausts the pool. In FINALIZED, any residual
-/// left after this last floored payout is swept to treasury by the close path.
+/// Transfers cumulative floor deltas to explicit recipients and the payee's
+/// implicit remainder share. Residual dust stays in escrow between `OPEN`
+/// distributions and is released automatically when a later cumulative
+/// entitlement crosses the next whole token. In FINALIZED, any remaining final
+/// dust is swept to treasury by the close path.
 ///
 /// All recipient and fixed token accounts have already been validated, so this
 /// helper is only responsible for payout math and signed token CPIs.
@@ -309,22 +271,22 @@ fn transfer_pool(
     payee_token_account: &PayeeTokenAccountView<'_, Checked>,
     entries: &[DistributionEntry],
     payee_bps: u32,
-    pool: u64,
+    settlement: SettlementWatermarks,
     signers: &[Signer<'_, '_>],
 ) -> ProgramResult {
-    if pool == 0 {
+    if settlement.is_fully_accounted()? {
         return Ok(());
     }
 
     for (entry, recipient_token_account) in entries.iter().zip(recipients.iter_as_any()) {
-        let amount = floor_bps_share(pool, entry.bps() as u32)?;
+        let amount = settlement.delta_for_bps(entry.bps() as u32)?;
         if amount > 0 {
             channel_ctx.transfer_checked_signed(&recipient_token_account, amount, signers)?;
         }
     }
 
     if payee_bps != 0 {
-        let payee_floor = floor_bps_share(pool, payee_bps)?;
+        let payee_floor = settlement.delta_for_bps(payee_bps)?;
         if payee_floor > 0 {
             channel_ctx.transfer_checked_signed(
                 &payee_token_account.as_any(),
@@ -399,4 +361,139 @@ fn tombstone_finalized_channel(
     channel_ctx.channel.set_lamports(new_min);
     payer_ctx.payer.set_lamports(new_payer_bal);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate alloc;
+
+    use alloc::{vec, vec::Vec};
+
+    use super::*;
+
+    fn assert_cumulative_deltas_match_single_final_distribution(bps: &[u32], checkpoints: &[u64]) {
+        let mut previous = 0;
+        let mut total_paid = 0u64;
+        let mut paid_by_share = vec![0u64; bps.len()];
+
+        for &current in checkpoints {
+            assert!(current >= previous, "checkpoints must be monotonic");
+            let settlement = SettlementWatermarks::new(current, previous);
+
+            for (index, &share_bps) in bps.iter().enumerate() {
+                let delta = settlement.delta_for_bps(share_bps).unwrap();
+                paid_by_share[index] = paid_by_share[index]
+                    .checked_add(delta)
+                    .expect("cumulative share payout must fit in u64");
+                total_paid = total_paid
+                    .checked_add(delta)
+                    .expect("total cumulative payout must fit in u64");
+            }
+
+            assert!(
+                total_paid <= current,
+                "cumulative payout must never exceed settled"
+            );
+            previous = current;
+        }
+
+        let final_settled = checkpoints.last().copied().unwrap_or(0);
+        let final_settlement = SettlementWatermarks::new(final_settled, 0);
+        let mut single_final_total = 0u64;
+        for (index, &share_bps) in bps.iter().enumerate() {
+            let single_final_share = final_settlement.delta_for_bps(share_bps).unwrap();
+            assert_eq!(paid_by_share[index], single_final_share);
+            single_final_total = single_final_total
+                .checked_add(single_final_share)
+                .expect("single final payout must fit in u64");
+        }
+        assert_eq!(total_paid, single_final_total);
+    }
+
+    #[test]
+    fn cumulative_deltas_telescope_for_repeated_micro_checkpoints() {
+        let checkpoints: Vec<u64> = (1..=10_000).collect();
+
+        assert_cumulative_deltas_match_single_final_distribution(&[5000, 5000], &checkpoints);
+        assert_cumulative_deltas_match_single_final_distribution(&[3333, 3333, 3334], &checkpoints);
+        assert_cumulative_deltas_match_single_final_distribution(&[1, 9999], &checkpoints);
+
+        let mut thirty_two_dust_shares = Vec::with_capacity(33);
+        thirty_two_dust_shares.resize(32, 1);
+        thirty_two_dust_shares.push(9968);
+        assert_cumulative_deltas_match_single_final_distribution(
+            &thirty_two_dust_shares,
+            &checkpoints,
+        );
+
+        assert_cumulative_deltas_match_single_final_distribution(&[10000], &checkpoints);
+    }
+
+    #[test]
+    fn one_bps_share_crosses_whole_token_boundary_at_ten_thousand() {
+        assert_eq!(
+            SettlementWatermarks::new(9_999, 0)
+                .delta_for_bps(1)
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            SettlementWatermarks::new(10_000, 9_999)
+                .delta_for_bps(1)
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            SettlementWatermarks::new(9_999, 0)
+                .delta_for_bps(9_999)
+                .unwrap(),
+            9_998
+        );
+        assert_eq!(
+            SettlementWatermarks::new(10_000, 9_999)
+                .delta_for_bps(9_999)
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn cumulative_deltas_handle_large_u64_settled_values() {
+        assert_cumulative_deltas_match_single_final_distribution(
+            &[3333, 3333, 3334],
+            &[u64::MAX - 10_000, u64::MAX],
+        );
+        assert_cumulative_deltas_match_single_final_distribution(
+            &[1, 9999],
+            &[u64::MAX - 10_000, u64::MAX],
+        );
+    }
+
+    #[test]
+    fn settlement_watermarks_report_accounting_state() {
+        let fully_accounted = SettlementWatermarks::new(10, 10);
+        assert_eq!(fully_accounted.unaccounted().unwrap(), 0);
+        assert!(fully_accounted.is_fully_accounted().unwrap());
+
+        let partly_accounted = SettlementWatermarks::new(10, 9);
+        assert_eq!(partly_accounted.unaccounted().unwrap(), 1);
+        assert!(!partly_accounted.is_fully_accounted().unwrap());
+    }
+
+    #[test]
+    fn settlement_watermarks_reject_payout_watermark_above_settled() {
+        let invalid = SettlementWatermarks::new(9, 10);
+        assert_eq!(
+            invalid.unaccounted(),
+            Err(ProgramError::from(
+                PaymentChannelsError::DistributePoolOverflow
+            ))
+        );
+        assert_eq!(
+            invalid.delta_for_bps(5_000),
+            Err(ProgramError::from(
+                PaymentChannelsError::DistributePoolOverflow
+            ))
+        );
+    }
 }

@@ -62,20 +62,10 @@
             },
             {
               "kind": "structFieldTypeNode",
-              "name": "settled",
+              "name": "settlement",
               "type": {
-                "endian": "le",
-                "format": "u64",
-                "kind": "numberTypeNode"
-              }
-            },
-            {
-              "kind": "structFieldTypeNode",
-              "name": "paidOut",
-              "type": {
-                "endian": "le",
-                "format": "u64",
-                "kind": "numberTypeNode"
+                "kind": "definedTypeLinkNode",
+                "name": "settlementWatermarks"
               }
             },
             {
@@ -421,6 +411,33 @@
               "name": "closing"
             }
           ]
+        }
+      },
+      {
+        "kind": "definedTypeNode",
+        "name": "settlementWatermarks",
+        "type": {
+          "fields": [
+            {
+              "kind": "structFieldTypeNode",
+              "name": "settled",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "payoutWatermark",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            }
+          ],
+          "kind": "structTypeNode"
         }
       },
       {
@@ -790,12 +807,6 @@
         "kind": "errorNode",
         "message": "Payer lamports overflow on rent refund",
         "name": "distributePayerBalanceOverflow"
-      },
-      {
-        "code": 2413,
-        "kind": "errorNode",
-        "message": "OPEN distribution would leave flooring residual",
-        "name": "openDistributionWouldLeaveResidual"
       }
     ],
     "events": [],

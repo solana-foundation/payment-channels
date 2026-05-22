@@ -13,6 +13,7 @@ pub(crate) mod r#open_args;
 pub(crate) mod r#opened;
 pub(crate) mod r#settle_and_finalize_args;
 pub(crate) mod r#settle_args;
+pub(crate) mod r#settlement_watermarks;
 pub(crate) mod r#top_up_args;
 pub(crate) mod r#voucher_args;
 
@@ -24,5 +25,6 @@ pub use self::r#open_args::*;
 pub use self::r#opened::*;
 pub use self::r#settle_and_finalize_args::*;
 pub use self::r#settle_args::*;
+pub use self::r#settlement_watermarks::*;
 pub use self::r#top_up_args::*;
 pub use self::r#voucher_args::*;

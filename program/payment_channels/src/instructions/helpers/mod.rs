@@ -7,9 +7,7 @@ pub mod hash;
 pub mod token;
 pub mod voucher;
 
-pub use distribution::{
-    DistributionEntry, DistributionPreimage, MAX_DISTRIBUTION_RECIPIENTS, floor_bps_share,
-};
+pub use distribution::{DistributionEntry, DistributionPreimage, MAX_DISTRIBUTION_RECIPIENTS};
 
 use crate::state::channel::CHANNEL_SEED;
 use pinocchio::cpi::Seed;

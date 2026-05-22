@@ -1,3 +1,6 @@
+/// Basis-point denominator used for distribution shares.
+pub const BPS_DENOMINATOR: u32 = 10_000;
+
 /// Owner of the treasury ATAs that receive rounding residuals when a channel
 /// is finalized by `distribute`.
 /// TODO Placeholder — **replace before mainnet deploy**. The treasury ATA is derived
