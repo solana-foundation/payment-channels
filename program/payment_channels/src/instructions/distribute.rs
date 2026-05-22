@@ -234,23 +234,24 @@ pub fn process(
         &signers,
     )?;
 
-    if status == ChannelStatus::Open {
-        let mut ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
-        ch.settlement_mut().account_settled();
-        drop(ch);
-    }
-
-    if status == ChannelStatus::Finalized {
-        // Payer refund branch — one-shot, gated by snapshotted payer_withdrawn_at.
-        if payer_withdrawn_at == 0 && deposit > settled {
-            channel_ctx.transfer_checked_signed(
-                &payer_ctx.payer_token_account.as_any(),
-                deposit - settled,
-                &signers,
-            )?;
+    match status {
+        ChannelStatus::Open => {
+            let mut ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
+            ch.settlement_mut().account_settled();
         }
-        sweep_finalized_residual(&channel_ctx, &treasury_token_account, &signers)?;
-        tombstone_finalized_channel(&mut channel_ctx, &mut payer_ctx, &signers)?;
+        ChannelStatus::Finalized => {
+            // Payer refund branch — one-shot, gated by snapshotted payer_withdrawn_at.
+            if payer_withdrawn_at == 0 && deposit > settled {
+                channel_ctx.transfer_checked_signed(
+                    &payer_ctx.payer_token_account.as_any(),
+                    deposit - settled,
+                    &signers,
+                )?;
+            }
+            sweep_finalized_residual(&channel_ctx, &treasury_token_account, &signers)?;
+            tombstone_finalized_channel(&mut channel_ctx, &mut payer_ctx, &signers)?;
+        }
+        ChannelStatus::Closing => return Err(PaymentChannelsError::ChannelNotDistributable.into()),
     }
 
     Ok(())
