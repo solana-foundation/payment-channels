@@ -58,7 +58,7 @@ fn withdraw_transfers_correct_amount() {
     svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
     let payee = Pubkey::new_unique();
-    let authorized_signer = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
     let deposit: u64 = 100_000_000;
     let settled: u64 = 30_000_000;
 
@@ -111,7 +111,7 @@ fn withdraw_zero_refund_stamps_timestamp() {
     svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
     let payee = Pubkey::new_unique();
-    let authorized_signer = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
     let deposit: u64 = 100_000_000;
 
     let mint = CreateMint::new(&mut svm, &payer)

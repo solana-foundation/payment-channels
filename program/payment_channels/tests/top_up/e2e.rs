@@ -75,7 +75,7 @@ fn top_up_increases_deposit() {
     svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
     let payee = Pubkey::new_unique();
-    let authorized_signer = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
     let deposit: u64 = 100_000_000;
     let top_up_amount: u64 = 50_000_000;
 
@@ -235,7 +235,7 @@ fn top_up_wrong_mint_rejects() {
     svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
     let payee = Pubkey::new_unique();
-    let authorized_signer = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
     let deposit: u64 = 100_000_000;
     let top_up_amount: u64 = 50_000_000;
 
@@ -297,7 +297,7 @@ fn top_up_wrong_escrow_rejects() {
     svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
     let payee = Pubkey::new_unique();
-    let authorized_signer = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
     let deposit: u64 = 100_000_000;
     let top_up_amount: u64 = 50_000_000;
 
@@ -393,7 +393,7 @@ fn top_up_increases_deposit_token_2022() {
     svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
     let payee = Pubkey::new_unique();
-    let authorized_signer = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
     let deposit: u64 = 100_000_000;
     let top_up_amount: u64 = 50_000_000;
 
@@ -456,7 +456,7 @@ fn top_up_token_2022_nonzero_decimals_succeeds() {
     svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
     let payee = Pubkey::new_unique();
-    let authorized_signer = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
     let deposit: u64 = 100_000_000;
     let top_up_amount: u64 = 50_000_000;
 
@@ -515,7 +515,7 @@ fn top_up_unsupported_token_2022_mint_extension_rejects_without_state_changes() 
     svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
     let payee = Pubkey::new_unique();
-    let authorized_signer = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
     let deposit: u64 = 100_000_000;
     let top_up_amount: u64 = 50_000_000;
 
@@ -583,7 +583,7 @@ fn top_up_wrong_escrow_rejects_token_2022() {
     svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
     let payee = Pubkey::new_unique();
-    let authorized_signer = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
     let deposit: u64 = 100_000_000;
     let top_up_amount: u64 = 50_000_000;
 

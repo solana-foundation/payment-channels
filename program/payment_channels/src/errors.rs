@@ -104,6 +104,8 @@ pub enum PaymentChannelsError {
     ChannelAddressMismatch = 2000,
     #[error("Payer and payee must be different accounts")]
     PayerPayeeMustDiffer = 2001,
+    #[error("authorized_signer must be a valid Ed25519 public key")]
+    InvalidAuthorizedSigner = 2002,
 
     // ix top_up
     #[error("Deposit must be non-zero")]

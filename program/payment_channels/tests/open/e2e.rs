@@ -6,6 +6,7 @@
 use payment_channels::state::{
     AccountDiscriminator, CURRENT_CHANNEL_VERSION, Channel, ChannelStatus,
 };
+use solana_keypair::Keypair;
 use solana_message::Message;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
@@ -42,7 +43,7 @@ fn open_sets_channel_fields() {
     let mut svm = LiteSVM::load_program();
 
     let payee = Pubkey::new_unique();
-    let authorized_signer = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
     let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
     let (channel, channel_token_account) =
         derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
@@ -123,7 +124,7 @@ fn open_with_no_splits_succeeds() {
     let mut svm = LiteSVM::load_program();
 
     let payee = Pubkey::new_unique();
-    let authorized_signer = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
     let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
     let (channel, channel_token_account) =
         derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
@@ -162,7 +163,7 @@ fn wrong_channel_token_account_rejected() {
     let mut svm = LiteSVM::load_program();
 
     let payee = Pubkey::new_unique();
-    let authorized_signer = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
     let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
     let (channel, _) = derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
     let wrong_channel_ata = Pubkey::new_unique();
@@ -193,7 +194,7 @@ fn open_sets_channel_fields_token_2022() {
     let mut svm = LiteSVM::load_program();
 
     let payee = Pubkey::new_unique();
-    let authorized_signer = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
     let (payer, mint, payer_token_account) =
         setup_funded_svm_with_token_program(&mut svm, DEPOSIT, &TOKEN_2022);
     let (channel, channel_token_account) = derive_pdas_with_token_program(
@@ -259,7 +260,7 @@ fn open_with_no_splits_succeeds_token_2022() {
     let mut svm = LiteSVM::load_program();
 
     let payee = Pubkey::new_unique();
-    let authorized_signer = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
     let (payer, mint, payer_token_account) =
         setup_funded_svm_with_token_program(&mut svm, DEPOSIT, &TOKEN_2022);
     let (channel, channel_token_account) = derive_pdas_with_token_program(

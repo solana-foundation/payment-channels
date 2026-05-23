@@ -11,7 +11,7 @@ Quick reference for every instruction exposed by the payment-channels program: d
 | Disc | Instruction | Caller | Signer | Transition | Purpose |
 |---|---|---|---|---|---|
 | 1 | `open` | payer | payer | `NONEXISTENT → OPEN` | Create the channel PDA, create escrow ATA, transfer the initial deposit, and commit the distribution preimage hash. |
-| 2 | `settle` | permissionless | Ed25519 voucher | `OPEN → OPEN` | Advance the cumulative settled watermark from a payer-signed voucher. |
+| 2 | `settle` | permissionless | Ed25519 voucher | `OPEN → OPEN` | Advance the cumulative settled watermark from an authorized-signer voucher. |
 | 3 | `topUp` | payer | payer | `OPEN → OPEN` | Add escrow and raise the deposit ceiling. |
 | 4 | `settleAndFinalize` | merchant/payee | merchant/payee, optional Ed25519 voucher | `OPEN/CLOSING → FINALIZED` | Optional final settle, then lock the channel for distribution/refund. |
 | 5 | `requestClose` | payer | payer | `OPEN → CLOSING` | Start the grace-period close window. |
@@ -24,7 +24,7 @@ The **Signer** column lists transaction-level signers where applicable; `Ed25519
 
 ## `open` (1)
 
-Payer-signed initializer. Creates the active channel PDA, creates its escrow ATA, transfers `deposit` from the payer token account, stores the exact Blake3 hash of the distribution preimage, and emits `Opened`.
+Payer-signed initializer. Creates the active channel PDA, creates its escrow ATA, transfers `deposit` from the payer token account, stores the exact Blake3 hash of the distribution preimage, and emits `Opened`. The `authorized_signer` account must be a valid Ed25519 public key, but it does not need to sign `open`.
 
 **Args**
 
@@ -50,7 +50,7 @@ salt(u64 LE) || deposit(u64 LE) || grace_period(u32 LE) || count(u32 LE) || entr
 | 0 | `payer` | yes | yes | Funds rent, deposit, and escrow ATA creation. Must own `payer_token_account`. |
 | 1 | `payee` | — | — | Channel payee and implicit-remainder recipient. Bound into PDA seeds and channel state. |
 | 2 | `mint` | — | — | SPL Token or Token-2022 mint for escrow/payouts. |
-| 3 | `authorized_signer` | — | — | Ed25519 voucher signer. Bound into PDA seeds and channel state. |
+| 3 | `authorized_signer` | — | — | Ed25519 voucher signer. Must be a valid Ed25519 public key; bound into PDA seeds and channel state. |
 | 4 | `channel` | — | yes | Channel PDA derived from `[b"channel", payer, payee, mint, authorized_signer, salt]`. |
 | 5 | `payer_token_account` | — | yes | `ATA(payer, mint, token_program)`; source of the initial deposit. |
 | 6 | `channel_token_account` | — | yes | Escrow ATA `ATA(channel, mint, token_program)` created by this instruction. |
@@ -63,7 +63,7 @@ salt(u64 LE) || deposit(u64 LE) || grace_period(u32 LE) || count(u32 LE) || entr
 
 ## `settle` (2)
 
-Permissionless crank. Authority is the payer-signed Ed25519 voucher verified through the previous instruction in the Instructions sysvar.
+Permissionless crank. Authority is the Ed25519 voucher signed by `Channel.authorized_signer` and verified through the previous instruction in the Instructions sysvar.
 
 **Args**
 
@@ -263,6 +263,7 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 |---|---|---|
 | 2000 | `ChannelAddressMismatch` | Provided `channel` account address does not match `find_pda(payer, payee, mint, authorized_signer, salt)`. |
 | 2001 | `PayerPayeeMustDiffer` | `payer` and `payee` accounts are equal. |
+| 2002 | `InvalidAuthorizedSigner` | `authorized_signer` is not a valid Ed25519 public key. |
 
 ### `topUp` (instruction 3)
 

@@ -130,6 +130,9 @@ pub enum PaymentChannelsError {
     /// 2001 - Payer and payee must be different accounts
     #[error("Payer and payee must be different accounts")]
     PayerPayeeMustDiffer = 0x7D1,
+    /// 2002 - authorized_signer must be a valid Ed25519 public key
+    #[error("authorized_signer must be a valid Ed25519 public key")]
+    InvalidAuthorizedSigner = 0x7D2,
     /// 2100 - Deposit must be non-zero
     #[error("Deposit must be non-zero")]
     TopUpDepositOverflow = 0x834,

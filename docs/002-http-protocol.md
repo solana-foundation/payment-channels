@@ -48,8 +48,8 @@ Actors: **C** = client (payer). **S** = server (merchant).
 
 To avoid paying Solana network fees for invalid transactions and to ensure protocol security, the server MUST perform the following validations off-chain before submitting any transactions:
 
-1. **`POST /channel/open` Payload Validation:** The server MUST strictly validate that the `distributionSplits`, `payee`, and `mint` in the payload exactly match what it requested in the `402` challenge. Failing to do so allows a malicious client to alter the distribution to themselves.
-2. **Voucher Validation:** Before accepting a metered request or submitting `settle` or `settleAndFinalize` with a voucher, the server MUST verify the Ed25519 signature over the Borsh-serialized voucher, check that `settled < cumulativeAmount <= deposit`, and ensure the voucher is fresh (`expiresAt` is null or in the future). The same validation applies to any `voucher` carried in `POST /channel/close`.
+1. **`POST /channel/open` Payload Validation:** The server MUST strictly validate that the `distributionSplits`, `payee`, and `mint` in the payload exactly match what it requested in the `402` challenge. It MUST decode the submitted `open` transaction, verify that the `authorized_signer` account equals `payload.authorizedSigner`, reject any `authorizedSigner` that is not a valid Ed25519 public key, and persist the accepted signer with the channel. Failing to do so allows a malicious client to alter consensus-critical channel state.
+2. **Voucher Validation:** Before accepting a metered request or submitting `settle` or `settleAndFinalize` with a voucher, the server MUST verify the Ed25519 signature over the Borsh-serialized voucher, require the voucher `signer` to equal the channel's persisted `authorizedSigner`, check that `settled < cumulativeAmount <= deposit`, and ensure the voucher is fresh (`expiresAt` is null or in the future). The same validation applies to any `voucher` carried in `POST /channel/close`.
 
 **Challenge `request` object** (JCS-canonicalized then base64url-nopad into the `request` auth-param of `WWW-Authenticate: Payment`):
 
@@ -85,10 +85,10 @@ To avoid paying Solana network fees for invalid transactions and to ensure proto
   }
 }
 
-`authorizedSigner` is client-chosen and carried in the open credential's `payload`.
+`authorizedSigner` is client-chosen and carried in the open credential's `payload`, but it is consensus-critical open state. It MUST be a valid Ed25519 public key and is the only key accepted for later vouchers.
 ```
 
-**SignedVoucher** (carried in `payload.voucher` of credentials; the inner `voucher` object is Borsh-serialized and Ed25519-signed by the payer, producing the base58 `signature`):
+**SignedVoucher** (carried in `payload.voucher` of credentials; the inner `voucher` object is Borsh-serialized and Ed25519-signed by `authorizedSigner`, producing the base58 `signature`):
 
 ```json
 {
@@ -97,7 +97,7 @@ To avoid paying Solana network fees for invalid transactions and to ensure proto
     "cumulativeAmount": "<u64 decimal string>",
     "expiresAt": "<RFC 3339 timestamp — OPTIONAL>"
   },
-  "signer": "<payer pubkey base58>",
+  "signer": "<authorizedSigner pubkey base58>",
   "signature": "<base58 Ed25519 sig over Borsh(voucher)>",
   "signatureType": "ed25519"
 }
