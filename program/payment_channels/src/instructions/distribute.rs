@@ -11,9 +11,9 @@ use pinocchio::{
 use pinocchio_token_2022::instructions::CloseAccount;
 
 use crate::helpers::accounts::view::{
-    AnyTokenAccountView, ChannelContext, ChannelTokenAccountView, MintAccountView,
-    PayeeTokenAccountView, PayerContext, PayerTokenAccountView, RedirectableAta, TokenContext,
-    TokenProgramAccountView, TreasuryTokenAccountView,
+    ChannelContext, ChannelTokenAccountView, MintAccountView, PayeeTokenAccountView,
+    PayerTokenAccountView, RedirectableAta, TokenContext, TokenProgramAccountView,
+    TreasuryTokenAccountView,
 };
 use crate::helpers::accounts::view::{PayerAccountView, RecipientTokenAccountsView};
 use crate::instructions::helpers::{
@@ -162,7 +162,7 @@ pub fn process(
 
     let token_ctx = TokenContext::new(accs.mint, accs.token_program)?;
     let mut channel_ctx = ChannelContext::new(accs.channel, accs.channel_token_account, token_ctx)?;
-    let mut payer_ctx = PayerContext::new_wallet(accs.payer, &expected_payer)?;
+    let mut payer = accs.payer.check_wallet(&expected_payer)?;
 
     let mut ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
 
@@ -235,18 +235,6 @@ pub fn process(
     );
     let signers = [Signer::from(&signer_seeds)];
 
-    let escrow_at_entry = if status == ChannelStatus::Finalized {
-        Some(
-            channel_ctx
-                .token_ctx
-                .token_program
-                .amount(&channel_ctx.channel_token_account.as_any())?,
-        )
-    } else {
-        None
-    };
-
-    let mut transferred_out = 0u64;
     transfer_pool(
         &accs.recipient_token_accounts,
         &channel_ctx,
@@ -257,7 +245,6 @@ pub fn process(
         args.recipients.payee_bps(),
         pool,
         &signers,
-        &mut transferred_out,
     )?;
 
     if status == ChannelStatus::Finalized {
@@ -274,44 +261,13 @@ pub fn process(
                 token_account: &accs.payer_token_account,
                 amount: deposit - settled,
             }
-            .transfer_or_redirect(
-                &channel_ctx,
-                &signers,
-                &treasury_token_account,
-                &mut transferred_out,
-            )?;
+            .transfer_or_redirect(&channel_ctx, &signers, &treasury_token_account)?;
         }
-
-        let treasury_sweep = escrow_at_entry
-            .expect("finalized branch snapshots escrow balance")
-            .checked_sub(transferred_out)
-            .ok_or(PaymentChannelsError::DistributeBalanceCalculationOverflow)?;
-        transfer_checked_and_count(
-            &channel_ctx,
-            treasury_token_account.as_any(),
-            treasury_sweep,
-            &signers,
-            &mut transferred_out,
-        )?;
-
-        tombstone_finalized_channel(&mut channel_ctx, &mut payer_ctx.payer, &signers)?;
+        sweep_finalized_residual(&channel_ctx, &treasury_token_account, &signers)?;
+        tombstone_finalized_channel(&mut channel_ctx, &mut payer, &signers)?;
     }
 
     Ok(())
-}
-
-/// Records `amount` in the finalized escrow accounting total, then transfers it.
-fn transfer_checked_and_count(
-    channel_ctx: &ChannelContext<'_>,
-    to: AnyTokenAccountView<'_, Checked>,
-    amount: u64,
-    signers: &[Signer<'_, '_>],
-    transferred_out: &mut u64,
-) -> ProgramResult {
-    *transferred_out = transferred_out
-        .checked_add(amount)
-        .ok_or(PaymentChannelsError::DistributeBalanceCalculationOverflow)?;
-    channel_ctx.transfer_checked_signed(&to, amount, signers)
 }
 
 /// Role-specific beneficiary identity used to map account validation failures.
@@ -361,7 +317,6 @@ impl BeneficiaryPayout<'_> {
         channel_ctx: &ChannelContext<'_>,
         signers: &[Signer<'_, '_>],
         treasury: &TreasuryTokenAccountView<'_, Checked>,
-        transferred_out: &mut u64,
     ) -> ProgramResult {
         let token_ctx = &channel_ctx.token_ctx;
         if self.amount == 0 {
@@ -373,23 +328,11 @@ impl BeneficiaryPayout<'_> {
 
         match token_ctx.validate_redirectable_ata(self.token_account, self.owner) {
             Ok(RedirectableAta::Valid(destination)) => {
-                transfer_checked_and_count(
-                    channel_ctx,
-                    destination,
-                    self.amount,
-                    signers,
-                    transferred_out,
-                )?;
+                channel_ctx.transfer_checked_signed(&destination, self.amount, signers)?;
                 Ok(())
             }
-            Ok(RedirectableAta::RedirectToTreasury { .. }) => {
-                transfer_checked_and_count(
-                    channel_ctx,
-                    treasury.as_any(),
-                    self.amount,
-                    signers,
-                    transferred_out,
-                )?;
+            Ok(RedirectableAta::RedirectToTreasury) => {
+                channel_ctx.transfer_checked_signed(&treasury.as_any(), self.amount, signers)?;
                 Ok(())
             }
             Err(err) => Err(self.map_account_error(err).into()),
@@ -413,7 +356,6 @@ fn transfer_pool(
     payee_bps: u32,
     pool: u64,
     signers: &[Signer<'_, '_>],
-    transferred_out: &mut u64,
 ) -> ProgramResult {
     for (entry, recipient_account) in entries.iter().zip(recipients.iter()) {
         let amount = floor_bps_share(pool, entry.bps() as u32)?;
@@ -423,7 +365,7 @@ fn transfer_pool(
             token_account: recipient_account,
             amount,
         }
-        .transfer_or_redirect(channel_ctx, signers, treasury, transferred_out)?;
+        .transfer_or_redirect(channel_ctx, signers, treasury)?;
     }
 
     let payee_share = if payee_bps != 0 {
@@ -437,8 +379,22 @@ fn transfer_pool(
         token_account: payee_token_account,
         amount: payee_share,
     }
-    .transfer_or_redirect(channel_ctx, signers, treasury, transferred_out)?;
+    .transfer_or_redirect(channel_ctx, signers, treasury)?;
     Ok(())
+}
+
+/// Sweeps all tokens left in the finalized escrow to treasury after recipient
+/// payouts and any payer refund have completed.
+fn sweep_finalized_residual(
+    channel_ctx: &ChannelContext<'_>,
+    treasury_token_account: &TreasuryTokenAccountView<'_, Checked>,
+    signers: &[Signer<'_, '_>],
+) -> ProgramResult {
+    let residual = channel_ctx
+        .token_ctx
+        .token_program
+        .amount(&channel_ctx.channel_token_account.as_any())?;
+    channel_ctx.transfer_checked_signed(&treasury_token_account.as_any(), residual, signers)
 }
 
 /// Closes the finalized channel's escrow token account and tombstones the

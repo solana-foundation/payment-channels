@@ -274,13 +274,6 @@ pub struct TokenContext<'a> {
     pub decimals: u8,
 }
 
-/// Reason a beneficiary ATA was considered redirectable instead of fatal.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RedirectReason {
-    /// Beneficiary ATA is canonical but carries unsupported Token-2022 account extensions.
-    UnsupportedTokenAccountExtension,
-}
-
 /// Result of validating a beneficiary ATA for a payout.
 #[derive(Clone, Copy)]
 pub enum RedirectableAta<'a> {
@@ -290,10 +283,7 @@ pub enum RedirectableAta<'a> {
         AnyTokenAccountView<'a, Checked>,
     ),
     /// Canonical ATA failed only by a redirectable condition.
-    RedirectToTreasury {
-        /// Reason the beneficiary payout should be sent to treasury.
-        reason: RedirectReason,
-    },
+    RedirectToTreasury,
 }
 
 impl<'a> TokenContext<'a> {
@@ -387,9 +377,7 @@ impl<'a> TokenContext<'a> {
             Ok(checked) => Ok(RedirectableAta::Valid(checked)),
             Err(AccountValidationError::TokenExtensionError(
                 TokenExtensionError::UnsupportedTokenExtension,
-            )) => Ok(RedirectableAta::RedirectToTreasury {
-                reason: RedirectReason::UnsupportedTokenAccountExtension,
-            }),
+            )) => Ok(RedirectableAta::RedirectToTreasury),
             Err(err) => Err(err),
         }
     }
@@ -485,49 +473,30 @@ impl<'a> ChannelContext<'a> {
     }
 }
 
-/// Marker trait for the payer validation mode carried by [`PayerContext`].
-pub trait PayerContextMode {}
-
-/// Payer context mode that validates only the payer wallet identity.
-pub struct WalletOnly;
-
-/// Payer context mode that also holds a checked payer token account.
-pub struct WithTokenAccount<'a> {
-    /// Checked canonical payer ATA used for direct payer refunds.
-    pub payer_token_account: PayerTokenAccountView<'a, Checked>,
-}
-
-impl PayerContextMode for WalletOnly {}
-impl<'a> PayerContextMode for WithTokenAccount<'a> {}
-
-pub struct PayerContext<'a, M: PayerContextMode = WithTokenAccount<'a>> {
-    pub payer: PayerAccountView<'a, Checked>,
-    pub mode: M,
-}
-
-impl<'a> PayerContext<'a, WalletOnly> {
-    /// Builds a payer context when only the payer wallet identity is needed.
-    pub fn new_wallet(
-        payer: PayerAccountView<'a, Unchecked>,
+impl<'a> PayerAccountView<'a, Unchecked> {
+    /// Checks the payer wallet identity without validating a payer token account.
+    pub(crate) fn check_wallet(
+        self,
         expected_payer: &Address,
-    ) -> Result<Self, PaymentChannelsError> {
-        if payer.address() != expected_payer {
+    ) -> Result<PayerAccountView<'a, Checked>, PaymentChannelsError> {
+        if self.address() != expected_payer {
             return Err(PaymentChannelsError::InvalidChannelPayer);
         }
 
-        Ok(Self {
-            payer: PayerAccountView {
-                inner: payer.inner,
-                _s: Default::default(),
-            },
-            mode: WalletOnly,
+        Ok(PayerAccountView {
+            inner: self.inner,
+            _s: Default::default(),
         })
     }
 }
 
-impl<'a> PayerContext<'a, WithTokenAccount<'a>> {
-    /// Builds a payer context with a checked payer ATA for direct refunds.
-    pub fn new_with_token(
+pub struct PayerContext<'a> {
+    pub payer: PayerAccountView<'a, Checked>,
+    pub payer_token_account: PayerTokenAccountView<'a, Checked>,
+}
+
+impl<'a> PayerContext<'a> {
+    pub fn new(
         payer: PayerAccountView<'a, Unchecked>,
         payer_token_account: PayerTokenAccountView<'a, Unchecked>,
         token_ctx: &TokenContext<'a>,
@@ -541,17 +510,10 @@ impl<'a> PayerContext<'a, WithTokenAccount<'a>> {
                 inner: payer.inner,
                 _s: Default::default(),
             },
-            mode: WithTokenAccount {
-                payer_token_account: PayerTokenAccountView {
-                    inner: payer_token_account.inner,
-                    _s: Default::default(),
-                },
+            payer_token_account: PayerTokenAccountView {
+                inner: payer_token_account.inner,
+                _s: Default::default(),
             },
         })
-    }
-
-    /// Returns the checked payer ATA carried by this context.
-    pub fn payer_token_account(&self) -> &PayerTokenAccountView<'a, Checked> {
-        &self.mode.payer_token_account
     }
 }

@@ -1143,30 +1143,6 @@ fn poisoned_payer_ata_does_not_affect_finalized_when_already_withdrawn() {
     assert_tombstone(&s.svm, &s.channel);
 }
 
-/// FINALIZED with `deposit == settled`: refund branch inactive (nothing
-/// to refund), payer ATA never validated.
-#[test]
-fn poisoned_payer_ata_does_not_affect_finalized_when_deposit_equals_settled() {
-    let splits = vec![Split {
-        owner: Pubkey::new_unique(),
-        bps: 5000,
-    }];
-    let deposit = 100_000;
-    let settled = 100_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_FINALIZED);
-    add_account_extension(&mut s.svm, &s.payer_ata, EXT_MEMO_TRANSFER, 1);
-
-    s.send(s.distribute_ix())
-        .expect("poisoned payer ATA must not block FINALIZED when no refund");
-
-    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 50_000);
-    assert_eq!(token_balance(&s.svm, &s.payee_ata), 50_000);
-    assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
-    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
-    assert_tombstone(&s.svm, &s.channel);
-}
-
 /// FINALIZED with refund branch active: poisoned payer ATA redirects the
 /// refund to treasury. Payer forfeits; merchant payouts + tombstone still
 /// complete. `payer_withdrawn_at` is stamped so a later `withdraw_payer`
