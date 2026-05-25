@@ -37,7 +37,6 @@ impl<'a, S> Clone for AnyTokenAccountView<'a, S>
 where
     S: State,
 {
-    /// Copies this lightweight wrapper around the same token account view.
     fn clone(&self) -> Self {
         *self
     }
@@ -57,7 +56,6 @@ impl<'a, S> AsRef<AccountView> for AnyTokenAccountView<'a, S>
 where
     S: State,
 {
-    /// Returns the underlying account view without changing validation state.
     fn as_ref(&self) -> &AccountView {
         self.inner
     }
@@ -104,7 +102,6 @@ macro_rules! decl_account_views {
 
     (@token $T:ident) => {
         impl<'a> $T<'a, Checked> {
-            /// Erases the concrete token account role while preserving checked state.
             pub fn as_any(&self) -> AnyTokenAccountView<'_, Checked> {
                 AnyTokenAccountView { inner: self.inner, _s: PhantomData }
             }
@@ -254,9 +251,7 @@ impl<'a> PayeeTokenAccountView<'a, Unchecked> {
 
 // Edge case-specific manual implementations
 
-/// Remaining-account tail containing recipient token accounts in preimage order.
 pub struct RecipientTokenAccountsView<'a> {
-    /// Mutable recipient account slice supplied after the fixed distribute accounts.
     inner: &'a mut [AccountView],
 }
 
@@ -505,11 +500,8 @@ pub struct WithTokenAccount<'a> {
 impl PayerContextMode for WalletOnly {}
 impl<'a> PayerContextMode for WithTokenAccount<'a> {}
 
-/// Validated payer account context, parameterized by token-account availability.
 pub struct PayerContext<'a, M: PayerContextMode = WithTokenAccount<'a>> {
-    /// Checked payer wallet account.
     pub payer: PayerAccountView<'a, Checked>,
-    /// Validation mode carrying additional payer accounts when required.
     pub mode: M,
 }
 

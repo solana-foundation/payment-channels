@@ -57,7 +57,7 @@ impl<'a> DistributeArgs<'a> {
 /// `DistributeArgs::recipients`; clients append them as remaining accounts.
 pub struct DistributeAccounts<'a> {
     /// Channel PDA whose accounting state is advanced and, on FINALIZED,
-    /// tombstoned in place at `AccountDiscriminator::ClosedChannel` after
+    /// tombstoned in place at [`AccountDiscriminator::ClosedChannel`] after
     /// all token movement is complete. The address stays alive forever and
     /// is never recycled, blocking voucher replay against a re-initialized
     /// channel at the same seeds.
@@ -129,7 +129,7 @@ impl<'a> TryFrom<&'a mut [AccountView]> for DistributeAccounts<'a> {
 /// [`deposit`](Channel::deposit) `−` [`settled`](Channel::settled) headroom
 /// (if not already withdrawn), closes the escrow ATA, and tombstones the
 /// Channel PDA in place via discriminator realloc to
-/// [`ClosedChannel`] — refunding the rent delta to the
+/// [`ClosedChannel`](crate::ClosedChannel) — refunding the rent delta to the
 /// payer while keeping the address program-owned forever.
 pub fn process(
     _program_id: &Address,
@@ -443,15 +443,11 @@ fn transfer_pool(
 
 /// Closes the finalized channel's escrow token account and tombstones the
 /// Channel PDA in place: shrinks the data buffer to
-/// [`ClosedChannel::LEN`], writes the `AccountDiscriminator::ClosedChannel`
+/// [`ClosedChannel::LEN`], writes the [`AccountDiscriminator::ClosedChannel`]
 /// payload, and refunds the freed rent delta to the payer. The PDA stays
 /// alive forever — program-owned, non-empty — so the system program rejects
 /// any future `CreateAccount` against the same seeds, blocking voucher
 /// replay against a re-initialized channel.
-///
-/// The payer wallet has already been identity-checked by
-/// `PayerContext<WalletOnly>`. Token-side payer validation was either
-/// performed lazily in the refund branch above or skipped entirely.
 fn tombstone_finalized_channel(
     channel_ctx: &mut ChannelContext<'_>,
     payer: &mut PayerAccountView<'_, Checked>,
