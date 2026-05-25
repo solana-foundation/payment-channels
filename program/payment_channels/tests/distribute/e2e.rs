@@ -982,6 +982,50 @@ fn poisoned_payee_redirects_remainder_to_treasury_in_open() {
 }
 
 #[test]
+fn zero_share_poisoned_payee_does_not_block_recipient_only_open_distribute() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 10_000,
+    }];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let paid_out = 0;
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+    add_account_extension(&mut s.svm, &s.payee_ata, EXT_MEMO_TRANSFER, 1);
+
+    s.send(s.distribute_ix())
+        .expect("zero-share poisoned payee must not block recipient-only distribute");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), settled);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
+    assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
+}
+
+#[test]
+fn zero_share_poisoned_payee_does_not_block_recipient_only_finalized_distribute() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 10_000,
+    }];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let paid_out = 0;
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_FINALIZED);
+    add_account_extension(&mut s.svm, &s.payee_ata, EXT_MEMO_TRANSFER, 1);
+
+    s.send(s.distribute_ix())
+        .expect("zero-share poisoned payee must not block finalized close");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), settled);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
+    assert_tombstone(&s.svm, &s.channel);
+}
+
+#[test]
 fn poisoned_payer_ata_does_not_affect_open_distribute() {
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
