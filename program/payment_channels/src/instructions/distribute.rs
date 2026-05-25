@@ -10,12 +10,15 @@ use pinocchio::{
 };
 use pinocchio_token_2022::instructions::CloseAccount;
 
-use crate::helpers::accounts::view::{
-    ChannelContext, ChannelTokenAccountView, MintAccountView, PayeeTokenAccountView,
-    PayerTokenAccountView, RedirectableAta, TokenContext, TokenProgramAccountView,
-    TreasuryTokenAccountView,
-};
 use crate::helpers::accounts::view::{PayerAccountView, RecipientTokenAccountsView};
+use crate::helpers::accounts::{
+    validation::AccountValidationError,
+    view::{
+        ChannelContext, ChannelTokenAccountView, MintAccountView, PayeeTokenAccountView,
+        PayerTokenAccountView, RedirectableAta, TokenContext, TokenProgramAccountView,
+        TreasuryTokenAccountView,
+    },
+};
 use crate::instructions::helpers::{
     DistributionEntry, DistributionPreimage, channel_signer_seeds, floor_bps_share,
 };
@@ -136,7 +139,7 @@ pub fn process(
     accounts: &mut [AccountView],
     args: &DistributeArgs<'_>,
 ) -> ProgramResult {
-    let accs = DistributeAccounts::try_from(accounts)?;
+    let mut accs = DistributeAccounts::try_from(accounts)?;
 
     // Load and validate the channel identity before inspecting token accounts.
     // The channel address is captured first because `ch` borrows its data.
@@ -152,17 +155,18 @@ pub fn process(
     }
 
     // Identity.
+    if accs.payer.address() != &ch.payer {
+        return Err(PaymentChannelsError::InvalidChannelPayer.into());
+    }
     if accs.mint.address() != &ch.mint {
         return Err(PaymentChannelsError::InvalidChannelMint.into());
     }
-    let expected_payer = Address::new_from_array(*ch.payer.as_array());
 
     // drop initial ch
     drop(ch);
 
     let token_ctx = TokenContext::new(accs.mint, accs.token_program)?;
     let mut channel_ctx = ChannelContext::new(accs.channel, accs.channel_token_account, token_ctx)?;
-    let mut payer = accs.payer.check_wallet(&expected_payer)?;
 
     let mut ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
 
@@ -255,88 +259,95 @@ pub fn process(
         // poisoned at the moment of refund, the refund redirects to
         // treasury (payer forfeits; channel still closes).
         if payer_withdrawn_at == 0 && deposit > settled {
-            BeneficiaryPayout {
-                role: TokenAccountRole::PayerRefund,
-                owner: &payer_owner,
-                token_account: &accs.payer_token_account,
-                amount: deposit - settled,
-            }
-            .transfer_or_redirect(&channel_ctx, &signers, &treasury_token_account)?;
+            transfer_or_redirect(
+                &channel_ctx,
+                &accs.payer_token_account,
+                &payer_owner,
+                deposit - settled,
+                &treasury_token_account,
+                &signers,
+                map_payer_account_error,
+            )?;
         }
         sweep_finalized_residual(&channel_ctx, &treasury_token_account, &signers)?;
-        tombstone_finalized_channel(&mut channel_ctx, &mut payer, &signers)?;
+        tombstone_finalized_channel(&mut channel_ctx, &mut accs.payer, &signers)?;
     }
 
     Ok(())
 }
 
-/// Role-specific beneficiary identity used to map account validation failures.
-#[derive(Clone, Copy)]
-enum TokenAccountRole {
-    /// Explicit distribution recipient from the committed preimage.
-    Recipient,
-    /// Payee receiving the implicit remainder share.
-    Payee,
-    /// Payer receiving the finalized-channel refund.
-    PayerRefund,
+fn map_beneficiary_account_error(
+    err: AccountValidationError,
+    address_mismatch: PaymentChannelsError,
+    invalid_account: PaymentChannelsError,
+    invalid_extensions: PaymentChannelsError,
+) -> PaymentChannelsError {
+    match err {
+        AccountValidationError::AddressMismatch => address_mismatch,
+        AccountValidationError::MalformedTokenAccountData
+        | AccountValidationError::InvalidTokenProgram => invalid_account,
+        AccountValidationError::TokenExtensionError(_) => invalid_extensions,
+    }
 }
 
-/// Pending payout to a beneficiary that may either receive tokens or redirect.
-struct BeneficiaryPayout<'a> {
-    /// Beneficiary role used for role-specific error mapping.
-    role: TokenAccountRole,
-    /// Wallet owner whose canonical ATA is expected.
-    owner: &'a Address,
-    /// Beneficiary token account supplied to the instruction.
-    token_account: &'a AccountView,
-    /// Token amount assigned to this beneficiary.
+fn map_recipient_account_error(err: AccountValidationError) -> PaymentChannelsError {
+    map_beneficiary_account_error(
+        err,
+        PaymentChannelsError::RecipientAccountMismatch,
+        PaymentChannelsError::InvalidRecipientTokenAccount,
+        PaymentChannelsError::InvalidRecipientTokenExtensions,
+    )
+}
+
+fn map_payee_account_error(err: AccountValidationError) -> PaymentChannelsError {
+    map_beneficiary_account_error(
+        err,
+        PaymentChannelsError::PayeeAccountMismatch,
+        PaymentChannelsError::InvalidPayeeTokenAccount,
+        PaymentChannelsError::InvalidPayeeTokenExtensions,
+    )
+}
+
+fn map_payer_account_error(err: AccountValidationError) -> PaymentChannelsError {
+    map_beneficiary_account_error(
+        err,
+        PaymentChannelsError::PayerAccountMismatch,
+        PaymentChannelsError::InvalidPayerTokenAccount,
+        PaymentChannelsError::InvalidPayerTokenExtensions,
+    )
+}
+
+/// Sends a nonzero beneficiary payout to its ATA or redirects unsupported
+/// Token-2022 account extensions to treasury. Zero-amount payouts prove only
+/// the canonical ATA address.
+#[allow(clippy::too_many_arguments)]
+fn transfer_or_redirect(
+    channel_ctx: &ChannelContext<'_>,
+    token_account: &AccountView,
+    owner: &Address,
     amount: u64,
-}
-
-impl BeneficiaryPayout<'_> {
-    /// Converts a validation failure into the public error for this beneficiary role.
-    fn map_account_error(
-        &self,
-        err: crate::helpers::accounts::validation::AccountValidationError,
-    ) -> PaymentChannelsError {
-        match self.role {
-            TokenAccountRole::Recipient => TokenContext::map_recipient_account_error(err),
-            TokenAccountRole::Payee => TokenContext::map_payee_account_error(err),
-            TokenAccountRole::PayerRefund => TokenContext::map_payer_account_error(err),
-        }
+    treasury: &TreasuryTokenAccountView<'_, Checked>,
+    signers: &[Signer<'_, '_>],
+    map_account_error: fn(AccountValidationError) -> PaymentChannelsError,
+) -> ProgramResult {
+    let token_ctx = &channel_ctx.token_ctx;
+    if amount == 0 {
+        token_ctx
+            .validate_ata_address(token_account, owner)
+            .map_err(|err| ProgramError::from(map_account_error(err)))?;
+        return Ok(());
     }
 
-    /// Sends this payout to the beneficiary ATA or redirects it to treasury.
-    ///
-    /// Zero-amount payouts only prove the supplied beneficiary account is the
-    /// expected canonical ATA address; nonzero payouts run full token-account
-    /// validation so unsupported Token-2022 account extensions can redirect
-    /// without weakening malformed-account failures.
-    fn transfer_or_redirect(
-        &self,
-        channel_ctx: &ChannelContext<'_>,
-        signers: &[Signer<'_, '_>],
-        treasury: &TreasuryTokenAccountView<'_, Checked>,
-    ) -> ProgramResult {
-        let token_ctx = &channel_ctx.token_ctx;
-        if self.amount == 0 {
-            token_ctx
-                .validate_ata_address(self.token_account, self.owner)
-                .map_err(|err| ProgramError::from(self.map_account_error(err)))?;
-            return Ok(());
+    match token_ctx.validate_redirectable_ata(token_account, owner) {
+        Ok(RedirectableAta::Valid(destination)) => {
+            channel_ctx.transfer_checked_signed(&destination, amount, signers)?;
+            Ok(())
         }
-
-        match token_ctx.validate_redirectable_ata(self.token_account, self.owner) {
-            Ok(RedirectableAta::Valid(destination)) => {
-                channel_ctx.transfer_checked_signed(&destination, self.amount, signers)?;
-                Ok(())
-            }
-            Ok(RedirectableAta::RedirectToTreasury) => {
-                channel_ctx.transfer_checked_signed(&treasury.as_any(), self.amount, signers)?;
-                Ok(())
-            }
-            Err(err) => Err(self.map_account_error(err).into()),
+        Ok(RedirectableAta::RedirectToTreasury) => {
+            channel_ctx.transfer_checked_signed(&treasury.as_any(), amount, signers)?;
+            Ok(())
         }
+        Err(err) => Err(map_account_error(err).into()),
     }
 }
 
@@ -359,13 +370,15 @@ fn transfer_pool(
 ) -> ProgramResult {
     for (entry, recipient_account) in entries.iter().zip(recipients.iter()) {
         let amount = floor_bps_share(pool, entry.bps() as u32)?;
-        BeneficiaryPayout {
-            role: TokenAccountRole::Recipient,
-            owner: &entry.recipient,
-            token_account: recipient_account,
+        transfer_or_redirect(
+            channel_ctx,
+            recipient_account,
+            &entry.recipient,
             amount,
-        }
-        .transfer_or_redirect(channel_ctx, signers, treasury)?;
+            treasury,
+            signers,
+            map_recipient_account_error,
+        )?;
     }
 
     let payee_share = if payee_bps != 0 {
@@ -373,13 +386,15 @@ fn transfer_pool(
     } else {
         0
     };
-    BeneficiaryPayout {
-        role: TokenAccountRole::Payee,
-        owner: payee_owner,
-        token_account: payee_token_account,
-        amount: payee_share,
-    }
-    .transfer_or_redirect(channel_ctx, signers, treasury)?;
+    transfer_or_redirect(
+        channel_ctx,
+        payee_token_account,
+        payee_owner,
+        payee_share,
+        treasury,
+        signers,
+        map_payee_account_error,
+    )?;
     Ok(())
 }
 
@@ -406,7 +421,7 @@ fn sweep_finalized_residual(
 /// replay against a re-initialized channel.
 fn tombstone_finalized_channel(
     channel_ctx: &mut ChannelContext<'_>,
-    payer: &mut PayerAccountView<'_, Checked>,
+    payer: &mut PayerAccountView<'_>,
     signers: &[Signer<'_, '_>],
 ) -> ProgramResult {
     // Close the escrow SPL account; rent flows to payer SOL account.
