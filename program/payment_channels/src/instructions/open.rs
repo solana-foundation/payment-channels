@@ -225,6 +225,9 @@ pub fn process(
     if deposit == 0 {
         return Err(PaymentChannelsError::DepositMustBeNonZero.into());
     }
+    if args.grace_period() < 1 {
+        return Err(PaymentChannelsError::GracePeriodMustBeNonZero.into());
+    }
 
     if !accs.authorized_signer.address().is_on_curve() {
         return Err(PaymentChannelsError::InvalidAuthorizedSigner.into());
