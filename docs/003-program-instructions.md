@@ -143,7 +143,7 @@ Permissionless post-grace crank.
 
 ## `distribute` (7)
 
-Permissionless crank. Verifies the committed splits preimage (Blake3) against `Channel.distribution_hash`, then pays `pool = settled − paid_out` to the merchant side: each recipient gets `floor(pool * bps[i] / 10000)` and the **payee** gets the implicit remainder `floor(pool * (10000 − Σ bps) / 10000)`. From `OPEN`, flooring residual remains in the channel ATA. From `FINALIZED`, the residual is swept to the treasury ATA, the payer receives the unspent `deposit − settled` headroom (gated by `payer_withdrawn_at == 0`), and the escrow ATA + Channel PDA are tombstoned.
+Permissionless crank. Verifies the committed splits preimage (Blake3) against `Channel.distribution_hash`, then pays `pool = settled − paid_out` to the merchant side: each recipient gets `floor(pool * bps[i] / 10000)` and the **payee** gets the implicit remainder `floor(pool * (10000 − Σ bps) / 10000)`. From `OPEN`, flooring residual remains in the channel ATA. From `FINALIZED`, the residual is swept to the treasury ATA, the payer receives the unspent `deposit − settled` headroom (gated by `payer_withdrawn_at == 0`), and the escrow ATA + Channel PDA are tombstoned. Unsupported Token-2022 account extensions on nonzero beneficiary destinations redirect that share to treasury; malformed token-account data/TLV and wrong accounts hard-fail.
 
 **Args**
 

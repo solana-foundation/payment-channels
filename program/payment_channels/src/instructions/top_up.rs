@@ -119,7 +119,7 @@ pub fn process(
     let token_ctx = TokenContext::new(accs.mint, accs.token_program)?;
     let mut channel_ctx = ChannelContext::new(accs.channel, accs.channel_token_account, token_ctx)?;
     let payer_ctx =
-        PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)?;
+        PayerContext::new_with_token(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)?;
 
     {
         let mut ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
@@ -131,7 +131,7 @@ pub fn process(
     }
 
     TransferChecked {
-        from: &payer_ctx.payer_token_account,
+        from: payer_ctx.payer_token_account(),
         mint: &channel_ctx.token_ctx.mint,
         to: &channel_ctx.channel_token_account,
         authority: &payer_ctx.payer,

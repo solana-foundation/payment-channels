@@ -27,11 +27,12 @@ use super::{
     build_distribute_ix, build_recipients, treasury_owner,
 };
 use crate::common::token_2022::{
-    EXT_CPI_GUARD, EXT_GROUP_MEMBER_POINTER, EXT_GROUP_POINTER, EXT_MEMO_TRANSFER,
-    EXT_METADATA_POINTER, EXT_MINT_CLOSE_AUTHORITY, EXT_TOKEN_GROUP, EXT_TOKEN_GROUP_MEMBER,
-    EXT_TOKEN_METADATA, EXT_TRANSFER_FEE_CONFIG, EXT_TRANSFER_HOOK, POINTER_EXTENSION_LEN,
-    TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN, add_account_extension,
-    add_mint_extension,
+    EXT_CPI_GUARD, EXT_GROUP_MEMBER_POINTER, EXT_GROUP_POINTER, EXT_IMMUTABLE_OWNER,
+    EXT_MEMO_TRANSFER, EXT_METADATA_POINTER, EXT_MINT_CLOSE_AUTHORITY, EXT_TOKEN_GROUP,
+    EXT_TOKEN_GROUP_MEMBER, EXT_TOKEN_METADATA, EXT_TRANSFER_FEE_CONFIG, EXT_TRANSFER_HOOK,
+    POINTER_EXTENSION_LEN, TOKEN_2022_ACCOUNT_TYPE_ACCOUNT, TOKEN_2022_ACCOUNT_TYPE_OFFSET,
+    TOKEN_2022_BASE_ACCOUNT_LEN, TOKEN_2022_TLV_START, TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN,
+    TOKEN_METADATA_MIN_LEN, add_account_extension, add_mint_extension,
 };
 use crate::common::{
     ATA_PROGRAM, INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM,
@@ -47,6 +48,22 @@ fn set_token_balance(svm: &mut LiteSVM, token_account: &Pubkey, amount: u64) {
         .get_account(token_account)
         .expect("token account exists");
     acct.data[64..72].copy_from_slice(&amount.to_le_bytes());
+    svm.set_account(*token_account, acct)
+        .expect("overwrite token account");
+}
+
+fn add_malformed_account_extension(svm: &mut LiteSVM, token_account: &Pubkey) {
+    let mut acct = svm
+        .get_account(token_account)
+        .expect("token account exists");
+    if acct.data.len() < TOKEN_2022_TLV_START {
+        acct.data.resize(TOKEN_2022_TLV_START, 0);
+    }
+    acct.data[TOKEN_2022_BASE_ACCOUNT_LEN..TOKEN_2022_ACCOUNT_TYPE_OFFSET].fill(0);
+    acct.data[TOKEN_2022_ACCOUNT_TYPE_OFFSET] = TOKEN_2022_ACCOUNT_TYPE_ACCOUNT;
+    acct.data.truncate(TOKEN_2022_TLV_START);
+    acct.data
+        .extend_from_slice(&EXT_IMMUTABLE_OWNER.to_le_bytes());
     svm.set_account(*token_account, acct)
         .expect("overwrite token account");
 }
@@ -889,7 +906,195 @@ fn unsupported_token_2022_mint_extensions_reject_without_state_changes() {
 }
 
 #[test]
-fn unsupported_token_2022_account_extensions_reject_without_state_changes() {
+fn malformed_token_2022_account_extension_rejects_without_state_changes() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5000,
+    }];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let paid_out = 0;
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+    let paid_out_before = read_paid_out(&s.svm, &s.channel);
+    add_malformed_account_extension(&mut s.svm, &s.recipient_atas[0]);
+
+    let res = s.send(s.distribute_ix());
+
+    expect_custom_err(res, PaymentChannelsError::InvalidRecipientTokenExtensions);
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
+    assert_eq!(read_paid_out(&s.svm, &s.channel), paid_out_before);
+}
+
+// ===========================================================================
+// Skip-and-redirect: poisoned beneficiary ATAs forfeit their share to
+// treasury rather than reverting the whole crank.
+// Address / mint / owner / token-program / base-data errors still hard-fail.
+
+/// OPEN distribute: a recipient that mutates its canonical ATA to an
+/// unsupported Token-2022 extension state (MemoTransfer / CpiGuard)
+/// forfeits its share to treasury for this crank. Honest recipient + payee
+/// still receive their floored shares. `paid_out` advances to `settled`.
+#[test]
+fn poisoned_recipient_redirects_share_to_treasury_in_open() {
+    for extension_type in [EXT_MEMO_TRANSFER, EXT_CPI_GUARD] {
+        let splits = vec![
+            Split {
+                owner: Pubkey::new_unique(),
+                bps: 3000,
+            },
+            Split {
+                owner: Pubkey::new_unique(),
+                bps: 4000,
+            },
+        ];
+        let deposit = 200_000;
+        let settled = 100_000;
+        let paid_out = 0;
+        let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+        add_account_extension(&mut s.svm, &s.recipient_atas[0], extension_type, 1);
+
+        s.send(s.distribute_ix())
+            .expect("poisoned recipient forfeits, distribute still succeeds");
+
+        // Poisoned recipient share → treasury. Honest recipient + payee paid.
+        assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
+        assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 40_000);
+        assert_eq!(token_balance(&s.svm, &s.payee_ata), 30_000);
+        assert_eq!(token_balance(&s.svm, &s.treasury_ata), 30_000);
+        assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
+        assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
+    }
+}
+
+/// FINALIZED distribute: same skip-redirect, plus tombstone completes.
+/// Forfeited share is already in treasury via the per-recipient redirect;
+/// the residual sweep moves any remaining escrow dust.
+#[test]
+fn poisoned_recipient_redirects_share_to_treasury_in_finalized() {
+    for extension_type in [EXT_MEMO_TRANSFER, EXT_CPI_GUARD] {
+        let splits = vec![
+            Split {
+                owner: Pubkey::new_unique(),
+                bps: 3000,
+            },
+            Split {
+                owner: Pubkey::new_unique(),
+                bps: 4000,
+            },
+        ];
+        let deposit = 200_000;
+        let settled = 100_000;
+        let paid_out = 0;
+        let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_FINALIZED);
+        add_account_extension(&mut s.svm, &s.recipient_atas[0], extension_type, 1);
+
+        s.send(s.distribute_ix())
+            .expect("poisoned recipient forfeits in FINALIZED; tombstone completes");
+
+        assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
+        assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 40_000);
+        assert_eq!(token_balance(&s.svm, &s.payee_ata), 30_000);
+        // Treasury gets the poisoned recipient's 30 000 share.
+        assert_eq!(token_balance(&s.svm, &s.treasury_ata), 30_000);
+        // Payer refund branch active (deposit > settled, payer_withdrawn_at == 0).
+        assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
+        assert_tombstone(&s.svm, &s.channel);
+    }
+}
+
+/// Multiple recipients with poisoned ATAs all redirect to treasury in the
+/// same crank. Verifies the per-recipient skip is independent.
+#[test]
+fn multiple_poisoned_recipients_all_redirect_to_treasury() {
+    let splits = vec![
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 2000,
+        },
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 3000,
+        },
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 4000,
+        },
+    ];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let paid_out = 0;
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+    // Poison recipients [0] and [2]; recipient [1] stays healthy.
+    add_account_extension(&mut s.svm, &s.recipient_atas[0], EXT_MEMO_TRANSFER, 1);
+    add_account_extension(&mut s.svm, &s.recipient_atas[2], EXT_CPI_GUARD, 1);
+
+    s.send(s.distribute_ix()).expect("distribute ok");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 30_000);
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[2]), 0);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 10_000);
+    // Treasury collects both forfeited shares: 20 000 + 40 000.
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 60_000);
+    assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
+}
+
+/// Poisoned payee ATA: the payee's implicit-remainder share redirects to
+/// treasury. Recipients still paid normally.
+#[test]
+fn poisoned_payee_redirects_remainder_to_treasury_in_open() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 6000,
+    }];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let paid_out = 0;
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+    add_account_extension(&mut s.svm, &s.payee_ata, EXT_MEMO_TRANSFER, 1);
+
+    s.send(s.distribute_ix())
+        .expect("poisoned payee forfeits remainder");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 60_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
+    // Payee's 40 % implicit remainder → treasury.
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 40_000);
+    assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
+}
+
+#[test]
+fn poisoned_payee_redirects_remainder_to_treasury_in_finalized() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 6000,
+    }];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let paid_out = 0;
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_FINALIZED);
+    add_account_extension(&mut s.svm, &s.payee_ata, EXT_MEMO_TRANSFER, 1);
+
+    s.send(s.distribute_ix())
+        .expect("poisoned payee forfeits remainder; tombstone completes");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 60_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 40_000);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
+    assert_tombstone(&s.svm, &s.channel);
+}
+
+// ===========================================================================
+// Payer ATA validation is lazy. Payer cannot brick OPEN or no-refund
+// FINALIZED distributions by poisoning their own canonical ATA.
+
+/// OPEN distribute never touches the payer ATA, so a poisoned payer ATA
+/// has no effect on the crank.
+#[test]
+fn poisoned_payer_ata_does_not_affect_open_distribute() {
     for extension_type in [EXT_MEMO_TRANSFER, EXT_CPI_GUARD] {
         let splits = vec![Split {
             owner: Pubkey::new_unique(),
@@ -899,16 +1104,94 @@ fn unsupported_token_2022_account_extensions_reject_without_state_changes() {
         let settled = 100_000;
         let paid_out = 0;
         let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
-        let paid_out_before = read_paid_out(&s.svm, &s.channel);
-        add_account_extension(&mut s.svm, &s.recipient_atas[0], extension_type, 1);
+        add_account_extension(&mut s.svm, &s.payer_ata, extension_type, 1);
 
-        let res = s.send(s.distribute_ix());
+        s.send(s.distribute_ix())
+            .expect("poisoned payer ATA must not block OPEN distribute");
 
-        expect_custom_err(res, PaymentChannelsError::InvalidRecipientTokenExtensions);
-        assert_eq!(read_paid_out(&s.svm, &s.channel), paid_out_before);
-        assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
+        assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 50_000);
+        assert_eq!(token_balance(&s.svm, &s.payee_ata), 50_000);
         assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
+        assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
+        assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
     }
+}
+
+/// FINALIZED with `payer_withdrawn_at != 0`: refund branch inactive,
+/// payer ATA never validated, distribute + tombstone complete.
+#[test]
+fn poisoned_payer_ata_does_not_affect_finalized_when_already_withdrawn() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5000,
+    }];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let paid_out = 0;
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_FINALIZED);
+    set_payer_withdrawn_at(&mut s.svm, &s.channel, 1_700_000_000);
+    set_token_balance(&mut s.svm, &s.channel_ata, settled - paid_out);
+    add_account_extension(&mut s.svm, &s.payer_ata, EXT_MEMO_TRANSFER, 1);
+
+    s.send(s.distribute_ix())
+        .expect("poisoned payer ATA must not block FINALIZED when refund inactive");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 50_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 50_000);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
+    assert_tombstone(&s.svm, &s.channel);
+}
+
+/// FINALIZED with `deposit == settled`: refund branch inactive (nothing
+/// to refund), payer ATA never validated.
+#[test]
+fn poisoned_payer_ata_does_not_affect_finalized_when_deposit_equals_settled() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5000,
+    }];
+    let deposit = 100_000;
+    let settled = 100_000;
+    let paid_out = 0;
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_FINALIZED);
+    add_account_extension(&mut s.svm, &s.payer_ata, EXT_MEMO_TRANSFER, 1);
+
+    s.send(s.distribute_ix())
+        .expect("poisoned payer ATA must not block FINALIZED when no refund");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 50_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 50_000);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
+    assert_tombstone(&s.svm, &s.channel);
+}
+
+/// FINALIZED with refund branch active: poisoned payer ATA redirects the
+/// refund to treasury. Payer forfeits; merchant payouts + tombstone still
+/// complete. `payer_withdrawn_at` is stamped so a later `withdraw_payer`
+/// cannot double-spend.
+#[test]
+fn poisoned_payer_ata_redirects_refund_to_treasury_in_finalized_with_refund() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5000,
+    }];
+    let deposit = 200_000;
+    let settled = 150_000;
+    let paid_out = 0;
+    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_FINALIZED);
+    add_account_extension(&mut s.svm, &s.payer_ata, EXT_MEMO_TRANSFER, 1);
+
+    s.send(s.distribute_ix())
+        .expect("poisoned payer ATA forfeits refund; tombstone completes");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
+    // Payer's refund (deposit - settled = 50 000) → treasury.
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), deposit - settled);
+    assert_tombstone(&s.svm, &s.channel);
 }
 
 #[test]

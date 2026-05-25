@@ -101,7 +101,7 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
     let token_ctx = TokenContext::new(accs.mint, accs.token_program)?;
     let mut channel_ctx = ChannelContext::new(accs.channel, accs.channel_token_account, token_ctx)?;
     let payer_ctx =
-        PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)?;
+        PayerContext::new_with_token(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)?;
 
     // Stamp before CPI — runtime rolls back on failure.
     {
@@ -123,7 +123,7 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
         .checked_sub(settled)
         .ok_or(PaymentChannelsError::RefundCalculationOverflow)?;
     channel_ctx.transfer_checked_signed(
-        &payer_ctx.payer_token_account.as_any(),
+        &payer_ctx.payer_token_account().as_any(),
         refund,
         &signers,
     )?;

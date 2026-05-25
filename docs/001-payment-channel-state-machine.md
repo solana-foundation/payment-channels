@@ -10,7 +10,7 @@ This ADR specifies the channel lifecycle, instruction set, and on-chain PDA layo
 
 The program implements unidirectional payment channels. Channels are PDAs holding escrowed tokens. Payer-signed off-chain vouchers carry a cumulative amount committed to a `settled` watermark. The split config (a list of `(recipient, bps)` entries with `0 ≤ sum(bps) ≤ 10000`) is passed to `open`. The program stores the 32-byte Blake3 digest in `Channel.distribution_hash`. Splits are recoverable from the `open` instruction data. Token movement occurs at closure via two paths:
 
-- **Happy path (`settleAndFinalize` + `distribute`)**: Merchant commits the final voucher (transitions to `FINALIZED`) and runs `distribute` with the splits preimage. The program verifies the Blake3 hash, pays `settled - paid_out` proportionally across recipients, pays the payee's implicit remainder share, sweeps residual dust to the treasury ATA, refunds `deposit - settled` to the payer, and tombstones the PDA. These instructions SHOULD be bundled.
+- **Happy path (`settleAndFinalize` + `distribute`)**: Merchant commits the final voucher (transitions to `FINALIZED`) and runs `distribute` with the splits preimage. The program verifies the Blake3 hash, pays `settled - paid_out` proportionally across recipients, pays the payee's implicit remainder share, sweeps residual dust to the treasury ATA, refunds `deposit - settled` to the payer, and tombstones the PDA. Any beneficiary whose canonical Token-2022 ATA has been mutated to an unsupported extension state (`MemoTransfer`, `CpiGuard`, …) forfeits that crank's share to the treasury ATA so a single poisoned ATA cannot brick payouts to the rest of the channel. These instructions SHOULD be bundled.
 - **Unhappy path (post-grace permissionless crank)**: If the merchant fails to submit a voucher after `requestClose` starts the grace period, anyone can call `finalize` post-grace to transition to `FINALIZED`. Anyone can then call `distribute` using the publicly recoverable splits preimage. The payer can also pull their refund early during `FINALIZED` via `withdrawPayer`.
 
 Instructions determined by on-chain state are permissionless cranks. Authority is encoded in the channel state, not the signer.
@@ -144,8 +144,8 @@ Total 48 bytes, stored align-1 (`[u8; 8]` arrays for the two ints). Field order 
 | `requestClose` | `OPEN → CLOSING` | payer signer equals channel `payer`; channel is `OPEN`; sets `closureStartedAt = now` |
 | `settleAndFinalize` | `CLOSING → FINALIZED` | merchant signer equals channel `payee`; `now < closureStartedAt + GRACE`; voucher optional (if present: preceding Ed25519 ix, signer equals `authorized_signer`, voucher fresh†, `settled < voucher.cumulative ≤ deposit`) |
 | `finalize` | `CLOSING → FINALIZED` | channel is `CLOSING`; `now ≥ closureStartedAt + GRACE` |
-| `distribute` | `OPEN → OPEN` | channel is `OPEN`; parsed preimage hash matches `distribution_hash`; recipient account tail length/order matches preimage; `settled > paid_out` |
-| `distribute` | `FINALIZED → CLOSED` | channel is `FINALIZED`; parsed preimage hash matches `distribution_hash`; recipient account tail length/order matches preimage; pays any remaining pool, performs any pending payer refund, sweeps residual, closes escrow, and tombstones the PDA |
+| `distribute` | `OPEN → OPEN` | channel is `OPEN`; parsed preimage hash matches `distribution_hash`; recipient account tail length/order matches preimage; `settled > paid_out`; any nonzero beneficiary share whose ATA carries an unsupported Token-2022 account extension is redirected to treasury |
+| `distribute` | `FINALIZED → CLOSED` | channel is `FINALIZED`; parsed preimage hash matches `distribution_hash`; recipient account tail length/order matches preimage; pays any remaining pool (unsupported beneficiary account-extension shares redirected to treasury), performs any pending payer refund (unsupported payer account-extension refund redirects to treasury), sweeps residual, closes escrow, and tombstones the PDA |
 | `withdrawPayer` | `FINALIZED → FINALIZED` | payer signer equals channel `payer`; channel is `FINALIZED`; `payerWithdrawnAt == 0`; mint/escrow/refund ATAs match channel |
 
 † **voucher fresh** = `voucher.expires_at == 0` OR `now < voucher.expires_at`. Expired vouchers MUST be rejected to prevent merchants from settling stale authorizations after the payer's TTL has passed.
@@ -170,6 +170,7 @@ count (u32 LE) || [ recipient (32 bytes) || bps (u16 LE) ] × count
 - Recipient `i` receives `floor((settled - paid_out) * bps[i] / 10000)`.
 - The payee receives the implicit remainder share `floor((settled - paid_out) * (10000 - Σ bps) / 10000)`.
 - During `OPEN`, residual dust from flooring remains in the channel ATA. During `FINALIZED`, residual dust is swept to the treasury ATA before the escrow ATA is closed.
+- Per-beneficiary ATAs are validated inline. A nonzero recipient/payee share redirects to treasury only when the canonical Token-2022 ATA has an unsupported account extension. Malformed extension TLV, malformed base account data, uninitialized accounts, wrong mint, wrong owner, wrong address, and invalid token program hard-fail. Zero-amount shares validate only the canonical ATA address and skip token-account data and extension scans. The payer ATA is validated only inside the active FINALIZED refund branch, where the same redirect/hard-fail policy applies.
 - Default `MAX_DISTRIBUTION_RECIPIENTS = 32`. Program-level constant; tunable per deployment.
 
 ## Token Program Support
@@ -183,16 +184,16 @@ program id, so extensionless Token-2022 and classic SPL Token share one path.
 Defensive validation runs before any escrow movement or `paid_out` mutation:
 
 - `open` validates the mint and the payer's source token account. The channel's escrow ATA is created in-band by the ATA program after the address is checked against `find_program_address([channel, token_program, mint], …)`, so it needs no extension scan.
-- `distribute` validates the mint and every token account it touches: the channel escrow, the payer refund ATA, the treasury ATA, and each recipient ATA.
+- `distribute` validates the mint, the channel escrow ATA, and the treasury ATA eagerly. Per-beneficiary ATAs (payee, recipients, and the active payer refund destination) are validated inline at the point of transfer: unsupported Token-2022 account extensions redirect nonzero shares to treasury; malformed TLV and address/owner/mint/program/base-data errors hard-fail.
 - Classic SPL Token mints/accounts must use the base layouts (strict length equality).
 - Token-2022 mints/accounts are parsed with the account-type byte and TLV extension trailer.
 - Token-2022 mint extensions are allowed only for an explicitly enumerated set: `MetadataPointer`, `TokenMetadata`, `GroupPointer`, `TokenGroup`, `GroupMemberPointer`, `TokenGroupMember`. The list is fixed; future extensions, even ones that would not affect transfer semantics, are rejected until added here.
 - Token-2022 token-account extensions are allowed only for base accounts and `ImmutableOwner`.
-- Unknown, malformed, or unsupported extensions are rejected before any token transfer.
+- Unsupported Token-2022 account extensions on lazy beneficiary ATAs are redirected to treasury as described above. Malformed extension TLV always hard-fails. Any extension error on eagerly validated accounts hard-fails before token transfer.
 
 ### Why the allow-list excludes the rest
 
-Each row below would either trap funds, distort the `deposit`/`settled` accounting, add CPI account requirements, or undermine the program's custody guarantee. `open` rejects mints carrying any of these extensions; `distribute` re-validates each runtime token account before transfer. Rejection is by allow-list exclusion (not state inspection) — extension presence alone is disqualifying.
+Each row below would either trap funds, distort the `deposit`/`settled` accounting, add CPI account requirements, or undermine the program's custody guarantee. `open` rejects mints carrying any of these extensions hard. `distribute` re-checks each beneficiary ATA at transfer time: unsupported account extensions redirect that beneficiary's nonzero share to treasury rather than reverting the crank; malformed extension TLV and non-beneficiary extension failures still hard-fail. Rejection / redirect is by allow-list exclusion (not state inspection) — extension presence alone is disqualifying.
 
 | Extension | Reason |
 |---|---|
@@ -205,7 +206,7 @@ Each row below would either trap funds, distort the `deposit`/`settled` accounti
 | `InterestBearing` | User-visible token amount changes over time; exact channel accounting is intentionally base-unit only |
 | `ScaledUiAmountConfig` | Display-vs-raw amount divergence breaks user-visible exact distribution |
 | `Pausable` | Mint-level pause can block escrow release |
-| `CpiGuard` / `MemoTransfer` account extensions | Distribution CPIs do not use delegate flow or memo pre-instructions |
+| `CpiGuard` / `MemoTransfer` account extensions | Distribution CPIs do not use delegate flow or memo pre-instructions; at `distribute` time a beneficiary carrying either extension forfeits that share to treasury rather than blocking the rest of the crank |
 | `MintCloseAuthority` | Mint identity can be closed and recreated while channels reference the address |
 
 ## TBD

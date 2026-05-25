@@ -7,11 +7,19 @@ use crate::helpers::{
     },
 };
 
+/// Account validation failure with enough detail to decide redirectability.
 pub(crate) enum AccountValidationError {
+    /// Account address, token mint, token owner, or initialization state did not match expectations.
     AddressMismatch,
+    /// Token account data could not be parsed as a valid SPL Token account.
     MalformedTokenAccountData,
+    /// Supplied token program is neither SPL Token nor Token-2022.
     InvalidTokenProgram,
-    TokenExtensionError,
+    /// Token-2022 TLV data failed extension policy validation.
+    TokenExtensionError(
+        /// Underlying TLV parser or extension policy failure.
+        TokenExtensionError,
+    ),
 }
 
 pub(crate) trait AccountValidator {
@@ -102,7 +110,8 @@ impl AccountValidator for AccountView {
                 // Token-account base layout already aligns with the AccountType
                 // discriminator offset, so there's no padding to police — go
                 // straight to the whitelisted TLV walk.
-                scan_tlv_extensions::<TokenAccountExtensionPolicy>(&data[tlv::START..])?;
+                scan_tlv_extensions::<TokenAccountExtensionPolicy>(&data[tlv::START..])
+                    .map_err(AccountValidationError::from)?;
             }
         }
 
@@ -111,7 +120,7 @@ impl AccountValidator for AccountView {
 }
 
 impl From<TokenExtensionError> for AccountValidationError {
-    fn from(_value: TokenExtensionError) -> Self {
-        AccountValidationError::TokenExtensionError
+    fn from(value: TokenExtensionError) -> Self {
+        AccountValidationError::TokenExtensionError(value)
     }
 }

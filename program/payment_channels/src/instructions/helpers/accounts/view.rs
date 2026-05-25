@@ -8,7 +8,6 @@ use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer};
 use crate::{
     PaymentChannelsError, TREASURY_OWNER,
     helpers::{
-        DistributionEntry,
         accounts::validation::{AccountValidationError, AccountValidator},
         token::{MintExtensionPolicy, TokenExtensionError, base_layout, scan_tlv_extensions, tlv},
     },
@@ -32,6 +31,17 @@ pub struct AnyTokenAccountView<'a, S: State = Unchecked> {
     _s: PhantomData<S>,
 }
 
+impl<'a, S> Copy for AnyTokenAccountView<'a, S> where S: State {}
+
+impl<'a, S> Clone for AnyTokenAccountView<'a, S>
+where
+    S: State,
+{
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
 impl<'a, S> Deref for AnyTokenAccountView<'a, S>
 where
     S: State,
@@ -42,17 +52,33 @@ where
     }
 }
 
-macro_rules! decl_account_view {
-    ($($T:ident),+ $(,)?) => {$(
+impl<'a, S> AsRef<AccountView> for AnyTokenAccountView<'a, S>
+where
+    S: State,
+{
+    fn as_ref(&self) -> &AccountView {
+        self.inner
+    }
+}
+
+macro_rules! decl_account_views {
+    (
+        token { $($Token:ident),+ $(,)? }
+        account { $($Account:ident),+ $(,)? }
+    ) => {
+        $(
+            decl_account_views!(@base $Token);
+            decl_account_views!(@token $Token);
+        )+
+        $(
+            decl_account_views!(@base $Account);
+        )+
+    };
+
+    (@base $T:ident) => {
         pub struct $T<'a, S: State = Unchecked> {
             inner: &'a mut AccountView,
             _s: PhantomData<S>,
-        }
-
-        impl<'a> $T<'a, Checked> {
-            pub fn as_any(&self) -> AnyTokenAccountView<'_, Checked> {
-                AnyTokenAccountView { inner: self.inner, _s: PhantomData }
-            }
         }
 
         impl<'a> From<&'a mut AccountView> for $T<'a, Unchecked> {
@@ -72,23 +98,102 @@ macro_rules! decl_account_view {
         impl<'a, S> DerefMut for $T<'a, S> where S: State {
             fn deref_mut(&mut self) -> &mut Self::Target { self.inner }
         }
+    };
 
-    )*};
+    (@token $T:ident) => {
+        impl<'a> $T<'a, Checked> {
+            pub fn as_any(&self) -> AnyTokenAccountView<'_, Checked> {
+                AnyTokenAccountView { inner: self.inner, _s: PhantomData }
+            }
+        }
+    };
 }
 
 // General account view definitions
+decl_account_views! {
+    token {
+        ChannelTokenAccountView,
+        PayerTokenAccountView,
+        PayeeTokenAccountView,
+        TreasuryTokenAccountView,
+    }
+    account {
+        ChannelAccountView,
+        PayerAccountView,
+        PayeeAccountView,
+        TokenProgramAccountView,
+        MintAccountView,
+    }
+}
 
-decl_account_view!(
-    ChannelAccountView,
-    ChannelTokenAccountView,
-    PayerAccountView,
-    PayerTokenAccountView,
-    PayeeAccountView,
-    PayeeTokenAccountView,
-    TokenProgramAccountView,
-    MintAccountView,
-    TreasuryTokenAccountView,
-);
+fn channel_token_error_for_account_validation(err: AccountValidationError) -> PaymentChannelsError {
+    match err {
+        AccountValidationError::AddressMismatch => PaymentChannelsError::ChannelAccountMismatch,
+        AccountValidationError::MalformedTokenAccountData
+        | AccountValidationError::InvalidTokenProgram => {
+            PaymentChannelsError::InvalidChannelTokenAccount
+        }
+        AccountValidationError::TokenExtensionError(_) => {
+            PaymentChannelsError::InvalidChannelTokenExtensions
+        }
+    }
+}
+
+fn payer_token_error_for_account_validation(err: AccountValidationError) -> PaymentChannelsError {
+    match err {
+        AccountValidationError::AddressMismatch => PaymentChannelsError::PayerAccountMismatch,
+        AccountValidationError::MalformedTokenAccountData
+        | AccountValidationError::InvalidTokenProgram => {
+            PaymentChannelsError::InvalidPayerTokenAccount
+        }
+        AccountValidationError::TokenExtensionError(_) => {
+            PaymentChannelsError::InvalidPayerTokenExtensions
+        }
+    }
+}
+
+fn payee_token_error_for_account_validation(err: AccountValidationError) -> PaymentChannelsError {
+    match err {
+        AccountValidationError::AddressMismatch => PaymentChannelsError::PayeeAccountMismatch,
+        AccountValidationError::MalformedTokenAccountData
+        | AccountValidationError::InvalidTokenProgram => {
+            PaymentChannelsError::InvalidPayeeTokenAccount
+        }
+        AccountValidationError::TokenExtensionError(_) => {
+            PaymentChannelsError::InvalidPayeeTokenExtensions
+        }
+    }
+}
+
+fn treasury_token_error_for_account_validation(
+    err: AccountValidationError,
+) -> PaymentChannelsError {
+    match err {
+        AccountValidationError::AddressMismatch => PaymentChannelsError::TreasuryAccountMismatch,
+        AccountValidationError::MalformedTokenAccountData
+        | AccountValidationError::InvalidTokenProgram => {
+            PaymentChannelsError::InvalidTreasuryTokenAccount
+        }
+        AccountValidationError::TokenExtensionError(_) => {
+            PaymentChannelsError::InvalidTreasuryTokenExtensions
+        }
+    }
+}
+
+fn recipient_token_error_for_account_validation(
+    err: AccountValidationError,
+) -> PaymentChannelsError {
+    match err {
+        AccountValidationError::AddressMismatch => PaymentChannelsError::RecipientAccountMismatch,
+        AccountValidationError::MalformedTokenAccountData
+        | AccountValidationError::InvalidTokenProgram => {
+            PaymentChannelsError::InvalidRecipientTokenAccount
+        }
+        AccountValidationError::TokenExtensionError(_) => {
+            PaymentChannelsError::InvalidRecipientTokenExtensions
+        }
+    }
+}
 
 impl<'a> TokenProgramAccountView<'a, Checked> {
     pub fn amount(
@@ -118,18 +223,7 @@ impl<'a> TreasuryTokenAccountView<'a, Unchecked> {
     ) -> Result<TreasuryTokenAccountView<'a, Checked>, PaymentChannelsError> {
         self.inner
             .validate_as_ata_checked(&TREASURY_OWNER, token_ctx)
-            .map_err(|err| match err {
-                AccountValidationError::AddressMismatch => {
-                    PaymentChannelsError::TreasuryAccountMismatch
-                }
-                AccountValidationError::MalformedTokenAccountData
-                | AccountValidationError::InvalidTokenProgram => {
-                    PaymentChannelsError::InvalidTreasuryTokenAccount
-                }
-                AccountValidationError::TokenExtensionError => {
-                    PaymentChannelsError::InvalidTreasuryTokenExtensions
-                }
-            })?;
+            .map_err(treasury_token_error_for_account_validation)?;
 
         Ok(TreasuryTokenAccountView {
             inner: self.inner,
@@ -146,18 +240,7 @@ impl<'a> PayeeTokenAccountView<'a, Unchecked> {
     ) -> Result<PayeeTokenAccountView<'a, Checked>, PaymentChannelsError> {
         self.inner
             .validate_as_ata_checked(payee, token_ctx)
-            .map_err(|err| match err {
-                AccountValidationError::AddressMismatch => {
-                    PaymentChannelsError::PayeeAccountMismatch
-                }
-                AccountValidationError::MalformedTokenAccountData
-                | AccountValidationError::InvalidTokenProgram => {
-                    PaymentChannelsError::InvalidPayeeTokenAccount
-                }
-                AccountValidationError::TokenExtensionError => {
-                    PaymentChannelsError::InvalidPayeeTokenExtensions
-                }
-            })?;
+            .map_err(payee_token_error_for_account_validation)?;
 
         Ok(PayeeTokenAccountView {
             inner: self.inner,
@@ -168,63 +251,19 @@ impl<'a> PayeeTokenAccountView<'a, Unchecked> {
 
 // Edge case-specific manual implementations
 
-pub struct RecipientTokenAccountsView<'a, S: State = Unchecked> {
+/// Remaining-account tail containing recipient token accounts in preimage order.
+pub struct RecipientTokenAccountsView<'a> {
+    /// Mutable recipient account slice supplied after the fixed distribute accounts.
     inner: &'a mut [AccountView],
-    _s: PhantomData<S>,
 }
 
-impl<'a> RecipientTokenAccountsView<'a, Unchecked> {
-    pub fn check(
-        self,
-        entries: &[DistributionEntry],
-        token_ctx: &TokenContext<'a>,
-    ) -> Result<RecipientTokenAccountsView<'a, Checked>, PaymentChannelsError> {
-        for (entry, account) in entries.iter().zip(self.inner.iter()) {
-            account
-                .validate_as_ata_checked(&entry.recipient, token_ctx)
-                .map_err(|err| match err {
-                    AccountValidationError::AddressMismatch => {
-                        PaymentChannelsError::RecipientAccountMismatch
-                    }
-                    AccountValidationError::MalformedTokenAccountData
-                    | AccountValidationError::InvalidTokenProgram => {
-                        PaymentChannelsError::InvalidRecipientTokenAccount
-                    }
-                    AccountValidationError::TokenExtensionError => {
-                        PaymentChannelsError::InvalidRecipientTokenExtensions
-                    }
-                })?;
-        }
-
-        Ok(RecipientTokenAccountsView {
-            inner: self.inner,
-            _s: Default::default(),
-        })
-    }
-}
-
-impl<'a> RecipientTokenAccountsView<'a, Checked> {
-    pub fn iter_as_any(&self) -> impl Iterator<Item = AnyTokenAccountView<'_, Checked>> {
-        self.iter().map(|acc| AnyTokenAccountView::<Checked> {
-            inner: acc,
-            _s: Default::default(),
-        })
-    }
-}
-
-impl<'a> From<&'a mut [AccountView]> for RecipientTokenAccountsView<'a, Unchecked> {
+impl<'a> From<&'a mut [AccountView]> for RecipientTokenAccountsView<'a> {
     fn from(value: &'a mut [AccountView]) -> Self {
-        Self {
-            inner: value,
-            _s: Default::default(),
-        }
+        Self { inner: value }
     }
 }
 
-impl<'a, S> Deref for RecipientTokenAccountsView<'a, S>
-where
-    S: State,
-{
+impl<'a> Deref for RecipientTokenAccountsView<'a> {
     type Target = [AccountView];
     fn deref(&self) -> &Self::Target {
         self.inner
@@ -235,6 +274,28 @@ pub struct TokenContext<'a> {
     pub mint: MintAccountView<'a, Checked>,
     pub token_program: TokenProgramAccountView<'a, Checked>,
     pub decimals: u8,
+}
+
+/// Reason a beneficiary ATA was considered redirectable instead of fatal.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RedirectReason {
+    /// Beneficiary ATA is canonical but carries unsupported Token-2022 account extensions.
+    UnsupportedTokenAccountExtension,
+}
+
+/// Result of validating a beneficiary ATA for a payout.
+#[derive(Clone, Copy)]
+pub enum RedirectableAta<'a> {
+    /// Canonical ATA passed full validation and can receive the transfer.
+    Valid(
+        /// Checked token account view for the beneficiary destination.
+        AnyTokenAccountView<'a, Checked>,
+    ),
+    /// Canonical ATA failed only by a redirectable condition.
+    RedirectToTreasury {
+        /// Reason the beneficiary payout should be sent to treasury.
+        reason: RedirectReason,
+    },
 }
 
 impl<'a> TokenContext<'a> {
@@ -295,6 +356,54 @@ impl<'a> TokenContext<'a> {
             decimals,
         })
     }
+
+    pub(crate) fn validate_ata_address(
+        &self,
+        account: &AccountView,
+        owner: &Address,
+    ) -> Result<(), AccountValidationError> {
+        account.validate_as_ata_unchecked(owner, self.token_program.address(), self.mint.address())
+    }
+
+    pub(crate) fn validate_ata_checked<'b>(
+        &self,
+        account: &'b AccountView,
+        owner: &Address,
+    ) -> Result<AnyTokenAccountView<'b, Checked>, AccountValidationError> {
+        account.validate_as_ata_checked(owner, self)?;
+        Ok(AnyTokenAccountView {
+            inner: account,
+            _s: PhantomData,
+        })
+    }
+
+    pub(crate) fn validate_redirectable_ata<'b>(
+        &self,
+        account: &'b AccountView,
+        owner: &Address,
+    ) -> Result<RedirectableAta<'b>, AccountValidationError> {
+        match self.validate_ata_checked(account, owner) {
+            Ok(checked) => Ok(RedirectableAta::Valid(checked)),
+            Err(AccountValidationError::TokenExtensionError(
+                TokenExtensionError::UnsupportedTokenExtension,
+            )) => Ok(RedirectableAta::RedirectToTreasury {
+                reason: RedirectReason::UnsupportedTokenAccountExtension,
+            }),
+            Err(err) => Err(err),
+        }
+    }
+
+    pub(crate) fn map_payer_account_error(err: AccountValidationError) -> PaymentChannelsError {
+        payer_token_error_for_account_validation(err)
+    }
+
+    pub(crate) fn map_payee_account_error(err: AccountValidationError) -> PaymentChannelsError {
+        payee_token_error_for_account_validation(err)
+    }
+
+    pub(crate) fn map_recipient_account_error(err: AccountValidationError) -> PaymentChannelsError {
+        recipient_token_error_for_account_validation(err)
+    }
 }
 
 pub struct ChannelContext<'a> {
@@ -311,18 +420,7 @@ impl<'a> ChannelContext<'a> {
     ) -> Result<Self, PaymentChannelsError> {
         channel_token_account
             .validate_as_ata_checked(channel.address(), &token_ctx)
-            .map_err(|err| match err {
-                AccountValidationError::AddressMismatch => {
-                    PaymentChannelsError::ChannelAccountMismatch
-                }
-                AccountValidationError::MalformedTokenAccountData
-                | AccountValidationError::InvalidTokenProgram => {
-                    PaymentChannelsError::InvalidChannelTokenAccount
-                }
-                AccountValidationError::TokenExtensionError => {
-                    PaymentChannelsError::InvalidChannelTokenExtensions
-                }
-            })?;
+            .map_err(channel_token_error_for_account_validation)?;
 
         Ok(Self {
             channel,
@@ -383,41 +481,73 @@ impl<'a> ChannelContext<'a> {
     }
 }
 
-pub struct PayerContext<'a> {
-    pub payer: PayerAccountView<'a, Checked>,
+/// Marker trait for the payer validation mode carried by [`PayerContext`].
+pub trait PayerContextMode {}
+
+/// Payer context mode that validates only the payer wallet identity.
+pub struct WalletOnly;
+
+/// Payer context mode that also holds a checked payer token account.
+pub struct WithTokenAccount<'a> {
+    /// Checked canonical payer ATA used for direct payer refunds.
     pub payer_token_account: PayerTokenAccountView<'a, Checked>,
 }
 
-impl<'a> PayerContext<'a> {
-    pub fn new(
+impl PayerContextMode for WalletOnly {}
+impl<'a> PayerContextMode for WithTokenAccount<'a> {}
+
+/// Validated payer account context, parameterized by token-account availability.
+pub struct PayerContext<'a, M: PayerContextMode = WithTokenAccount<'a>> {
+    /// Checked payer wallet account.
+    pub payer: PayerAccountView<'a, Checked>,
+    /// Validation mode carrying additional payer accounts when required.
+    pub mode: M,
+}
+
+impl<'a> PayerContext<'a, WalletOnly> {
+    pub fn new_wallet(
         payer: PayerAccountView<'a, Unchecked>,
-        payer_token_account: PayerTokenAccountView<'a, Unchecked>,
-        token_ctx: &TokenContext<'a>,
+        expected_payer: &Address,
     ) -> Result<Self, PaymentChannelsError> {
-        payer_token_account
-            .validate_as_ata_checked(payer.address(), token_ctx)
-            .map_err(|err| match err {
-                AccountValidationError::AddressMismatch => {
-                    PaymentChannelsError::PayerAccountMismatch
-                }
-                AccountValidationError::MalformedTokenAccountData
-                | AccountValidationError::InvalidTokenProgram => {
-                    PaymentChannelsError::InvalidPayerTokenAccount
-                }
-                AccountValidationError::TokenExtensionError => {
-                    PaymentChannelsError::InvalidPayerTokenExtensions
-                }
-            })?;
+        if payer.address() != expected_payer {
+            return Err(PaymentChannelsError::InvalidChannelPayer);
+        }
 
         Ok(Self {
             payer: PayerAccountView {
                 inner: payer.inner,
                 _s: Default::default(),
             },
-            payer_token_account: PayerTokenAccountView {
-                inner: payer_token_account.inner,
+            mode: WalletOnly,
+        })
+    }
+}
+
+impl<'a> PayerContext<'a, WithTokenAccount<'a>> {
+    pub fn new_with_token(
+        payer: PayerAccountView<'a, Unchecked>,
+        payer_token_account: PayerTokenAccountView<'a, Unchecked>,
+        token_ctx: &TokenContext<'a>,
+    ) -> Result<Self, PaymentChannelsError> {
+        payer_token_account
+            .validate_as_ata_checked(payer.address(), token_ctx)
+            .map_err(payer_token_error_for_account_validation)?;
+
+        Ok(Self {
+            payer: PayerAccountView {
+                inner: payer.inner,
                 _s: Default::default(),
             },
+            mode: WithTokenAccount {
+                payer_token_account: PayerTokenAccountView {
+                    inner: payer_token_account.inner,
+                    _s: Default::default(),
+                },
+            },
         })
+    }
+
+    pub fn payer_token_account(&self) -> &PayerTokenAccountView<'a, Checked> {
+        &self.mode.payer_token_account
     }
 }

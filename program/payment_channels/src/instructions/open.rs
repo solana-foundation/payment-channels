@@ -255,7 +255,7 @@ pub fn process(
     let mut channel_ctx =
         ChannelContext::new_uninit(accs.channel, accs.channel_token_account, token_ctx)?;
     let payer_ctx =
-        PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)?;
+        PayerContext::new_with_token(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)?;
 
     // Allocate the channel PDA. The runtime verifies the seeds match
     // accs.channel.address(); mismatched account → CPI failure.
@@ -293,7 +293,7 @@ pub fn process(
 
     // Transfer the deposit from payer to escrow.
     TransferChecked {
-        from: &payer_ctx.payer_token_account,
+        from: payer_ctx.payer_token_account(),
         mint: &channel_ctx.token_ctx.mint,
         to: &channel_ctx.channel_token_account,
         authority: &payer_ctx.payer,
