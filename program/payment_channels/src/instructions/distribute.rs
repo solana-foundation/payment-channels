@@ -300,6 +300,7 @@ pub fn process(
     Ok(())
 }
 
+/// Records `amount` in the finalized escrow accounting total, then transfers it.
 fn transfer_checked_and_count(
     channel_ctx: &ChannelContext<'_>,
     to: AnyTokenAccountView<'_, Checked>,
@@ -337,6 +338,7 @@ struct BeneficiaryPayout<'a> {
 }
 
 impl BeneficiaryPayout<'_> {
+    /// Converts a validation failure into the public error for this beneficiary role.
     fn map_account_error(
         &self,
         err: crate::helpers::accounts::validation::AccountValidationError,
@@ -348,6 +350,12 @@ impl BeneficiaryPayout<'_> {
         }
     }
 
+    /// Sends this payout to the beneficiary ATA or redirects it to treasury.
+    ///
+    /// Zero-amount payouts only prove the supplied beneficiary account is the
+    /// expected canonical ATA address; nonzero payouts run full token-account
+    /// validation so unsupported Token-2022 account extensions can redirect
+    /// without weakening malformed-account failures.
     fn transfer_or_redirect(
         &self,
         channel_ctx: &ChannelContext<'_>,

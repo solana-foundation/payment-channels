@@ -120,6 +120,7 @@ impl AccountValidator for AccountView {
 }
 
 impl From<TokenExtensionError> for AccountValidationError {
+    /// Preserves the underlying Token-2022 extension failure for redirect decisions.
     fn from(value: TokenExtensionError) -> Self {
         AccountValidationError::TokenExtensionError(value)
     }

@@ -37,6 +37,7 @@ impl<'a, S> Clone for AnyTokenAccountView<'a, S>
 where
     S: State,
 {
+    /// Copies this lightweight wrapper around the same token account view.
     fn clone(&self) -> Self {
         *self
     }
@@ -56,6 +57,7 @@ impl<'a, S> AsRef<AccountView> for AnyTokenAccountView<'a, S>
 where
     S: State,
 {
+    /// Returns the underlying account view without changing validation state.
     fn as_ref(&self) -> &AccountView {
         self.inner
     }
@@ -102,6 +104,7 @@ macro_rules! decl_account_views {
 
     (@token $T:ident) => {
         impl<'a> $T<'a, Checked> {
+            /// Erases the concrete token account role while preserving checked state.
             pub fn as_any(&self) -> AnyTokenAccountView<'_, Checked> {
                 AnyTokenAccountView { inner: self.inner, _s: PhantomData }
             }
@@ -357,6 +360,7 @@ impl<'a> TokenContext<'a> {
         })
     }
 
+    /// Validates only that `account` is the canonical ATA for `owner`.
     pub(crate) fn validate_ata_address(
         &self,
         account: &AccountView,
@@ -365,6 +369,7 @@ impl<'a> TokenContext<'a> {
         account.validate_as_ata_unchecked(owner, self.token_program.address(), self.mint.address())
     }
 
+    /// Validates the canonical ATA address, base token account data, and allowed extensions.
     pub(crate) fn validate_ata_checked<'b>(
         &self,
         account: &'b AccountView,
@@ -377,6 +382,7 @@ impl<'a> TokenContext<'a> {
         })
     }
 
+    /// Validates a beneficiary ATA, converting unsupported account extensions into a redirect.
     pub(crate) fn validate_redirectable_ata<'b>(
         &self,
         account: &'b AccountView,
@@ -393,14 +399,17 @@ impl<'a> TokenContext<'a> {
         }
     }
 
+    /// Maps payer ATA validation failures onto payer-specific public errors.
     pub(crate) fn map_payer_account_error(err: AccountValidationError) -> PaymentChannelsError {
         payer_token_error_for_account_validation(err)
     }
 
+    /// Maps payee ATA validation failures onto payee-specific public errors.
     pub(crate) fn map_payee_account_error(err: AccountValidationError) -> PaymentChannelsError {
         payee_token_error_for_account_validation(err)
     }
 
+    /// Maps recipient ATA validation failures onto recipient-specific public errors.
     pub(crate) fn map_recipient_account_error(err: AccountValidationError) -> PaymentChannelsError {
         recipient_token_error_for_account_validation(err)
     }
@@ -505,6 +514,7 @@ pub struct PayerContext<'a, M: PayerContextMode = WithTokenAccount<'a>> {
 }
 
 impl<'a> PayerContext<'a, WalletOnly> {
+    /// Builds a payer context when only the payer wallet identity is needed.
     pub fn new_wallet(
         payer: PayerAccountView<'a, Unchecked>,
         expected_payer: &Address,
@@ -524,6 +534,7 @@ impl<'a> PayerContext<'a, WalletOnly> {
 }
 
 impl<'a> PayerContext<'a, WithTokenAccount<'a>> {
+    /// Builds a payer context with a checked payer ATA for direct refunds.
     pub fn new_with_token(
         payer: PayerAccountView<'a, Unchecked>,
         payer_token_account: PayerTokenAccountView<'a, Unchecked>,
@@ -547,6 +558,7 @@ impl<'a> PayerContext<'a, WithTokenAccount<'a>> {
         })
     }
 
+    /// Returns the checked payer ATA carried by this context.
     pub fn payer_token_account(&self) -> &PayerTokenAccountView<'a, Checked> {
         &self.mode.payer_token_account
     }
