@@ -594,6 +594,12 @@
         "name": "depositMustBeNonZero"
       },
       {
+        "code": 201,
+        "kind": "errorNode",
+        "message": "Grace period must be non-zero",
+        "name": "gracePeriodMustBeNonZero"
+      },
+      {
         "code": 230,
         "kind": "errorNode",
         "message": "Missing Ed25519 precompile ix at current-1",
