@@ -4,7 +4,7 @@
 
 use crate::common::token_2022::{EXT_TRANSFER_FEE_CONFIG, add_mint_extension};
 use crate::common::{
-    PROGRAM_ID, ProgramLoader, SPL_TOKEN, TOKEN_2022,  expect_custom_err, open_channel,
+    PROGRAM_ID, ProgramLoader, SPL_TOKEN, TOKEN_2022, expect_custom_err, open_channel,
     token_balance,
 };
 use litesvm::LiteSVM;

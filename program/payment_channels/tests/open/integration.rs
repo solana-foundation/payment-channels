@@ -19,7 +19,7 @@ use crate::common::token_2022::{
     TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN, add_account_extension,
     add_mint_extension,
 };
-use crate::common::{ProgramLoader, SPL_TOKEN,  expect_custom_err, token_balance};
+use crate::common::{ProgramLoader, SPL_TOKEN, expect_custom_err, token_balance};
 
 const SALT: u64 = 1;
 const DEPOSIT: u64 = 1_000_000;

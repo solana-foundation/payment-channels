@@ -33,8 +33,8 @@ use crate::common::token_2022::{
 };
 use crate::common::{
     ATA_PROGRAM, INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM,
-    SYSVAR_RENT, compute_budget_ix,  event_authority, expect_custom_err,
-    expect_instruction_err, set_clock, token_balance, treasury_owner,
+    SYSVAR_RENT, compute_budget_ix, event_authority, expect_custom_err, expect_instruction_err,
+    set_clock, token_balance, treasury_owner,
     voucher::{build_ed25519_ix, voucher_payload},
 };
 
@@ -1271,10 +1271,7 @@ fn reopen_at_same_seeds_rejects_across_tx() {
         &[&s.payer_keypair],
         blockhash,
     );
-    expect_instruction_err(
-        s.svm.send_transaction(tx),
-        InstructionError::Custom(0),
-    );
+    expect_instruction_err(s.svm.send_transaction(tx), InstructionError::Custom(0));
     // Tombstone bytes preserved — no partial reinit happened.
     assert_tombstone(&s.svm, &s.channel);
 }
@@ -1317,9 +1314,7 @@ fn reopen_at_same_seeds_rejects_same_tx() {
         &[&s.payer_keypair],
         blockhash,
     );
-    let err = s.svm.send_transaction(tx)
-        .expect_err("tx should fail")
-        .err;
+    let err = s.svm.send_transaction(tx).expect_err("tx should fail").err;
     // Lock down both the failing ix index (open is at index 2 — after
     // compute-budget at 0 and distribute at 1) and the variant. A regression
     // that shifts the failure to a different ix or a different system error

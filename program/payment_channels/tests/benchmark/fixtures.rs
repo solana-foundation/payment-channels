@@ -100,13 +100,7 @@ fn create_seeded_mint(
     const MINT_LEN: u64 = 82;
     let rent = svm.minimum_balance_for_rent_exemption(MINT_LEN as usize);
 
-    let create_ix = create_account(
-        &payer.pubkey(),
-        &mint_pk,
-        rent,
-        MINT_LEN,
-        token_program,
-    );
+    let create_ix = create_account(&payer.pubkey(), &mint_pk, rent, MINT_LEN, token_program);
     let init_ix = initialize_mint2(token_program, &mint_pk, &payer.pubkey(), None, 0)
         .expect("initialize_mint2 ix");
 
@@ -400,7 +394,9 @@ pub struct DistributeAccounts {
 // activation-deferred by one slot), and callers compile a `MessageV0` against
 // the returned [`AddressLookupTableAccount`].
 
-use solana_address_lookup_table_interface::instruction::{create_lookup_table, extend_lookup_table};
+use solana_address_lookup_table_interface::instruction::{
+    create_lookup_table, extend_lookup_table,
+};
 use solana_message::AddressLookupTableAccount;
 
 /// Create + extend an ALT covering `addresses`, then advance the slot so

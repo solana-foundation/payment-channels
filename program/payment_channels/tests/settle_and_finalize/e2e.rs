@@ -16,7 +16,7 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 
 use crate::common::{
-    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader,  expect_custom_err,
+    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, expect_custom_err,
     voucher::{build_ed25519_ix, voucher_payload},
 };
 
