@@ -237,7 +237,7 @@ pub fn process(
     match status {
         ChannelStatus::Open => {
             let mut ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
-            ch.settlement_mut().account_settled();
+            ch.settlement_mut().mark_as_settled();
         }
         ChannelStatus::Finalized => {
             // Payer refund branch — one-shot, gated by snapshotted payer_withdrawn_at.

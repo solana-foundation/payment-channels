@@ -403,7 +403,7 @@ impl SettlementWatermarks {
     /// Marks the current `settled` watermark as accounted after a successful
     /// `OPEN` distribution pass.
     #[inline(always)]
-    pub fn account_settled(&mut self) {
+    pub fn mark_as_settled(&mut self) {
         self.payout_watermark = self.settled;
     }
 }
