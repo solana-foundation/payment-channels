@@ -14,11 +14,6 @@
 //! Voucher / precompile helpers live in [`crate::common::voucher`] and are
 //! re-used across the e2e suites.
 
-// Bench scenarios mix-and-match helpers per parameter sweep; some functions
-// are only reachable from a subset of scenarios, which would otherwise
-// trip `cargo test`'s dead-code warning on focused runs.
-#![allow(dead_code)]
-
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, MintTo};
 use payment_channels_client::instructions::{
@@ -44,7 +39,14 @@ pub const DEFAULT_SALT: u64 = 0x1234_5678_9abc_def0;
 pub const DEFAULT_DEPOSIT: u64 = 1_000_000;
 pub const DEFAULT_SETTLED: u64 = 500_000;
 
+/// `Channel.status` byte values mirroring the on-chain `ChannelStatus`
+/// repr; kept as explicit `u8`s so the bench's byte-level mutators stay
+/// independent of the generated client and would surface any layout drift
+/// from the program enum. `OPEN` is only referenced symbolically (channels
+/// start in this state and no scenario writes it back), hence the targeted
+/// `#[allow(dead_code)]`.
 pub mod status {
+    #[allow(dead_code)]
     pub const OPEN: u8 = 0;
     pub const FINALIZED: u8 = 1;
     pub const CLOSING: u8 = 2;
@@ -341,11 +343,6 @@ pub fn force_settled(svm: &mut LiteSVM, channel: &Pubkey, settled: u64) {
     mutate_channel(svm, channel, |data| {
         data[20..28].copy_from_slice(&settled.to_le_bytes());
     });
-}
-
-pub fn read_channel_balance(svm: &LiteSVM, ata: &Pubkey) -> u64 {
-    let acct = svm.get_account(ata).expect("ata exists");
-    u64::from_le_bytes(acct.data[64..72].try_into().unwrap())
 }
 
 /// Create the payee, treasury, and recipient ATAs needed to run `distribute`.
