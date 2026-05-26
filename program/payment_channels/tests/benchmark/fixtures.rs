@@ -25,13 +25,13 @@ use payment_channels_client::instructions::{
     Open, OpenInstructionArgs, Settle, SettleInstructionArgs,
 };
 use payment_channels_client::types::{DistributionEntry, OpenArgs, SettleArgs, VoucherArgs};
-use solana_account::Account;
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
-use solana_rent::Rent;
 use solana_signer::Signer;
+use solana_system_interface::instruction::create_account;
 use solana_transaction::Transaction;
+use spl_token_2022_interface::instruction::initialize_mint2;
 
 use crate::common::{
     ATA_PROGRAM, INSTRUCTIONS_SYSVAR, PROGRAM_ID, SYSTEM_PROGRAM, SYSVAR_RENT, event_authority,
@@ -76,37 +76,48 @@ fn seeded_pubkey(role: &str) -> Pubkey {
     Pubkey::new_from_array(seeded_bytes(role))
 }
 
-/// Inject a fully-initialized Mint account at `mint` owned by `token_program`.
-/// `litesvm_token::CreateMint` exposes no setter for the mint keypair
-/// (`create_mint.rs:78` hardcodes `let mint_kp = Keypair::new();`), so the
-/// only way to keep the mint pubkey stable across runs without forking
-/// upstream is to write the Mint bytes directly. Stable mint → stable bumps
-/// on every ATA derived from `(channel, token_program, mint)`, which is the
-/// dominant lever on CU variance. Layout is the SPL/Token-2022 base Mint
-/// (82 bytes, no extensions), accepted by both programs identically.
-fn inject_mint(svm: &mut LiteSVM, mint: &Pubkey, authority: &Pubkey, token_program: &Pubkey) {
-    //   0..4   mint_authority_option: u32 LE (1 = Some)
-    //   4..36  mint_authority: [u8; 32]
-    //  36..44  supply: u64 LE  (left at 0; MintTo updates it)
-    //      44  decimals: u8    (0)
-    //      45  is_initialized: u8 (1)
-    //  46..50  freeze_authority_option: u32 LE (0 = None)
-    //  50..82  freeze_authority: [u8; 32]
-    let mut data = vec![0u8; 82];
-    data[0..4].copy_from_slice(&1u32.to_le_bytes());
-    data[4..36].copy_from_slice(authority.as_ref());
-    data[45] = 1;
-    svm.set_account(
-        *mint,
-        Account {
-            lamports: Rent::default().minimum_balance(82),
-            data,
-            owner: *token_program,
-            executable: false,
-            rent_epoch: 0,
-        },
-    )
-    .expect("inject mint");
+/// Create a Mint at the seeded mint keypair, owned by `token_program`.
+///
+/// Mirrors `litesvm_token::CreateMint::send()` (which would also issue
+/// `create_account` + `initialize_mint2`), except the mint keypair is
+/// deterministic instead of `Keypair::new()`. A stable mint pubkey is the
+/// dominant lever on cross-run CU determinism because every ATA derived
+/// from `(channel, token_program, mint)` would otherwise see bump roulette.
+///
+/// `initialize_mint2` from `spl-token-2022-interface` accepts both the
+/// classic SPL Token program and Token-2022 (the wire format is identical
+/// at the no-extension base layout).
+fn create_seeded_mint(
+    svm: &mut LiteSVM,
+    payer: &Keypair,
+    token_program: &Pubkey,
+) -> (Keypair, Pubkey) {
+    let mint_kp = seeded_keypair("mint");
+    let mint_pk = mint_kp.pubkey();
+    // Base Mint layout — 82 bytes for both SPL Token and Token-2022 with
+    // no extensions; matches what `litesvm_token::CreateMint` allocates
+    // when its `token-2022` feature is off.
+    const MINT_LEN: u64 = 82;
+    let rent = svm.minimum_balance_for_rent_exemption(MINT_LEN as usize);
+
+    let create_ix = create_account(
+        &payer.pubkey(),
+        &mint_pk,
+        rent,
+        MINT_LEN,
+        token_program,
+    );
+    let init_ix = initialize_mint2(token_program, &mint_pk, &payer.pubkey(), None, 0)
+        .expect("initialize_mint2 ix");
+
+    let tx = Transaction::new_signed_with_payer(
+        &[create_ix, init_ix],
+        Some(&payer.pubkey()),
+        &[payer, &mint_kp],
+        svm.latest_blockhash(),
+    );
+    svm.send_transaction(tx).expect("create mint");
+    (mint_kp, mint_pk)
 }
 
 /// All the state a benchmark scenario needs to talk to a single channel.
@@ -128,8 +139,9 @@ pub struct Fixture {
 }
 
 /// Deterministic (payer, mint, payer_ata). `payer` is airdropped, the mint
-/// is injected at a seed-derived address, and the payer ATA is created +
-/// funded with `deposit` tokens.
+/// is created at a seed-derived keypair via the real `create_account +
+/// initialize_mint2` path, and the payer ATA is created + funded with
+/// `deposit` tokens.
 fn seeded_mint_funded(
     svm: &mut LiteSVM,
     deposit: u64,
@@ -137,8 +149,7 @@ fn seeded_mint_funded(
 ) -> (Keypair, Pubkey, Pubkey) {
     let payer = seeded_keypair("payer");
     svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
-    let mint = seeded_pubkey("mint");
-    inject_mint(svm, &mint, &payer.pubkey(), token_program);
+    let (_mint_kp, mint) = create_seeded_mint(svm, &payer, token_program);
     let payer_ata = CreateAssociatedTokenAccount::new(svm, &payer, &mint)
         .token_program_id(token_program)
         .send()
