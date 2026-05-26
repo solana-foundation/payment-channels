@@ -10,7 +10,7 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-use crate::common::{ProgramLoader, SPL_TOKEN, cu_tracker, open_channel, set_clock, token_balance};
+use crate::common::{ProgramLoader, SPL_TOKEN,  open_channel, set_clock, token_balance};
 
 /// Patch an existing channel account to FINALIZED status with the given settled amount.
 fn patch_channel_finalized(svm: &mut LiteSVM, channel: &Pubkey, settled: u64) {
@@ -48,7 +48,7 @@ fn send_withdraw_payer(
         &[payer],
         svm.latest_blockhash(),
     );
-    cu_tracker::send_and_record(svm, tx)
+    svm.send_transaction(tx)
 }
 
 #[test]

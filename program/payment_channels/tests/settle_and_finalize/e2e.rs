@@ -16,7 +16,7 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 
 use crate::common::{
-    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, cu_tracker, expect_custom_err,
+    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader,  expect_custom_err,
     voucher::{build_ed25519_ix, voucher_payload},
 };
 
@@ -134,7 +134,7 @@ fn open_to_finalized_with_voucher() {
         &[&fee_payer, &merchant],
         svm.latest_blockhash(),
     );
-    cu_tracker::send_and_record(&mut svm, tx).expect("tx ok");
+    svm.send_transaction(tx).expect("tx ok");
 
     assert_eq!(read_status(&svm, &channel), ChannelStatus::Finalized as u8);
     assert_eq!(read_settled(&svm, &channel), cumulative);
@@ -194,7 +194,7 @@ fn with_voucher_expired_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        cu_tracker::send_and_record(&mut svm, tx),
+        svm.send_transaction(tx),
         PaymentChannelsError::VoucherExpired,
     );
 }
@@ -246,7 +246,7 @@ fn with_voucher_wrong_authorized_signer_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        cu_tracker::send_and_record(&mut svm, tx),
+        svm.send_transaction(tx),
         PaymentChannelsError::VoucherSignerMismatch,
     );
 }

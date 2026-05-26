@@ -76,13 +76,6 @@ test: test-program
 test-program: generate-client
     cd {{program_dir}} && cargo test-sbf
 
-# Run tests with CU profiling enabled. The `instructions` test binary
-# writes a single `cu_report.md` next to Cargo.toml on exit; CI posts it
-# as the PR comment. Local: `cat {{program_dir}}/cu_report.md`.
-test-and-benchmark: generate-client
-    cd {{program_dir}} && \
-        CU_REPORT=1 CU_REPORT_DATE="$(date -u +%Y-%m-%d)" cargo test-sbf
-
 # Run the parameterized CU benchmark scenarios and emit bench_report.md
 # next to Cargo.toml. `--test-threads=1` keeps logs interleaved-free and
 # avoids contention; bench scenarios themselves only push to a Mutex so

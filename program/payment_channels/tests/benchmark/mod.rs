@@ -7,11 +7,8 @@
 //! `Cargo.toml` with one row per scenario (CUs + estimated SOL cost at
 //! three priority-fee rates), sorted lexicographically by label.
 //!
-//! Independent of [`crate::common::cu_tracker`], which aggregates samples
-//! across the whole test suite bucketed by instruction name. The bench
-//! tracks one sample per parameterized scenario; CU in LiteSVM is
-//! deterministic for the same accounts + ix-data, so a single run per
-//! scenario is enough.
+//! CU in LiteSVM is deterministic for the same accounts + ix-data, so a
+//! single run per scenario is enough.
 
 pub mod fixtures;
 mod scenarios;
@@ -53,8 +50,6 @@ pub fn record(svm: &mut LiteSVM, tx: Transaction, label: impl Into<String>) -> T
     res
 }
 
-// Same priority-fee model as `cu_tracker.rs`. Duplicated to keep the bench
-// module standalone — ~10 lines, no shared abstraction earned yet.
 const BASE_FEE_LAMPORTS: u64 = 5_000;
 const MICRO_LAMPORTS_PER_LAMPORT: u64 = 1_000_000;
 const LAMPORTS_PER_SOL: f64 = 1_000_000_000.0;
