@@ -36,6 +36,16 @@ fn zero_deposit_rejected() {
 }
 
 #[test]
+fn zero_grace_period_rejected() {
+    assert_eq!(
+        OpenRun::new(SALT, DEPOSIT, 0, 1).run(),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::GracePeriodMustBeNonZero as u32
+        )),
+    );
+}
+
+#[test]
 fn zero_recipients_passes_arg_validation() {
     // count == 0 is legal: the channel becomes a vanilla two-party channel
     // where the payee receives 100% of `pool` at `distribute`.
