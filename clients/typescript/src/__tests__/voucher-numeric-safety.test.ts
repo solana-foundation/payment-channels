@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getOpenArgsEncoder,
   getSettleAndFinalizeArgsEncoder,
+  getTopUpArgsEncoder,
   getVoucherArgsDecoder,
   getVoucherArgsEncoder,
 } from '../generated/index.js';
@@ -134,6 +135,25 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
         recipients: [],
       }),
     ).toThrow(TypeError);
+  });
+
+  it('rejects unsafe-integer salt in OpenArgs', () => {
+    const encoder = getOpenArgsEncoder();
+    expect(() =>
+      encoder.encode({
+        salt: 9007199254740993 as unknown as bigint,
+        deposit: 0n,
+        gracePeriod: 0,
+        recipients: [],
+      }),
+    ).toThrow(TypeError);
+  });
+
+  it('rejects unsafe-integer TopUpArgs.amount', () => {
+    const encoder = getTopUpArgsEncoder();
+    expect(() => encoder.encode({ amount: 9007199254740993 as unknown as bigint })).toThrow(
+      TypeError,
+    );
   });
 
   it('still throws on junk voucher when hasVoucher == 0 - encoder must produce well-formed 48 bytes', () => {
