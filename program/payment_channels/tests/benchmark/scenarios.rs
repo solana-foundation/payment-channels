@@ -16,8 +16,10 @@ use payment_channels_client::types::{
 };
 use solana_clock::Clock;
 use solana_instruction::{AccountMeta, Instruction};
+use solana_message::{AddressLookupTableAccount, VersionedMessage, v0::Message as MessageV0};
 use solana_signer::Signer;
 use solana_transaction::Transaction;
+use solana_transaction::versioned::VersionedTransaction;
 
 use litesvm::LiteSVM;
 
@@ -52,6 +54,31 @@ fn build_focal_tx(
         &signers,
         svm.latest_blockhash(),
     )
+}
+
+/// Same shape as [`build_focal_tx`] but wraps the focal ixs in a v0
+/// transaction that resolves account metas through `alt`. Used by scenarios
+/// where the legacy 1232-byte account list overflows (e.g. n=32 distribute).
+fn build_focal_v0_tx(
+    svm: &LiteSVM,
+    fee_payer: &solana_keypair::Keypair,
+    extra_signers: &[&solana_keypair::Keypair],
+    ixs: &[Instruction],
+    alt: &AddressLookupTableAccount,
+) -> VersionedTransaction {
+    let mut full = Vec::with_capacity(ixs.len() + 1);
+    full.push(compute_budget_ix(COMPUTE_UNIT_LIMIT));
+    full.extend_from_slice(ixs);
+    let msg = MessageV0::try_compile(
+        &fee_payer.pubkey(),
+        &full,
+        std::slice::from_ref(alt),
+        svm.latest_blockhash(),
+    )
+    .expect("compile v0 message");
+    let mut signers: Vec<&solana_keypair::Keypair> = vec![fee_payer];
+    signers.extend_from_slice(extra_signers);
+    VersionedTransaction::try_new(VersionedMessage::V0(msg), &signers).expect("sign v0 tx")
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -104,6 +131,13 @@ fn open_n01_t22() {
 #[test]
 fn open_n16_t22() {
     run_open(16, TOKEN_2022, "open[n=16,tok=t22]");
+}
+
+/// `open` at `MAX_DISTRIBUTION_RECIPIENTS` (32) on Token-2022. Caps the
+/// per-recipient curve at the protocol limit on the heavier token program.
+#[test]
+fn open_n32_t22() {
+    run_open(32, TOKEN_2022, "open[n=32,tok=t22]");
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -377,13 +411,6 @@ fn distribute_n16_spl_open() {
     run_distribute(&f, &mut svm, &accts, "distribute[n=16,tok=spl,open]");
 }
 
-// distribute[n=32] is intentionally omitted: 32 recipient ATAs + 8 base
-// accounts overflow the 1232-byte legacy transaction limit. Exercising
-// that path needs a v0 tx with an Address Lookup Table — scope-creep here
-// since CU is independent of how the accounts are encoded. n=16 already
-// pins the high-end of the cost curve. See `tests/distribute/e2e.rs`'s
-// `many_distinct_recipients_accepted` for the same cap.
-
 /// `distribute` at 16 recipients on Token-2022, OPEN. Per-recipient
 /// `transfer_checked` cost on the heavier token program (extension
 /// scans per account).
@@ -408,6 +435,80 @@ fn distribute_n01_spl_fin() {
 fn distribute_n16_spl_fin() {
     let (mut svm, f, accts) = distribute_setup_finalized(16, SPL_TOKEN);
     run_distribute(&f, &mut svm, &accts, "distribute[n=16,tok=spl,fin]");
+}
+
+// n=32 (`MAX_DISTRIBUTION_RECIPIENTS`) overflows the 1232-byte legacy tx
+// account-list, so the next three scenarios pack the recipient ATAs into an
+// ALT and submit a v0 transaction. The on-chain program sees identical
+// account metas either way; the v0 wrapping pays a small per-tx CU surcharge
+// for ALT resolution but the per-recipient on-chain slope is what's being
+// captured here.
+
+fn run_distribute_alt(
+    f: &Fixture,
+    svm: &mut LiteSVM,
+    accts: &fixtures::DistributeAccounts,
+    label: &str,
+) {
+    let recipients: Vec<DistributionEntry> = f
+        .splits
+        .iter()
+        .map(|(owner, bps)| DistributionEntry {
+            recipient: *owner,
+            bps: *bps,
+        })
+        .collect();
+    let remaining: Vec<AccountMeta> = accts
+        .recipient_atas
+        .iter()
+        .map(|a| AccountMeta::new(*a, false))
+        .collect();
+    let ix = Distribute {
+        channel: f.channel,
+        payer: f.payer.pubkey(),
+        channel_token_account: f.channel_ata,
+        payer_token_account: f.payer_ata,
+        payee_token_account: accts.payee_ata,
+        treasury_token_account: accts.treasury_ata,
+        mint: f.mint,
+        token_program: f.token_program,
+    }
+    .instruction_with_remaining_accounts(
+        DistributeInstructionArgs {
+            distribute_args: DistributeArgs { recipients },
+        },
+        &remaining,
+    );
+    // Only the recipient ATAs are packed into the ALT — the 8 fixed
+    // distribute accounts always sit in the message's account_keys table.
+    let alt = fixtures::build_address_lookup_table(svm, &f.payer, accts.recipient_atas.clone());
+    let tx = build_focal_v0_tx(svm, &f.payer, &[], &[ix], &alt);
+    record(svm, tx, label).expect("distribute ok");
+}
+
+/// `distribute` at `MAX_DISTRIBUTION_RECIPIENTS` (32) on SPL, OPEN. Submitted
+/// via v0 + ALT because the 32 recipient ATAs overflow the legacy tx
+/// account-list cap. Caps the per-recipient curve at the protocol limit.
+#[test]
+fn distribute_n32_spl_open() {
+    let (mut svm, f, accts) = distribute_setup_open(32, SPL_TOKEN);
+    run_distribute_alt(&f, &mut svm, &accts, "distribute[n=32,tok=spl,open]");
+}
+
+/// `distribute` at 32 recipients on Token-2022, OPEN, via ALT. Caps the
+/// per-recipient curve on the heavier token program.
+#[test]
+fn distribute_n32_t22_open() {
+    let (mut svm, f, accts) = distribute_setup_open(32, TOKEN_2022);
+    run_distribute_alt(&f, &mut svm, &accts, "distribute[n=32,tok=t22,open]");
+}
+
+/// `distribute` at 32 recipients on SPL, FINALIZED, via ALT. Tombstone
+/// branch stacked on the protocol-max recipient-loop cost.
+#[test]
+fn distribute_n32_spl_fin() {
+    let (mut svm, f, accts) = distribute_setup_finalized(32, SPL_TOKEN);
+    run_distribute_alt(&f, &mut svm, &accts, "distribute[n=32,tok=spl,fin]");
 }
 
 // ───────────────────────────────────────────────────────────────────────────

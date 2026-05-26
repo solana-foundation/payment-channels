@@ -19,7 +19,7 @@ use std::sync::{Mutex, OnceLock};
 
 use litesvm::LiteSVM;
 use litesvm::types::TransactionResult;
-use solana_transaction::Transaction;
+use solana_transaction::versioned::VersionedTransaction;
 use tabled::{Table, Tabled, settings::Style};
 
 static SAMPLES: OnceLock<Mutex<Vec<(String, u64)>>> = OnceLock::new();
@@ -35,9 +35,16 @@ fn samples() -> &'static Mutex<Vec<(String, u64)>> {
 
 /// Send `tx` and, when `BENCH=1`, record `(label, CU)` for the focal
 /// scenario. Failures drop the sample — `compute_units_consumed` on an
-/// aborted tx is not a useful number.
+/// aborted tx is not a useful number. Accepts both legacy
+/// [`solana_transaction::Transaction`] and v0
+/// [`solana_transaction::versioned::VersionedTransaction`] via
+/// `Into<VersionedTransaction>` — the same surface LiteSVM exposes.
 #[allow(clippy::result_large_err)]
-pub fn record(svm: &mut LiteSVM, tx: Transaction, label: impl Into<String>) -> TransactionResult {
+pub fn record(
+    svm: &mut LiteSVM,
+    tx: impl Into<VersionedTransaction>,
+    label: impl Into<String>,
+) -> TransactionResult {
     if !is_enabled() {
         return svm.send_transaction(tx);
     }

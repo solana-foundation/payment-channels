@@ -77,10 +77,12 @@ fn seeded_pubkey(role: &str) -> Pubkey {
 }
 
 /// Inject a fully-initialized Mint account at `mint` owned by `token_program`.
-/// Replaces `litesvm_token::CreateMint::send()`, which hardcodes
-/// `Keypair::new()` for the mint and so produces a different mint pubkey
-/// every run — propagating bump variance into every ATA derived from
-/// `(channel, token_program, mint)`. Layout is the SPL/Token-2022 base Mint
+/// `litesvm_token::CreateMint` exposes no setter for the mint keypair
+/// (`create_mint.rs:78` hardcodes `let mint_kp = Keypair::new();`), so the
+/// only way to keep the mint pubkey stable across runs without forking
+/// upstream is to write the Mint bytes directly. Stable mint → stable bumps
+/// on every ATA derived from `(channel, token_program, mint)`, which is the
+/// dominant lever on CU variance. Layout is the SPL/Token-2022 base Mint
 /// (82 bytes, no extensions), accepted by both programs identically.
 fn inject_mint(svm: &mut LiteSVM, mint: &Pubkey, authority: &Pubkey, token_program: &Pubkey) {
     //   0..4   mint_authority_option: u32 LE (1 = Some)
@@ -378,4 +380,44 @@ pub struct DistributeAccounts {
     pub payee_ata: Pubkey,
     pub treasury_ata: Pubkey,
     pub recipient_atas: Vec<Pubkey>,
+}
+
+// ---------------------------------------------------------------------------
+// Address Lookup Table support for scenarios that overflow the 1232-byte
+// legacy transaction account-list limit (e.g. n=32 `distribute`). An ALT is
+// created + extended in a setup tx, the slot is warped (ALTs are
+// activation-deferred by one slot), and callers compile a `MessageV0` against
+// the returned [`AddressLookupTableAccount`].
+
+use solana_address_lookup_table_interface::instruction::{create_lookup_table, extend_lookup_table};
+use solana_message::AddressLookupTableAccount;
+
+/// Create + extend an ALT covering `addresses`, then advance the slot so
+/// later v0 transactions can resolve it. Returns the
+/// [`AddressLookupTableAccount`] ready to feed into
+/// [`solana_message::v0::Message::try_compile`].
+pub fn build_address_lookup_table(
+    svm: &mut LiteSVM,
+    payer: &Keypair,
+    addresses: Vec<Pubkey>,
+) -> AddressLookupTableAccount {
+    // Slot 0 is the genesis slot under LiteSVM. `create_lookup_table` takes
+    // the recent slot as its third argument; pass `0` and warp afterwards.
+    let (create_ix, table_address) = create_lookup_table(payer.pubkey(), payer.pubkey(), 0);
+    let extend_ix = extend_lookup_table(
+        table_address,
+        payer.pubkey(),
+        Some(payer.pubkey()),
+        addresses.clone(),
+    );
+    let msg = solana_message::Message::new(&[create_ix, extend_ix], Some(&payer.pubkey()));
+    let tx = Transaction::new(&[payer], msg, svm.latest_blockhash());
+    svm.send_transaction(tx).expect("alt setup ok");
+    // ALTs created in slot N are only resolvable starting in slot N+1.
+    svm.warp_to_slot(svm.get_sysvar::<solana_clock::Clock>().slot + 1);
+
+    AddressLookupTableAccount {
+        key: table_address,
+        addresses,
+    }
 }
