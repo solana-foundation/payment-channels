@@ -71,10 +71,13 @@ build-client: generate-client
 
 # ---------- test ----------
 
-test: test-program
+test: test-program test-client
 
 test-program: generate-client
     cd {{program_dir}} && cargo test-sbf
+
+test-client: generate-client
+    cd {{ts_client_dir}} && pnpm run test
 
 # Run tests with CU profiling enabled. The `instructions` test binary
 # writes a single `cu_report.md` next to Cargo.toml on exit; CI posts it
