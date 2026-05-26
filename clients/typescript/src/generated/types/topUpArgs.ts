@@ -10,16 +10,15 @@ import {
   combineCodec,
   getStructDecoder,
   getStructEncoder,
-  getU64Decoder,
-  getU64Encoder,
   type FixedSizeCodec,
   type FixedSizeDecoder,
   type FixedSizeEncoder,
 } from "@solana/kit";
+import { getU64Decoder, getU64Encoder } from "../../safe-codecs.js";
 
 export type TopUpArgs = { amount: bigint };
 
-export type TopUpArgsArgs = { amount: number | bigint };
+export type TopUpArgsArgs = { amount: bigint };
 
 export function getTopUpArgsEncoder(): FixedSizeEncoder<TopUpArgsArgs> {
   return getStructEncoder([["amount", getU64Encoder()]]);

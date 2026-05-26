@@ -10,17 +10,19 @@ import {
   combineCodec,
   getAddressDecoder,
   getAddressEncoder,
-  getI64Decoder,
-  getI64Encoder,
   getStructDecoder,
   getStructEncoder,
-  getU64Decoder,
-  getU64Encoder,
   type Address,
   type FixedSizeCodec,
   type FixedSizeDecoder,
   type FixedSizeEncoder,
 } from "@solana/kit";
+import {
+  getI64Decoder,
+  getI64Encoder,
+  getU64Decoder,
+  getU64Encoder,
+} from "../../safe-codecs.js";
 
 export type VoucherArgs = {
   channelId: Address;
@@ -30,8 +32,8 @@ export type VoucherArgs = {
 
 export type VoucherArgsArgs = {
   channelId: Address;
-  cumulativeAmount: number | bigint;
-  expiresAt: number | bigint;
+  cumulativeAmount: bigint;
+  expiresAt: bigint;
 };
 
 export function getVoucherArgsEncoder(): FixedSizeEncoder<VoucherArgsArgs> {

@@ -10,7 +10,6 @@ import {
   assertIsInstructionWithAccounts,
   containsBytes,
   extendClient,
-  getU8Encoder,
   SOLANA_ERROR__PROGRAM_CLIENTS__FAILED_TO_IDENTIFY_INSTRUCTION,
   SOLANA_ERROR__PROGRAM_CLIENTS__UNRECOGNIZED_INSTRUCTION_TYPE,
   SolanaError,
@@ -30,6 +29,7 @@ import {
   type SelfFetchFunctions,
   type SelfPlanAndSendFunctions,
 } from "@solana/program-client-core";
+import { getU8Encoder } from "../../safe-codecs.js";
 import {
   getChannelCodec,
   getClosedChannelCodec,
