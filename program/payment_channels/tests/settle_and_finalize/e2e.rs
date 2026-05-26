@@ -3,9 +3,8 @@
 #![allow(clippy::result_large_err)]
 
 use litesvm::LiteSVM;
-use payment_channels::ed25519;
+use payment_channels::PaymentChannelsError;
 use payment_channels::state::channel::ChannelStatus;
-use payment_channels::{PaymentChannelsError, VOUCHER_PAYLOAD_SIZE};
 use payment_channels_client::instructions::{SettleAndFinalize, SettleAndFinalizeInstructionArgs};
 use payment_channels_client::types::{SettleAndFinalizeArgs, VoucherArgs};
 use solana_account::Account;
@@ -17,8 +16,8 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 
 use crate::common::{
-    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, cu_tracker, ed25519_program_id,
-    expect_custom_err,
+    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, cu_tracker, expect_custom_err,
+    voucher::{build_ed25519_ix, voucher_payload},
 };
 
 /// Inject a 216-byte Channel owned by PROGRAM_ID.
@@ -74,38 +73,6 @@ fn read_settled(svm: &LiteSVM, channel: &Pubkey) -> u64 {
 fn read_closure_started_at(svm: &LiteSVM, channel: &Pubkey) -> i64 {
     let data = svm.get_account(channel).expect("channel exists").data;
     i64::from_le_bytes(data[36..44].try_into().unwrap())
-}
-
-fn voucher_payload(voucher: &VoucherArgs) -> [u8; VOUCHER_PAYLOAD_SIZE] {
-    borsh::to_vec(voucher)
-        .expect("voucher borsh encoding")
-        .try_into()
-        .expect("voucher payload matches VOUCHER_PAYLOAD_SIZE")
-}
-
-fn build_ed25519_ix(
-    pubkey: &[u8; ed25519::PUBKEY_SERIALIZED_SIZE],
-    signature: &[u8; ed25519::SIGNATURE_SERIALIZED_SIZE],
-    message: &[u8; VOUCHER_PAYLOAD_SIZE],
-) -> Instruction {
-    let mut data = Vec::with_capacity(ed25519::MESSAGE_OFFSET + VOUCHER_PAYLOAD_SIZE);
-    data.push(1u8);
-    data.push(0u8);
-    data.extend_from_slice(&(ed25519::SIGNATURE_OFFSET as u16).to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes());
-    data.extend_from_slice(&(ed25519::PUBKEY_OFFSET as u16).to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes());
-    data.extend_from_slice(&(ed25519::MESSAGE_OFFSET as u16).to_le_bytes());
-    data.extend_from_slice(&(VOUCHER_PAYLOAD_SIZE as u16).to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes());
-    data.extend_from_slice(pubkey);
-    data.extend_from_slice(signature);
-    data.extend_from_slice(message);
-    Instruction {
-        program_id: ed25519_program_id(),
-        accounts: Vec::new(),
-        data,
-    }
 }
 
 fn build_saf_ix(channel: &Pubkey, args: SettleAndFinalizeArgs, merchant: &Pubkey) -> Instruction {

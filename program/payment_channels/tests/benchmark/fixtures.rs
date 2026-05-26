@@ -11,16 +11,16 @@
 //! `request_close`/`finalize`/`settle` chain would inflate the focal tx's
 //! CU measurement through unrelated setup cost.
 //!
-//! `build_ed25519_ix` + `voucher_payload` are local copies of helpers
-//! triplicated across `tests/{settle,settle_and_finalize,distribute}/e2e.rs`.
-//! A separate cleanup will hoist those to `tests/common/`.
+//! Voucher / precompile helpers live in [`crate::common::voucher`] and are
+//! re-used across the e2e suites.
 
+// Bench scenarios mix-and-match helpers per parameter sweep; some functions
+// are only reachable from a subset of scenarios, which would otherwise
+// trip `cargo test`'s dead-code warning on focused runs.
 #![allow(dead_code)]
 
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, MintTo};
-use payment_channels::VOUCHER_PAYLOAD_SIZE;
-use payment_channels::ed25519;
 use payment_channels_client::instructions::{
     Open, OpenInstructionArgs, Settle, SettleInstructionArgs,
 };
@@ -34,8 +34,9 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 
 use crate::common::{
-    ATA_PROGRAM, INSTRUCTIONS_SYSVAR, PROGRAM_ID, SYSTEM_PROGRAM, SYSVAR_RENT, ed25519_program_id,
-    event_authority,
+    ATA_PROGRAM, INSTRUCTIONS_SYSVAR, PROGRAM_ID, SYSTEM_PROGRAM, SYSVAR_RENT, event_authority,
+    treasury_owner,
+    voucher::{build_ed25519_ix, voucher_payload},
 };
 
 pub const GRACE_PERIOD: u32 = 3_600;
@@ -47,16 +48,6 @@ pub mod status {
     pub const OPEN: u8 = 0;
     pub const FINALIZED: u8 = 1;
     pub const CLOSING: u8 = 2;
-}
-
-/// `constants::TREASURY_OWNER` mirror — alternating 0xBE 0xEF × 16.
-pub fn treasury_owner() -> Pubkey {
-    let mut b = [0u8; 32];
-    for i in 0..16 {
-        b[i * 2] = 0xBE;
-        b[i * 2 + 1] = 0xEF;
-    }
-    Pubkey::new_from_array(b)
 }
 
 // ---------------------------------------------------------------------------
@@ -278,44 +269,6 @@ pub fn open_setup(svm: &mut LiteSVM, f: &Fixture, deposit: u64) {
         svm.latest_blockhash(),
     );
     svm.send_transaction(tx).expect("open setup ok");
-}
-
-/// Borsh-serialize a voucher into the byte string the ed25519 precompile
-/// must verify. Field order (`channel_id || cumulative_amount || expires_at`)
-/// matches the on-chain `VoucherArgs` byte-for-byte.
-pub fn voucher_payload(voucher: &VoucherArgs) -> [u8; VOUCHER_PAYLOAD_SIZE] {
-    borsh::to_vec(voucher)
-        .expect("voucher borsh encoding")
-        .try_into()
-        .expect("voucher payload matches VOUCHER_PAYLOAD_SIZE")
-}
-
-/// Canonical single-signature Ed25519 precompile ix with all `*_ix_index`
-/// fields pinned to `u16::MAX` so the precompile reads from this ix's own
-/// data.
-pub fn build_ed25519_ix(
-    pubkey: &[u8; ed25519::PUBKEY_SERIALIZED_SIZE],
-    signature: &[u8; ed25519::SIGNATURE_SERIALIZED_SIZE],
-    message: &[u8; VOUCHER_PAYLOAD_SIZE],
-) -> Instruction {
-    let mut data = Vec::with_capacity(ed25519::MESSAGE_OFFSET + VOUCHER_PAYLOAD_SIZE);
-    data.push(1u8);
-    data.push(0u8);
-    data.extend_from_slice(&(ed25519::SIGNATURE_OFFSET as u16).to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes());
-    data.extend_from_slice(&(ed25519::PUBKEY_OFFSET as u16).to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes());
-    data.extend_from_slice(&(ed25519::MESSAGE_OFFSET as u16).to_le_bytes());
-    data.extend_from_slice(&(VOUCHER_PAYLOAD_SIZE as u16).to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes());
-    data.extend_from_slice(pubkey);
-    data.extend_from_slice(signature);
-    data.extend_from_slice(message);
-    Instruction {
-        program_id: ed25519_program_id(),
-        accounts: Vec::new(),
-        data,
-    }
 }
 
 /// `[ed25519, settle]` against the fixture's authorized signer.
