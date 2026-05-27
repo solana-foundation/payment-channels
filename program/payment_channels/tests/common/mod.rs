@@ -11,6 +11,8 @@ use payment_channels::PaymentChannelsError;
 use payment_channels::instructions::open::DISCRIMINATOR as OPEN_DISCRIMINATOR;
 use payment_channels::state::Channel;
 use payment_channels::state::channel::ChannelStatus;
+use payment_channels::state::{AccountDiscriminator, CURRENT_CHANNEL_VERSION};
+use pinocchio::Address;
 use solana_clock::Clock;
 use solana_instruction::{AccountMeta, Instruction, error::InstructionError};
 use solana_keypair::Keypair;
@@ -143,6 +145,39 @@ pub fn compute_budget_ix(units: u32) -> Instruction {
         accounts: Vec::new(),
         data,
     }
+}
+
+/// Read-only typed view over the `Channel` PDA blob managed by `svm`.
+///
+/// `Channel` is `#[repr(C)]` with `align_of::<Channel>() == 1` (every field
+/// is `u8` / `[u8; N]` / `Address`), so casting a `&[u8]` of length
+/// `Channel::LEN` to `&Channel` is sound. Same invariant the on-chain
+/// `Transmutable` load relies on.
+pub fn read_channel<R>(svm: &LiteSVM, channel: &Pubkey, f: impl FnOnce(&Channel) -> R) -> R {
+    let acct = svm.get_account(channel).expect("channel exists");
+    assert_eq!(
+        acct.data.len(),
+        Channel::LEN,
+        "channel blob length mismatch"
+    );
+    let ch = unsafe { &*(acct.data.as_ptr() as *const Channel) };
+    f(ch)
+}
+
+/// Typed mutator over the `Channel` PDA blob: get → mutate via setters /
+/// field writes → set_account. Replaces hardcoded byte offsets so field
+/// renames or type changes surface as compile errors.
+pub fn mutate_channel<F: FnOnce(&mut Channel)>(svm: &mut LiteSVM, channel: &Pubkey, f: F) {
+    let mut acct = svm.get_account(channel).expect("channel exists");
+    assert_eq!(
+        acct.data.len(),
+        Channel::LEN,
+        "channel blob length mismatch"
+    );
+    // SAFETY: see `read_channel`.
+    let ch = unsafe { &mut *(acct.data.as_mut_ptr() as *mut Channel) };
+    f(ch);
+    svm.set_account(*channel, acct).expect("overwrite channel");
 }
 
 fn program_binary_path() -> String {
@@ -294,18 +329,22 @@ impl ChannelBuilder {
 
     pub fn build(self) -> Vec<u8> {
         let mut data = vec![0u8; Channel::LEN];
-        data[0] = 1; // AccountDiscriminator::Channel
-        data[1] = 1; // CURRENT_CHANNEL_VERSION
-        data[3] = self.status as u8;
-        data[12..20].copy_from_slice(&self.deposit.to_le_bytes());
-        data[20..28].copy_from_slice(&self.settled.to_le_bytes());
-        data[36..44].copy_from_slice(&self.closure_started_at.to_le_bytes());
-        data[44..52].copy_from_slice(&self.payer_withdrawn_at.to_le_bytes());
-        data[52..56].copy_from_slice(&self.grace_period.to_le_bytes());
-        data[88..120].copy_from_slice(&self.payer.to_bytes());
-        data[120..152].copy_from_slice(&self.payee.to_bytes());
-        data[152..184].copy_from_slice(&self.authorized_signer.to_bytes());
-        data[184..216].copy_from_slice(&self.mint.to_bytes());
+        // SAFETY: `Channel` is `#[repr(C)]` with `align_of == 1`; a zeroed
+        // 216-byte `Vec<u8>` is a valid `Channel` for the purposes of
+        // initializing every field below.
+        let ch = unsafe { &mut *(data.as_mut_ptr() as *mut Channel) };
+        ch.discriminator = AccountDiscriminator::Channel as u8;
+        ch.version = CURRENT_CHANNEL_VERSION;
+        ch.status = self.status as u8;
+        ch.set_deposit(self.deposit);
+        ch.set_settled(self.settled);
+        ch.set_closure_started_at(self.closure_started_at);
+        ch.set_payer_withdrawn_at(self.payer_withdrawn_at);
+        ch.set_grace_period(self.grace_period);
+        ch.payer = Address::new_from_array(self.payer.to_bytes());
+        ch.payee = Address::new_from_array(self.payee.to_bytes());
+        ch.authorized_signer = Address::new_from_array(self.authorized_signer.to_bytes());
+        ch.mint = Address::new_from_array(self.mint.to_bytes());
         data
     }
 }

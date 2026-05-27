@@ -16,12 +16,13 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 
 use crate::common::{
-    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, compute_budget_ix, expect_custom_err,
+    ChannelBuilder, INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, compute_budget_ix,
+    expect_custom_err, read_channel,
     voucher::{build_ed25519_ix, voucher_payload},
 };
+use payment_channels::state::ChannelStatus;
 
-/// Seed a `Channel` PDA (208-byte `#[repr(C, packed)]` layout) owned by the
-/// program. Only the fields `settle` reads are non-zero.
+/// Seed a `Channel` PDA owned by the program with the fields `settle` reads.
 fn seed_channel(
     svm: &mut LiteSVM,
     channel: &Pubkey,
@@ -30,15 +31,12 @@ fn seed_channel(
     settled: u64,
     authorized_signer: &Pubkey,
 ) {
-    let mut data = vec![0u8; 216];
-    data[0] = 1; // AccountDiscriminator::Channel
-    data[1] = 1; // CURRENT_CHANNEL_VERSION
-    data[3] = status;
-    // salt: [u8; 8] at offset 4 — left as zero
-    data[12..20].copy_from_slice(&deposit.to_le_bytes());
-    data[20..28].copy_from_slice(&settled.to_le_bytes());
-    data[152..184].copy_from_slice(&authorized_signer.to_bytes());
-
+    let data = ChannelBuilder::new()
+        .status(channel_status_from_u8(status))
+        .deposit(deposit)
+        .settled(settled)
+        .authorized_signer(*authorized_signer)
+        .build();
     svm.set_account(
         *channel,
         Account {
@@ -52,6 +50,10 @@ fn seed_channel(
     .expect("set_account");
 }
 
+fn channel_status_from_u8(s: u8) -> ChannelStatus {
+    ChannelStatus::try_from(s).expect("valid status byte")
+}
+
 fn build_settle_ix(channel: &Pubkey, voucher: VoucherArgs) -> Instruction {
     Settle {
         channel: *channel,
@@ -63,10 +65,7 @@ fn build_settle_ix(channel: &Pubkey, voucher: VoucherArgs) -> Instruction {
 }
 
 fn read_settled(svm: &LiteSVM, channel: &Pubkey) -> u64 {
-    let acct = svm.get_account(channel).expect("channel exists");
-    let mut buf = [0u8; 8];
-    buf.copy_from_slice(&acct.data[20..28]);
-    u64::from_le_bytes(buf)
+    read_channel(svm, channel, |ch| ch.settled())
 }
 
 #[test]

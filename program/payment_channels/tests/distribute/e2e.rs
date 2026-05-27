@@ -34,7 +34,7 @@ use crate::common::token_2022::{
 use crate::common::{
     ATA_PROGRAM, INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM,
     SYSVAR_RENT, compute_budget_ix, event_authority, expect_custom_err, expect_instruction_err,
-    set_clock, token_balance, treasury_owner,
+    mutate_channel, read_channel, set_clock, token_balance, treasury_owner,
     voucher::{build_ed25519_ix, voucher_payload},
 };
 
@@ -51,10 +51,7 @@ fn set_token_balance(svm: &mut LiteSVM, token_account: &Pubkey, amount: u64) {
 }
 
 fn read_paid_out(svm: &LiteSVM, channel: &Pubkey) -> u64 {
-    let acct = svm.get_account(channel).expect("channel exists");
-    let mut buf = [0u8; 8];
-    buf.copy_from_slice(&acct.data[28..36]);
-    u64::from_le_bytes(buf)
+    read_channel(svm, channel, |ch| ch.paid_out())
 }
 
 /// Rent-exempt lamports for the 1-byte tombstone, computed via the same
@@ -75,31 +72,6 @@ fn assert_tombstone(svm: &LiteSVM, channel: &Pubkey) {
         tombstone_rent_lamports(),
         "tombstone rent-exempt at 1 byte",
     );
-}
-
-// ---------------------------------------------------------------------------
-// Direct byte writes to `Channel.status` / `paid_out` / `payer_withdrawn_at`.
-
-fn mutate_channel<F: FnOnce(&mut Vec<u8>)>(svm: &mut LiteSVM, channel: &Pubkey, f: F) {
-    let mut acct = svm.get_account(channel).expect("channel exists");
-    f(&mut acct.data);
-    svm.set_account(*channel, acct).expect("overwrite channel");
-}
-
-fn set_status(svm: &mut LiteSVM, channel: &Pubkey, status: u8) {
-    mutate_channel(svm, channel, |data| data[3] = status);
-}
-
-fn set_paid_out(svm: &mut LiteSVM, channel: &Pubkey, paid_out: u64) {
-    mutate_channel(svm, channel, |data| {
-        data[28..36].copy_from_slice(&paid_out.to_le_bytes());
-    });
-}
-
-fn set_payer_withdrawn_at(svm: &mut LiteSVM, channel: &Pubkey, ts: i64) {
-    mutate_channel(svm, channel, |data| {
-        data[44..52].copy_from_slice(&ts.to_le_bytes());
-    });
 }
 
 // ---------------------------------------------------------------------------
@@ -399,11 +371,11 @@ impl Scenario {
         }
 
         if paid_out > 0 {
-            set_paid_out(&mut svm, &channel, paid_out);
+            mutate_channel(&mut svm, &channel, |ch| ch.set_paid_out(paid_out));
         }
 
         if status != STATUS_OPEN {
-            set_status(&mut svm, &channel, status);
+            mutate_channel(&mut svm, &channel, |ch| ch.status = status);
         }
 
         let treasury_ata = CreateAssociatedTokenAccount::new(&mut svm, &fee_payer, &mint)
@@ -749,7 +721,9 @@ fn happy_path_finalized_already_withdrawn() {
     let paid_out = 0;
     let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_FINALIZED);
 
-    set_payer_withdrawn_at(&mut s.svm, &s.channel, 1_700_000_000);
+    mutate_channel(&mut s.svm, &s.channel, |ch| {
+        ch.set_payer_withdrawn_at(1_700_000_000)
+    });
     set_token_balance(&mut s.svm, &s.channel_ata, settled - paid_out);
 
     let payer_balance_before = s.svm.get_account(&s.payer).unwrap().lamports;
@@ -782,11 +756,9 @@ fn bad_preimage_hash() {
     let paid_out = 0;
     let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
 
-    let mut acct = s.svm.get_account(&s.channel).unwrap();
-    acct.data[56] ^= 0xFF;
-    s.svm
-        .set_account(s.channel, acct)
-        .expect("overwrite channel");
+    mutate_channel(&mut s.svm, &s.channel, |ch| {
+        ch.distribution_hash[0] ^= 0xFF;
+    });
     let res = s.send(s.distribute_ix());
     expect_custom_err(res, PaymentChannelsError::InvalidDistributionHash);
 }
@@ -1327,18 +1299,11 @@ fn reopen_at_same_seeds_rejects_same_tx() {
     }
 
     // Tx reverted: channel is restored to its pre-tx FINALIZED state.
-    let acct = s.svm.get_account(&s.channel).expect("channel exists");
-    assert_eq!(
-        acct.data.len(),
-        216,
-        "channel data restored to live size after revert",
-    );
-    assert_eq!(
-        acct.data[0], 1,
-        "discriminator restored to Channel after revert",
-    );
-    assert_eq!(
-        acct.data[3], STATUS_FINALIZED,
-        "status restored after revert",
-    );
+    read_channel(&s.svm, &s.channel, |ch| {
+        assert_eq!(
+            ch.discriminator, 1,
+            "discriminator restored to Channel after revert",
+        );
+        assert_eq!(ch.status, STATUS_FINALIZED, "status restored after revert");
+    });
 }

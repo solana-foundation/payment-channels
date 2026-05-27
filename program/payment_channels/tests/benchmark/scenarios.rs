@@ -28,7 +28,8 @@ use super::fixtures::{
 };
 use super::record;
 use crate::common::{
-    INSTRUCTIONS_SYSVAR, ProgramLoader, SPL_TOKEN, TOKEN_2022, compute_budget_ix, set_clock,
+    INSTRUCTIONS_SYSVAR, ProgramLoader, SPL_TOKEN, TOKEN_2022, compute_budget_ix, mutate_channel,
+    set_clock,
     voucher::{build_ed25519_ix, voucher_payload},
 };
 
@@ -252,8 +253,10 @@ fn finalize() {
     fixtures::open_setup(&mut svm, &f, DEFAULT_DEPOSIT);
 
     let closure_at: i64 = 1_000_000;
-    fixtures::set_status(&mut svm, &f.channel, fixtures::status::CLOSING);
-    fixtures::set_closure_started_at(&mut svm, &f.channel, closure_at);
+    mutate_channel(&mut svm, &f.channel, |ch| {
+        ch.status = fixtures::status::CLOSING;
+        ch.set_closure_started_at(closure_at);
+    });
     set_clock(&mut svm, closure_at + GRACE_PERIOD as i64);
 
     let ix = Finalize { channel: f.channel }.instruction();
@@ -271,8 +274,10 @@ fn run_settle_and_finalize(from_closing: bool, label: &str) {
     fixtures::open_setup(&mut svm, &f, DEFAULT_DEPOSIT);
     if from_closing {
         let closure_at: i64 = 1_000_000;
-        fixtures::set_status(&mut svm, &f.channel, fixtures::status::CLOSING);
-        fixtures::set_closure_started_at(&mut svm, &f.channel, closure_at);
+        mutate_channel(&mut svm, &f.channel, |ch| {
+            ch.status = fixtures::status::CLOSING;
+            ch.set_closure_started_at(closure_at);
+        });
         // Keep `now < closure_at + grace_period` so the CLOSING → FINALIZED
         // mid-grace path is exercised.
         set_clock(&mut svm, closure_at + 10);
@@ -381,7 +386,9 @@ fn distribute_setup_finalized(
     let (mut svm, f, accts) = distribute_setup_open(num_recipients, token_program);
     // Mutate to FINALIZED so the focal tx exercises the
     // treasury-sweep + payer-refund + tombstone branch.
-    fixtures::set_status(&mut svm, &f.channel, fixtures::status::FINALIZED);
+    mutate_channel(&mut svm, &f.channel, |ch| {
+        ch.status = fixtures::status::FINALIZED
+    });
     (svm, f, accts)
 }
 
@@ -519,8 +526,10 @@ fn run_withdraw_payer(token_program: solana_pubkey::Pubkey, label: &str) {
     let f = fixtures::prepare_channel(&mut svm, 1, token_program);
     fixtures::open_setup(&mut svm, &f, DEFAULT_DEPOSIT);
     // Skip the request_close + grace + finalize prelude — measure withdraw_payer alone.
-    fixtures::set_status(&mut svm, &f.channel, fixtures::status::FINALIZED);
-    fixtures::force_settled(&mut svm, &f.channel, DEFAULT_SETTLED);
+    mutate_channel(&mut svm, &f.channel, |ch| {
+        ch.status = fixtures::status::FINALIZED;
+        ch.set_settled(DEFAULT_SETTLED);
+    });
     let mut clock = svm.get_sysvar::<Clock>();
     clock.unix_timestamp = 1_000_000;
     svm.set_sysvar::<Clock>(&clock);
