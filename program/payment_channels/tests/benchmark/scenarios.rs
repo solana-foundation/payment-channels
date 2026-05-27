@@ -268,7 +268,7 @@ fn finalize() {
 // settle_and_finalize — merchant-signed transition, with or without voucher
 // across the OPEN → FINALIZED and CLOSING → FINALIZED entry points.
 
-fn run_settle_and_finalize(from_closing: bool, label: &str) {
+fn run_settle_and_finalize(from_closing: bool, with_voucher: bool, label: &str) {
     let mut svm = LiteSVM::load_program();
     let f = fixtures::prepare_channel(&mut svm, 1, SPL_TOKEN);
     fixtures::open_setup(&mut svm, &f, DEFAULT_DEPOSIT);
@@ -287,13 +287,15 @@ fn run_settle_and_finalize(from_closing: bool, label: &str) {
         cumulative_amount: DEFAULT_SETTLED,
         expires_at: 0,
     };
-    let payload = voucher_payload(&voucher);
-    let signature: [u8; 64] = f.authorized_signer.sign_message(&payload).into();
-    let ed_ix = build_ed25519_ix(
-        &f.authorized_signer.pubkey().to_bytes(),
-        &signature,
-        &payload,
-    );
+    let ed_ix = with_voucher.then(|| {
+        let payload = voucher_payload(&voucher);
+        let signature: [u8; 64] = f.authorized_signer.sign_message(&payload).into();
+        build_ed25519_ix(
+            &f.authorized_signer.pubkey().to_bytes(),
+            &signature,
+            &payload,
+        )
+    });
     let saf_ix = SettleAndFinalize {
         merchant: f.payee.pubkey(),
         channel: f.channel,
@@ -302,10 +304,11 @@ fn run_settle_and_finalize(from_closing: bool, label: &str) {
     .instruction(SettleAndFinalizeInstructionArgs {
         settle_and_finalize_args: SettleAndFinalizeArgs {
             voucher,
-            has_voucher: 1,
+            has_voucher: if with_voucher { 1 } else { 0 },
         },
     });
-    let tx = build_focal_tx(&svm, &f.payer, &[&f.payee], &[ed_ix, saf_ix]);
+    let ixs: Vec<_> = ed_ix.into_iter().chain(core::iter::once(saf_ix)).collect();
+    let tx = build_focal_tx(&svm, &f.payer, &[&f.payee], &ixs);
     record(&mut svm, tx, label).expect("settle_and_finalize ok");
 }
 
@@ -314,7 +317,7 @@ fn run_settle_and_finalize(from_closing: bool, label: &str) {
 /// left untouched (was 0).
 #[test]
 fn settle_and_finalize_from_open() {
-    run_settle_and_finalize(false, "settle_and_finalize[from_open]");
+    run_settle_and_finalize(false, true, "settle_and_finalize[from_open]");
 }
 
 /// Cooperative close mid-grace from CLOSING. Same wire path as
@@ -322,7 +325,21 @@ fn settle_and_finalize_from_open() {
 /// only triggered when the prior status was CLOSING.
 #[test]
 fn settle_and_finalize_from_closing() {
-    run_settle_and_finalize(true, "settle_and_finalize[from_closing]");
+    run_settle_and_finalize(true, true, "settle_and_finalize[from_closing]");
+}
+
+/// `has_voucher == 0` from OPEN: skips the ed25519 precompile + voucher
+/// decode entirely, exercising the lean cooperative-close path.
+#[test]
+fn settle_and_finalize_from_open_no_voucher() {
+    run_settle_and_finalize(false, false, "settle_and_finalize[from_open,voucher=no]");
+}
+
+/// `has_voucher == 0` from CLOSING: same lean path as `from_open_no_voucher`
+/// plus the `closure_started_at → 0` write.
+#[test]
+fn settle_and_finalize_from_closing_no_voucher() {
+    run_settle_and_finalize(true, false, "settle_and_finalize[from_closing,voucher=no]");
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -516,6 +533,16 @@ fn distribute_n32_t22_open() {
 fn distribute_n32_spl_fin() {
     let (mut svm, f, accts) = distribute_setup_finalized(32, SPL_TOKEN);
     run_distribute_alt(&f, &mut svm, &accts, "distribute[n=32,tok=spl,fin]");
+}
+
+/// `distribute` at 32 recipients on Token-2022, FINALIZED, via ALT. The
+/// worst-case scenario — protocol-max recipient loop on the heavier token
+/// program plus the tombstone branch (treasury sweep + payer refund +
+/// channel PDA shrink).
+#[test]
+fn distribute_n32_t22_fin() {
+    let (mut svm, f, accts) = distribute_setup_finalized(32, TOKEN_2022);
+    run_distribute_alt(&f, &mut svm, &accts, "distribute[n=32,tok=t22,fin]");
 }
 
 // ───────────────────────────────────────────────────────────────────────────
