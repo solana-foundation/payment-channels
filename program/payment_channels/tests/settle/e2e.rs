@@ -3,8 +3,8 @@
 #![allow(clippy::result_large_err)]
 
 use litesvm::LiteSVM;
+use payment_channels::PaymentChannelsError;
 use payment_channels::ed25519;
-use payment_channels::{PaymentChannelsError, VOUCHER_PAYLOAD_SIZE};
 use payment_channels_client::instructions::{Settle, SettleInstructionArgs};
 use payment_channels_client::types::{SettleArgs, VoucherArgs};
 use solana_account::Account;
@@ -18,8 +18,8 @@ use solana_transaction::Transaction;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 
 use crate::common::{
-    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, cu_tracker, ed25519_program_id,
-    expect_custom_err,
+    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, expect_custom_err,
+    voucher::{build_ed25519_ix, voucher_payload},
 };
 
 /// Seed a `Channel` PDA (208-byte `#[repr(C, packed)]` layout) owned by the
@@ -52,54 +52,6 @@ fn seed_channel(
         },
     )
     .expect("set_account");
-}
-
-/// Borsh-serialize the client `VoucherArgs`. The on-chain struct's field
-/// order (`channel_id || cumulative_amount || expires_at`) matches the
-/// ed25519-signed payload byte-for-byte, so the client's Borsh output IS
-/// the message the precompile must verify.
-fn voucher_payload(voucher: &VoucherArgs) -> [u8; VOUCHER_PAYLOAD_SIZE] {
-    borsh::to_vec(voucher)
-        .expect("voucher borsh encoding")
-        .try_into()
-        .expect("voucher payload matches VOUCHER_PAYLOAD_SIZE")
-}
-
-/// Canonical single-signature inline Ed25519 precompile ix:
-/// `[num_sigs=1, pad=0, offsets×1, pubkey, signature, message]`; all three
-/// `*_instruction_index` fields pinned to `u16::MAX` so the precompile reads
-/// from this ix's own data.
-fn build_ed25519_ix(
-    pubkey: &[u8; ed25519::PUBKEY_SERIALIZED_SIZE],
-    signature: &[u8; ed25519::SIGNATURE_SERIALIZED_SIZE],
-    message: &[u8; VOUCHER_PAYLOAD_SIZE],
-) -> Instruction {
-    let mut data = Vec::with_capacity(ed25519::MESSAGE_OFFSET + VOUCHER_PAYLOAD_SIZE);
-    data.push(1u8); // num_signatures
-    data.push(0u8); // padding
-
-    let pubkey_offset = ed25519::PUBKEY_OFFSET as u16;
-    let signature_offset = ed25519::SIGNATURE_OFFSET as u16;
-    let message_offset = ed25519::MESSAGE_OFFSET as u16;
-    let message_size = VOUCHER_PAYLOAD_SIZE as u16;
-
-    data.extend_from_slice(&signature_offset.to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes()); // signature_instruction_index
-    data.extend_from_slice(&pubkey_offset.to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes()); // public_key_instruction_index
-    data.extend_from_slice(&message_offset.to_le_bytes());
-    data.extend_from_slice(&message_size.to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes()); // message_instruction_index
-
-    data.extend_from_slice(pubkey);
-    data.extend_from_slice(signature);
-    data.extend_from_slice(message);
-
-    Instruction {
-        program_id: ed25519_program_id(),
-        accounts: Vec::new(),
-        data,
-    }
 }
 
 fn build_settle_ix(channel: &Pubkey, voucher: VoucherArgs) -> Instruction {
@@ -148,7 +100,7 @@ fn settle_advances_watermark_on_valid_voucher() {
         &[&fee_payer],
         svm.latest_blockhash(),
     );
-    cu_tracker::send_and_record(&mut svm, tx).expect("tx ok");
+    svm.send_transaction(tx).expect("tx ok");
 
     assert_eq!(read_settled(&svm, &channel), cumulative);
 }
@@ -196,7 +148,7 @@ fn settle_batches_two_paired_ix_advance_watermark() {
         &[&fee_payer],
         svm.latest_blockhash(),
     );
-    cu_tracker::send_and_record(&mut svm, tx).expect("tx ok");
+    svm.send_transaction(tx).expect("tx ok");
 
     assert_eq!(read_settled(&svm, &channel), 500_000);
 }
@@ -227,7 +179,7 @@ fn settle_without_preceding_ed25519_ix_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        cu_tracker::send_and_record(&mut svm, tx),
+        svm.send_transaction(tx),
         PaymentChannelsError::MissingEd25519Verification,
     );
 }
@@ -269,7 +221,7 @@ fn settle_after_expiry_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        cu_tracker::send_and_record(&mut svm, tx),
+        svm.send_transaction(tx),
         PaymentChannelsError::VoucherExpired,
     );
 }
@@ -304,7 +256,7 @@ fn settle_voucher_channel_mismatch_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        cu_tracker::send_and_record(&mut svm, tx),
+        svm.send_transaction(tx),
         PaymentChannelsError::VoucherChannelMismatch,
     );
 }
@@ -338,7 +290,7 @@ fn settle_voucher_over_deposit_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        cu_tracker::send_and_record(&mut svm, tx),
+        svm.send_transaction(tx),
         PaymentChannelsError::VoucherOverDeposit,
     );
 }
@@ -372,7 +324,7 @@ fn settle_voucher_not_monotonic_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        cu_tracker::send_and_record(&mut svm, tx),
+        svm.send_transaction(tx),
         PaymentChannelsError::VoucherWatermarkNotMonotonic,
     );
 }
@@ -413,7 +365,7 @@ fn settle_voucher_message_mismatch_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        cu_tracker::send_and_record(&mut svm, tx),
+        svm.send_transaction(tx),
         PaymentChannelsError::VoucherMessageMismatch,
     );
 }
@@ -448,7 +400,7 @@ fn settle_voucher_signer_mismatch_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        cu_tracker::send_and_record(&mut svm, tx),
+        svm.send_transaction(tx),
         PaymentChannelsError::VoucherSignerMismatch,
     );
 }
@@ -486,7 +438,7 @@ fn settle_malformed_ed25519_ix_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        cu_tracker::send_and_record(&mut svm, tx),
+        svm.send_transaction(tx),
         PaymentChannelsError::MalformedEd25519Instruction,
     );
 }
@@ -519,7 +471,7 @@ fn settle_preceding_compute_budget_ix_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        cu_tracker::send_and_record(&mut svm, tx),
+        svm.send_transaction(tx),
         PaymentChannelsError::MissingEd25519Verification,
     );
 }
@@ -561,7 +513,7 @@ fn settle_with_invalid_signature_rejects_before_settle_runs() {
         &[&fee_payer],
         svm.latest_blockhash(),
     );
-    let failed = cu_tracker::send_and_record(&mut svm, tx).expect_err("tx should fail");
+    let failed = svm.send_transaction(tx).expect_err("tx should fail");
 
     // Pin the failure at instruction index 0 (precompile). A failure at
     // index 1 would mean our program ran — exactly what this test rules

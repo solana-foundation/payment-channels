@@ -2,9 +2,9 @@
 
 #![allow(dead_code)]
 
-pub mod cu_tracker;
 pub mod lookup_table;
 pub mod token_2022;
+pub mod voucher;
 
 use litesvm::LiteSVM;
 use mollusk_svm::Mollusk;
@@ -40,6 +40,16 @@ pub fn event_authority() -> Pubkey {
         &PROGRAM_ID,
     )
     .0
+}
+
+/// `constants::TREASURY_OWNER` mirror — alternating `0xBE 0xEF` × 16.
+pub fn treasury_owner() -> Pubkey {
+    let mut b = [0u8; 32];
+    for i in 0..16 {
+        b[i * 2] = 0xBE;
+        b[i * 2 + 1] = 0xEF;
+    }
+    Pubkey::new_from_array(b)
 }
 
 pub fn token_balance(svm: &LiteSVM, account: &Pubkey) -> u64 {
@@ -117,9 +127,23 @@ pub fn open_channel(
         &[payer],
         svm.latest_blockhash(),
     );
-    cu_tracker::send_and_record(svm, tx).expect("open ok");
+    svm.send_transaction(tx).expect("open ok");
 
     (channel, channel_ata)
+}
+
+/// `ComputeBudgetInstruction::SetComputeUnitLimit(u32)` — variant tag 2
+/// followed by the limit as little-endian `u32`. Used as a stand-in for
+/// a non-Ed25519 preceding ix.
+pub fn compute_budget_ix(units: u32) -> Instruction {
+    let mut data = Vec::with_capacity(5);
+    data.push(0x02);
+    data.extend_from_slice(&units.to_le_bytes());
+    Instruction {
+        program_id: pubkey!("ComputeBudget111111111111111111111111111111"),
+        accounts: Vec::new(),
+        data,
+    }
 }
 
 fn program_binary_path() -> String {

@@ -40,7 +40,7 @@ salt(u64 LE) || deposit(u64 LE) || grace_period(u32 LE) || count(u32 LE) || entr
 |---|---|---|
 | `salt` | `u64` | PDA disambiguator for concurrent channels with the same payer/payee/mint/signer tuple. |
 | `deposit` | `u64` | Initial escrow amount. Must be non-zero. |
-| `grace_period` | `u32` | Seconds that must elapse after `requestClose` before permissionless `finalize`. |
+| `grace_period` | `u32` | Seconds that must elapse after `requestClose` before permissionless `finalize`. Must be non-zero. |
 | `recipients` | `Vec<DistributionEntry>` | Distribution preimage. Parsed as `count(u32 LE) || entries`; stored only as `blake3(preimage)` in the channel. |
 
 **Accounts**
@@ -238,6 +238,7 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | Code | Variant | Meaning |
 |---|---|---|
 | 200 | `DepositMustBeNonZero` | Deposit (`open`) or top-up amount (`topUp`) is zero. |
+| 201 | `GracePeriodMustBeNonZero` | `open.grace_period == 0`; channels must have a non-zero close window. |
 
 ### Voucher validation
 

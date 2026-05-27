@@ -33,6 +33,7 @@ Actors: **C** = client (payer). **S** = server (merchant).
 ### Notes
 
 - **Minimum-deposit constraint:** `POST /channel/open` requires `payload.depositAmount >= challenge.methodDetails.minimumDeposit`. Enforced at the HTTP layer, not on-chain.
+- **Grace-period constraint:** New-channel `POST /channel/open` requires `payload.gracePeriodSeconds == challenge.methodDetails.gracePeriodSeconds`. Before signing or submitting the transaction, the server MUST decode the `open` instruction data and reject unless encoded `grace_period` equals the same positive `u32`. The on-chain program rejects zero grace periods, but merchant-specific close-window policy is enforced at the HTTP layer.
 - **Server-submitted ixs:** `settle`, `settleAndFinalize`, and `distribute` are submitted directly by the server. In the cooperative path, the server triggers `distribute` (often bundled with `settleAndFinalize`) and may run mid-session distributes from `OPEN`.
 - **Escape routes are direct-to-chain:** The client submits these directly to Solana RPC:
   - `requestClose`: Payer-signed. Callable in `OPEN`. Starts the grace period.
@@ -48,7 +49,7 @@ Actors: **C** = client (payer). **S** = server (merchant).
 
 To avoid paying Solana network fees for invalid transactions and to ensure protocol security, the server MUST perform the following validations off-chain before submitting any transactions:
 
-1. **`POST /channel/open` Payload Validation:** The server MUST strictly validate that the `distributionSplits`, `payee`, and `mint` in the payload exactly match what it requested in the `402` challenge. Failing to do so allows a malicious client to alter the distribution to themselves.
+1. **`POST /channel/open` Payload Validation:** The server MUST strictly validate that the `distributionSplits`, `payee`, `mint`, and `gracePeriodSeconds` in the payload exactly match what it requested in the `402` challenge. It MUST also decode the submitted transaction's `open` instruction and reject unless encoded `grace_period` equals the challenged `gracePeriodSeconds`. Failing to do so allows a malicious client to alter the distribution to themselves or shorten the close window.
 2. **Voucher Validation:** Before accepting a metered request or submitting `settle` or `settleAndFinalize` with a voucher, the server MUST verify the Ed25519 signature over the Borsh-serialized voucher, check that `settled < cumulativeAmount <= deposit`, and ensure the voucher is fresh (`expiresAt` is null or in the future). The same validation applies to any `voucher` carried in `POST /channel/close`.
 
 **Challenge `request` object** (JCS-canonicalized then base64url-nopad into the `request` auth-param of `WWW-Authenticate: Payment`):
@@ -71,7 +72,7 @@ To avoid paying Solana network fees for invalid transactions and to ensure proto
     "feePayerKey": "<pubkey base58 — REQUIRED when feePayer=true>",
     "minVoucherDelta": "<u64 decimal string — OPTIONAL; server-policy hint, not enforced on-chain>",
     "ttlSeconds": <integer — OPTIONAL; server-policy hint for voucher `expiresAt`, not enforced on-chain>,
-    "gracePeriodSeconds": <integer — OPTIONAL, recommended 900>,
+    "gracePeriodSeconds": <integer — REQUIRED for new channel opens; merchant-selected close window in seconds, recommended 900>,
 
     // Solana-session extensions (not in MPP core; documented in Extensions section):
     "distributionSplits": [
@@ -240,6 +241,7 @@ Content-Type: application/json
     "authorizedSigner": "PayerAbcdef1234567890abcdef1234567890abcde",
     "salt": "42",
     "depositAmount": "1000000",
+    "gracePeriodSeconds": 900,
     "distributionSplits": [
       { "recipient": "PayeeMerchant1234567890abcdefghijklmnop", "shareBps": 9500 },
       { "recipient": "PltfrmFee456789abcdefghijklmnopqrstuv",   "shareBps":  500 }
