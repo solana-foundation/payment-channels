@@ -4,12 +4,13 @@
 
 use crate::common::token_2022::{EXT_TRANSFER_FEE_CONFIG, add_mint_extension};
 use crate::common::{
-    PROGRAM_ID, ProgramLoader, SPL_TOKEN, TOKEN_2022, expect_custom_err, open_channel,
-    token_balance,
+    ChannelBuilder, PROGRAM_ID, ProgramLoader, SPL_TOKEN, TOKEN_2022, expect_custom_err,
+    open_channel, read_channel, token_balance,
 };
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 use payment_channels::PaymentChannelsError;
+use payment_channels::state::ChannelStatus;
 use payment_channels_client::instructions::{TopUp, TopUpInstructionArgs};
 use payment_channels_client::types::TopUpArgs;
 use solana_account::Account;
@@ -19,14 +20,13 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-/// Inject a 216-byte Channel at `channel` owned by `PROGRAM_ID`.
+/// Inject a `Channel` at `channel` owned by `PROGRAM_ID`.
 fn seed_channel(svm: &mut LiteSVM, channel: &Pubkey, status: u8, deposit: u64, payer: &Pubkey) {
-    let mut data = vec![0u8; 216];
-    data[0] = 1; // AccountDiscriminator::Channel
-    data[1] = 1; // CURRENT_CHANNEL_VERSION
-    data[3] = status;
-    data[12..20].copy_from_slice(&deposit.to_le_bytes());
-    data[88..120].copy_from_slice(&payer.to_bytes());
+    let data = ChannelBuilder::new()
+        .status(ChannelStatus::try_from(status).expect("valid status byte"))
+        .deposit(deposit)
+        .payer(*payer)
+        .build();
     svm.set_account(
         *channel,
         Account {
@@ -41,8 +41,7 @@ fn seed_channel(svm: &mut LiteSVM, channel: &Pubkey, status: u8, deposit: u64, p
 }
 
 fn read_deposit(svm: &LiteSVM, channel: &Pubkey) -> u64 {
-    let acct = svm.get_account(channel).expect("channel exists");
-    u64::from_le_bytes(acct.data[12..20].try_into().unwrap())
+    read_channel(svm, channel, |ch| ch.deposit())
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -6,8 +6,8 @@
 //! channel PDA bump and every recipient ATA bump across runs, eliminating
 //! the dominant source of run-to-run CU variance.
 //!
-//! For non-OPEN prerequisite states, [`set_status`] / [`set_closure_started_at`] /
-//! [`force_settled`] write the channel buffer directly — running the real
+//! For non-OPEN prerequisite states, scenarios use `mutate_channel` (in
+//! [`crate::common`]) to write the channel buffer directly — running the real
 //! `request_close`/`finalize`/`settle` chain would inflate the focal tx's
 //! CU measurement through unrelated setup cost.
 //!
@@ -316,33 +316,6 @@ pub fn settle_setup(svm: &mut LiteSVM, f: &Fixture, cumulative: u64) {
         svm.latest_blockhash(),
     );
     svm.send_transaction(tx).expect("settle setup ok");
-}
-
-// ---------------------------------------------------------------------------
-// State mutators. Identical to the byte-level helpers in
-// `tests/distribute/e2e.rs` — used to skip the multi-tx prelude needed to
-// reach CLOSING / FINALIZED states so the focal ix's CU isn't polluted.
-
-fn mutate_channel<F: FnOnce(&mut Vec<u8>)>(svm: &mut LiteSVM, channel: &Pubkey, f: F) {
-    let mut acct = svm.get_account(channel).expect("channel exists");
-    f(&mut acct.data);
-    svm.set_account(*channel, acct).expect("overwrite channel");
-}
-
-pub fn set_status(svm: &mut LiteSVM, channel: &Pubkey, s: u8) {
-    mutate_channel(svm, channel, |data| data[3] = s);
-}
-
-pub fn set_closure_started_at(svm: &mut LiteSVM, channel: &Pubkey, ts: i64) {
-    mutate_channel(svm, channel, |data| {
-        data[36..44].copy_from_slice(&ts.to_le_bytes());
-    });
-}
-
-pub fn force_settled(svm: &mut LiteSVM, channel: &Pubkey, settled: u64) {
-    mutate_channel(svm, channel, |data| {
-        data[20..28].copy_from_slice(&settled.to_le_bytes());
-    });
 }
 
 /// Create the payee, treasury, and recipient ATAs needed to run `distribute`.

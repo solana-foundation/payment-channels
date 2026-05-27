@@ -1,5 +1,6 @@
 use mollusk_svm::result::ProgramResult;
 use payment_channels::PaymentChannelsError;
+use payment_channels::state::Channel;
 use payment_channels::state::channel::ChannelStatus;
 use solana_program_error::ProgramError;
 use solana_pubkey::Pubkey;
@@ -8,8 +9,11 @@ use crate::common::ChannelBuilder;
 
 use super::SettleAndFinalizeRun;
 
-fn channel_data(result: &mollusk_svm::result::InstructionResult) -> &[u8] {
-    &result.resulting_accounts[1].1.data
+fn channel(result: &mollusk_svm::result::InstructionResult) -> &Channel {
+    let data = &result.resulting_accounts[1].1.data;
+    assert_eq!(data.len(), Channel::LEN, "channel blob length mismatch");
+    // SAFETY: `Channel` is `#[repr(C)]` with `align_of == 1`.
+    unsafe { &*(data.as_ptr() as *const Channel) }
 }
 
 // closure_started_at = 1, grace_period = 3600 → deadline = 3601.
@@ -169,9 +173,9 @@ fn open_to_finalized_writes_status() {
     )
     .run_inspect();
     assert_eq!(result.program_result, ProgramResult::Success);
-    let data = channel_data(&result);
-    assert_eq!(data[3], ChannelStatus::Finalized as u8);
-    assert_eq!(i64::from_le_bytes(data[36..44].try_into().unwrap()), 0i64);
+    let ch = channel(&result);
+    assert_eq!(ch.status, ChannelStatus::Finalized as u8);
+    assert_eq!(ch.closure_started_at(), 0i64);
 }
 
 #[test]
@@ -189,11 +193,8 @@ fn closing_mid_grace_resets_closure_started_at() {
     )
     .run_inspect();
     assert_eq!(result.program_result, ProgramResult::Success);
-    let data = channel_data(&result);
-    assert_eq!(data[3], ChannelStatus::Finalized as u8);
-    assert_eq!(i64::from_le_bytes(data[36..44].try_into().unwrap()), 0i64);
-    assert_eq!(
-        u64::from_le_bytes(data[20..28].try_into().unwrap()),
-        200_000u64
-    );
+    let ch = channel(&result);
+    assert_eq!(ch.status, ChannelStatus::Finalized as u8);
+    assert_eq!(ch.closure_started_at(), 0i64);
+    assert_eq!(ch.settled(), 200_000u64);
 }

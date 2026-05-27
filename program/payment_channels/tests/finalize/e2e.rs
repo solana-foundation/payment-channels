@@ -13,7 +13,7 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-use crate::common::{PROGRAM_ID, ProgramLoader, expect_custom_err};
+use crate::common::{ChannelBuilder, PROGRAM_ID, ProgramLoader, expect_custom_err, read_channel};
 
 const CLOSURE_STARTED_AT: i64 = 1_000_000;
 const GRACE_PERIOD: u32 = 3_600;
@@ -26,12 +26,11 @@ fn seed_channel(
     closure_started_at: i64,
     grace_period: u32,
 ) {
-    let mut data = vec![0u8; 216];
-    data[0] = 1; // AccountDiscriminator::Channel
-    data[1] = 1; // CURRENT_CHANNEL_VERSION
-    data[3] = status as u8;
-    data[36..44].copy_from_slice(&closure_started_at.to_le_bytes());
-    data[52..56].copy_from_slice(&grace_period.to_le_bytes());
+    let data = ChannelBuilder::new()
+        .status(status)
+        .closure_started_at(closure_started_at)
+        .grace_period(grace_period)
+        .build();
     svm.set_account(
         *channel,
         Account {
@@ -64,10 +63,6 @@ fn send_finalize(
         svm.latest_blockhash(),
     );
     svm.send_transaction(tx)
-}
-
-fn read_channel(svm: &LiteSVM, channel: &Pubkey) -> Vec<u8> {
-    svm.get_account(channel).expect("channel exists").data
 }
 
 #[test]
@@ -110,9 +105,10 @@ fn at_exact_deadline_succeeds() {
 
     send_finalize(&mut svm, &channel, &fee_payer).expect("finalize at deadline ok");
 
-    let data = read_channel(&svm, &channel);
-    assert_eq!(data[3], ChannelStatus::Finalized as u8);
-    assert_eq!(i64::from_le_bytes(data[36..44].try_into().unwrap()), 0i64);
+    read_channel(&svm, &channel, |ch| {
+        assert_eq!(ch.status, ChannelStatus::Finalized as u8);
+        assert_eq!(ch.closure_started_at(), 0i64);
+    });
 }
 
 #[test]
@@ -133,7 +129,8 @@ fn post_grace_transitions_and_clears_timestamp() {
 
     send_finalize(&mut svm, &channel, &fee_payer).expect("finalize ok");
 
-    let data = read_channel(&svm, &channel);
-    assert_eq!(data[3], ChannelStatus::Finalized as u8);
-    assert_eq!(i64::from_le_bytes(data[36..44].try_into().unwrap()), 0i64);
+    read_channel(&svm, &channel, |ch| {
+        assert_eq!(ch.status, ChannelStatus::Finalized as u8);
+        assert_eq!(ch.closure_started_at(), 0i64);
+    });
 }
