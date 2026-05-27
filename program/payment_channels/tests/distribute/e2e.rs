@@ -8,8 +8,6 @@
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 use payment_channels::PaymentChannelsError;
-use payment_channels::VOUCHER_PAYLOAD_SIZE;
-use payment_channels::ed25519;
 use payment_channels::instructions::distribute::DISCRIMINATOR;
 use payment_channels::instructions::open::DISCRIMINATOR as OPEN_DISCRIMINATOR;
 use payment_channels_client::instructions::{Settle, SettleInstructionArgs, WithdrawPayer};
@@ -24,7 +22,7 @@ use solana_transaction_error::TransactionError;
 
 use super::{
     MAX_DISTRIBUTION_RECIPIENTS, STATUS_CLOSING, STATUS_FINALIZED, STATUS_OPEN, Split, TOKEN_2022,
-    build_distribute_ix, build_recipients, treasury_owner,
+    build_distribute_ix, build_recipients,
 };
 use crate::common::token_2022::{
     EXT_CPI_GUARD, EXT_GROUP_MEMBER_POINTER, EXT_GROUP_POINTER, EXT_MEMO_TRANSFER,
@@ -35,8 +33,9 @@ use crate::common::token_2022::{
 };
 use crate::common::{
     ATA_PROGRAM, INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM,
-    SYSVAR_RENT, compute_budget_ix, cu_tracker, ed25519_program_id, event_authority,
-    expect_custom_err, expect_instruction_err, set_clock, token_balance,
+    SYSVAR_RENT, compute_budget_ix, event_authority, expect_custom_err, expect_instruction_err,
+    set_clock, token_balance, treasury_owner,
+    voucher::{build_ed25519_ix, voucher_payload},
 };
 
 const GRACE_PERIOD: u32 = 3600;
@@ -264,7 +263,7 @@ fn open_channel(
         &[payer],
         svm.latest_blockhash(),
     );
-    cu_tracker::send_and_record(svm, tx).expect("open should succeed");
+    svm.send_transaction(tx).expect("open should succeed");
 
     OpenedChannel {
         channel,
@@ -277,46 +276,6 @@ fn open_channel(
 // ---------------------------------------------------------------------------
 // Settle helper — drives the precompile + settle bundle to advance the
 // `settled` watermark.
-
-fn voucher_payload(voucher: &VoucherArgs) -> [u8; VOUCHER_PAYLOAD_SIZE] {
-    borsh::to_vec(voucher)
-        .expect("voucher borsh encoding")
-        .try_into()
-        .expect("voucher payload matches VOUCHER_PAYLOAD_SIZE")
-}
-
-fn build_ed25519_ix(
-    pubkey: &[u8; ed25519::PUBKEY_SERIALIZED_SIZE],
-    signature: &[u8; ed25519::SIGNATURE_SERIALIZED_SIZE],
-    message: &[u8; VOUCHER_PAYLOAD_SIZE],
-) -> Instruction {
-    let mut data = Vec::with_capacity(ed25519::MESSAGE_OFFSET + VOUCHER_PAYLOAD_SIZE);
-    data.push(1u8);
-    data.push(0u8);
-
-    let pubkey_offset = ed25519::PUBKEY_OFFSET as u16;
-    let signature_offset = ed25519::SIGNATURE_OFFSET as u16;
-    let message_offset = ed25519::MESSAGE_OFFSET as u16;
-    let message_size = VOUCHER_PAYLOAD_SIZE as u16;
-
-    data.extend_from_slice(&signature_offset.to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes());
-    data.extend_from_slice(&pubkey_offset.to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes());
-    data.extend_from_slice(&message_offset.to_le_bytes());
-    data.extend_from_slice(&message_size.to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes());
-
-    data.extend_from_slice(pubkey);
-    data.extend_from_slice(signature);
-    data.extend_from_slice(message);
-
-    Instruction {
-        program_id: ed25519_program_id(),
-        accounts: Vec::new(),
-        data,
-    }
-}
 
 fn build_settle_ix(channel: &Pubkey, voucher: VoucherArgs) -> Instruction {
     Settle {
@@ -354,7 +313,7 @@ fn settle_to(
         &[fee_payer],
         svm.latest_blockhash(),
     );
-    cu_tracker::send_and_record(svm, tx).expect("settle should succeed");
+    svm.send_transaction(tx).expect("settle should succeed");
 }
 
 // ---------------------------------------------------------------------------
@@ -519,7 +478,7 @@ impl Scenario {
             &[&self.fee_payer],
             blockhash,
         );
-        cu_tracker::send_and_record(&mut self.svm, tx)
+        self.svm.send_transaction(tx)
     }
 }
 
@@ -714,7 +673,7 @@ fn distribute_after_withdraw_payer_skips_payer_refund() {
         &[&s.payer_keypair],
         s.svm.latest_blockhash(),
     );
-    cu_tracker::send_and_record(&mut s.svm, tx).expect("withdraw_payer ok");
+    s.svm.send_transaction(tx).expect("withdraw_payer ok");
 
     assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
 
@@ -1275,7 +1234,7 @@ fn settle_on_tombstoned_channel_rejects() {
         blockhash,
     );
     expect_instruction_err(
-        cu_tracker::send_and_record(&mut s.svm, tx),
+        s.svm.send_transaction(tx),
         InstructionError::InvalidAccountData,
     );
     assert_tombstone(&s.svm, &s.channel);
@@ -1312,10 +1271,7 @@ fn reopen_at_same_seeds_rejects_across_tx() {
         &[&s.payer_keypair],
         blockhash,
     );
-    expect_instruction_err(
-        cu_tracker::send_and_record(&mut s.svm, tx),
-        InstructionError::Custom(0),
-    );
+    expect_instruction_err(s.svm.send_transaction(tx), InstructionError::Custom(0));
     // Tombstone bytes preserved — no partial reinit happened.
     assert_tombstone(&s.svm, &s.channel);
 }
@@ -1358,9 +1314,7 @@ fn reopen_at_same_seeds_rejects_same_tx() {
         &[&s.payer_keypair],
         blockhash,
     );
-    let err = cu_tracker::send_and_record(&mut s.svm, tx)
-        .expect_err("tx should fail")
-        .err;
+    let err = s.svm.send_transaction(tx).expect_err("tx should fail").err;
     // Lock down both the failing ix index (open is at index 2 — after
     // compute-budget at 0 and distribute at 1) and the variant. A regression
     // that shifts the failure to a different ix or a different system error
