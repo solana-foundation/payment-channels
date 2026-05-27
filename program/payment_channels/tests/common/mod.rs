@@ -2,8 +2,8 @@
 
 #![allow(dead_code)]
 
-pub mod cu_tracker;
 pub mod token_2022;
+pub mod voucher;
 
 use litesvm::LiteSVM;
 use mollusk_svm::Mollusk;
@@ -39,6 +39,16 @@ pub fn event_authority() -> Pubkey {
         &PROGRAM_ID,
     )
     .0
+}
+
+/// `constants::TREASURY_OWNER` mirror — alternating `0xBE 0xEF` × 16.
+pub fn treasury_owner() -> Pubkey {
+    let mut b = [0u8; 32];
+    for i in 0..16 {
+        b[i * 2] = 0xBE;
+        b[i * 2 + 1] = 0xEF;
+    }
+    Pubkey::new_from_array(b)
 }
 
 pub fn token_balance(svm: &LiteSVM, account: &Pubkey) -> u64 {
@@ -116,7 +126,7 @@ pub fn open_channel(
         &[payer],
         svm.latest_blockhash(),
     );
-    cu_tracker::send_and_record(svm, tx).expect("open ok");
+    svm.send_transaction(tx).expect("open ok");
 
     (channel, channel_ata)
 }

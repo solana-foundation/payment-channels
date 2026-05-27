@@ -1,3 +1,4 @@
+mod benchmark;
 mod common;
 mod distribute;
 mod event_engine;

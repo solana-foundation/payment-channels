@@ -79,12 +79,14 @@ test-program: generate-client
 test-client: generate-client
     cd {{ts_client_dir}} && pnpm run test
 
-# Run tests with CU profiling enabled. The `instructions` test binary
-# writes a single `cu_report.md` next to Cargo.toml on exit; CI posts it
-# as the PR comment. Local: `cat {{program_dir}}/cu_report.md`.
-test-and-benchmark: generate-client
+# Run the parameterized CU benchmark scenarios and emit bench_report.md
+# next to Cargo.toml. `--test-threads=1` keeps logs interleaved-free and
+# avoids contention; bench scenarios themselves only push to a Mutex so
+# the report is correct either way.
+bench: generate-client
     cd {{program_dir}} && \
-        CU_REPORT=1 CU_REPORT_DATE="$(date -u +%Y-%m-%d)" cargo test-sbf
+        BENCH=1 BENCH_DATE="$(date -u +%Y-%m-%d)" \
+        cargo test-sbf --test instructions benchmark::scenarios:: -- --test-threads=1
 
 # Focused event-engine end-to-end run (litesvm). Loads the compiled .so
 # and exercises the self-CPI Anchor-event wire format via the `open`

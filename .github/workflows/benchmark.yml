@@ -1,6 +1,6 @@
-# Compute-unit profiler. Runs `just test-and-benchmark` on every PR and
-# upserts `cu_report.md` (written by the integration-test binary on exit)
-# as a PR comment keyed on the `<!-- cu-report -->` marker.
+# Compute-unit profiler. Runs `just bench` on every PR and upserts
+# `bench_report.md` (written by the integration-test binary on exit) as a
+# PR comment keyed on the `<!-- bench-report -->` marker.
 
 name: Benchmark
 
@@ -32,19 +32,19 @@ jobs:
           save-rust-cache: "true"
 
       - name: Run benchmark
-        run: just test-and-benchmark
+        run: just bench
 
-      - name: Post CU report comment
+      - name: Post bench report comment
         if: github.event.pull_request.head.repo.full_name == github.repository
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           PR=${{ github.event.pull_request.number }}
-          MARKER="<!-- cu-report -->"
+          MARKER="<!-- bench-report -->"
           REPORT="$MARKER
 
-          $(cat program/payment_channels/cu_report.md)"
+          $(cat program/payment_channels/bench_report.md)"
 
           COMMENT_ID=$(gh api "repos/${{ github.repository }}/issues/${PR}/comments" \
             --jq ".[] | select(.body | contains(\"$MARKER\")) | .id" | head -1)

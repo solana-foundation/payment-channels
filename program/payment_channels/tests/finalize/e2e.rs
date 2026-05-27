@@ -13,7 +13,7 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-use crate::common::{PROGRAM_ID, ProgramLoader, cu_tracker, expect_custom_err};
+use crate::common::{PROGRAM_ID, ProgramLoader, expect_custom_err};
 
 const CLOSURE_STARTED_AT: i64 = 1_000_000;
 const GRACE_PERIOD: u32 = 3_600;
@@ -63,7 +63,7 @@ fn send_finalize(
         &[fee_payer],
         svm.latest_blockhash(),
     );
-    cu_tracker::send_and_record(svm, tx)
+    svm.send_transaction(tx)
 }
 
 fn read_channel(svm: &LiteSVM, channel: &Pubkey) -> Vec<u8> {
