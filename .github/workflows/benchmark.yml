@@ -2,7 +2,7 @@
 # merge base (typically `main`), then upserts a side-by-side comparison
 # comment keyed on the `<!-- bench-report -->` marker.
 
-name: Benchmark
+name: benchmark
 
 on:
   pull_request:
