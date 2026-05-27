@@ -12,15 +12,11 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-use crate::common::{PROGRAM_ID, ProgramLoader};
+use crate::common::{ChannelBuilder, PROGRAM_ID, ProgramLoader, read_channel};
 
-/// Inject a 216-byte Channel at `channel` owned by `PROGRAM_ID`.
+/// Inject a `Channel` at `channel` owned by `PROGRAM_ID`.
 fn seed_channel(svm: &mut LiteSVM, channel: &Pubkey, status: ChannelStatus, payer: &Pubkey) {
-    let mut data = vec![0u8; 216];
-    data[0] = 1; // AccountDiscriminator::Channel
-    data[1] = 1; // CURRENT_CHANNEL_VERSION
-    data[3] = status as u8;
-    data[88..120].copy_from_slice(&payer.to_bytes());
+    let data = ChannelBuilder::new().status(status).payer(*payer).build();
     svm.set_account(
         *channel,
         Account {
@@ -32,10 +28,6 @@ fn seed_channel(svm: &mut LiteSVM, channel: &Pubkey, status: ChannelStatus, paye
         },
     )
     .expect("set_account");
-}
-
-fn read_channel(svm: &LiteSVM, channel: &Pubkey) -> Vec<u8> {
-    svm.get_account(channel).expect("channel exists").data
 }
 
 fn build_request_close_ix(payer: &Pubkey, channel: &Pubkey) -> Instruction {
@@ -66,10 +58,8 @@ fn request_close_marks_closing_and_stamps_now() {
     );
     svm.send_transaction(tx).expect("request_close ok");
 
-    let data = read_channel(&svm, &channel);
-    assert_eq!(data[3], ChannelStatus::Closing as u8);
-    assert_eq!(
-        i64::from_le_bytes(data[36..44].try_into().unwrap()),
-        pre_clock_ts,
-    );
+    read_channel(&svm, &channel, |ch| {
+        assert_eq!(ch.status, ChannelStatus::Closing as u8);
+        assert_eq!(ch.closure_started_at(), pre_clock_ts);
+    });
 }

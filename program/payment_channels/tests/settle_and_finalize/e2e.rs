@@ -16,16 +16,11 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 
 use crate::common::{
-    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, expect_custom_err,
+    ChannelBuilder, INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, expect_custom_err,
+    read_channel,
     voucher::{build_ed25519_ix, voucher_payload},
 };
 
-/// Inject a 216-byte Channel owned by PROGRAM_ID.
-///
-/// Byte offsets (from channel.rs layout):
-///  0  discriminator, 1  version, 3  status
-/// 12..20 deposit, 20..28 settled, 36..44 closure_started_at, 52..56 grace_period
-/// 88..120 payer, 120..152 payee, 152..184 authorized_signer, 184..216 mint
 #[allow(clippy::too_many_arguments)]
 fn seed_channel(
     svm: &mut LiteSVM,
@@ -38,16 +33,15 @@ fn seed_channel(
     payee: &Pubkey,
     authorized_signer: &Pubkey,
 ) {
-    let mut data = vec![0u8; 216];
-    data[0] = 1; // AccountDiscriminator::Channel
-    data[1] = 1; // CURRENT_CHANNEL_VERSION
-    data[3] = status as u8;
-    data[12..20].copy_from_slice(&deposit.to_le_bytes());
-    data[20..28].copy_from_slice(&settled.to_le_bytes());
-    data[36..44].copy_from_slice(&closure_started_at.to_le_bytes());
-    data[52..56].copy_from_slice(&grace_period.to_le_bytes());
-    data[120..152].copy_from_slice(&payee.to_bytes());
-    data[152..184].copy_from_slice(&authorized_signer.to_bytes());
+    let data = ChannelBuilder::new()
+        .status(status)
+        .deposit(deposit)
+        .settled(settled)
+        .closure_started_at(closure_started_at)
+        .grace_period(grace_period)
+        .payee(*payee)
+        .authorized_signer(*authorized_signer)
+        .build();
     svm.set_account(
         *channel,
         Account {
@@ -59,20 +53,6 @@ fn seed_channel(
         },
     )
     .expect("set_account");
-}
-
-fn read_status(svm: &LiteSVM, channel: &Pubkey) -> u8 {
-    svm.get_account(channel).expect("channel exists").data[3]
-}
-
-fn read_settled(svm: &LiteSVM, channel: &Pubkey) -> u64 {
-    let data = svm.get_account(channel).expect("channel exists").data;
-    u64::from_le_bytes(data[20..28].try_into().unwrap())
-}
-
-fn read_closure_started_at(svm: &LiteSVM, channel: &Pubkey) -> i64 {
-    let data = svm.get_account(channel).expect("channel exists").data;
-    i64::from_le_bytes(data[36..44].try_into().unwrap())
 }
 
 fn build_saf_ix(channel: &Pubkey, args: SettleAndFinalizeArgs, merchant: &Pubkey) -> Instruction {
@@ -136,9 +116,11 @@ fn open_to_finalized_with_voucher() {
     );
     svm.send_transaction(tx).expect("tx ok");
 
-    assert_eq!(read_status(&svm, &channel), ChannelStatus::Finalized as u8);
-    assert_eq!(read_settled(&svm, &channel), cumulative);
-    assert_eq!(read_closure_started_at(&svm, &channel), 0);
+    read_channel(&svm, &channel, |ch| {
+        assert_eq!(ch.status, ChannelStatus::Finalized as u8);
+        assert_eq!(ch.settled(), cumulative);
+        assert_eq!(ch.closure_started_at(), 0);
+    });
 }
 
 // ─── error paths ─────────────────────────────────────────────────────────────
