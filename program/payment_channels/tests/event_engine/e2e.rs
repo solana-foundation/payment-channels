@@ -43,7 +43,7 @@ fn open_emits_opened_event_with_anchor_compatible_wire_format() {
     fund(&mut svm, &payer.pubkey(), 10_000_000_000);
 
     let payee = Pubkey::new_unique();
-    let authorized_signer = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
     let salt: u64 = 1;
     let deposit: u64 = 100_000_000;
     let grace_period: u32 = 3_600;

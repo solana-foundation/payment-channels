@@ -229,6 +229,10 @@ pub fn process(
         return Err(PaymentChannelsError::GracePeriodMustBeNonZero.into());
     }
 
+    if !accs.authorized_signer.address().is_on_curve() {
+        return Err(PaymentChannelsError::InvalidAuthorizedSigner.into());
+    }
+
     let (channel_address, bump) = Channel::find_pda(
         accs.payer.address(),
         accs.payee.address(),

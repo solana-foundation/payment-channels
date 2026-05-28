@@ -97,7 +97,7 @@ pub struct Voucher {
 
 pub struct SignedVoucher {
     pub voucher:        Voucher,
-    pub signer:         Pubkey,           // JSON: base58 string
+    pub signer:         Pubkey,           // JSON: base58 string; equals Channel.authorized_signer
     pub signature:      [u8; 64],         // JSON: base58 string
     pub signature_type: SigType,          // always SigType::Ed25519
 }
@@ -123,7 +123,7 @@ pub struct VoucherArgs {
 
 Total 48 bytes, stored align-1 (`[u8; 8]` arrays for the two ints). Field order matches `Borsh({ channel_id, cumulative_amount, expires_at })`, so the struct's raw bytes ARE the Ed25519-signed payload — no repack between `VoucherArgs` and the precompile message.
 
-**Verification.** The caller bundles an Ed25519 native-program ix immediately before each voucher-bearing program ix in the same transaction. The program reads the verified message bytes from that ix via the Instructions sysvar and asserts they equal `VoucherArgs::as_bytes()`. The pubkey embedded in the precompile ix MUST equal `Channel.authorized_signer` (which equals `payer` if no delegate was bound at `open`).
+**Verification.** The caller bundles an Ed25519 native-program ix immediately before each voucher-bearing program ix in the same transaction. The program reads the verified message bytes from that ix via the Instructions sysvar and asserts they equal `VoucherArgs::as_bytes()`. The pubkey embedded in the precompile ix MUST equal `Channel.authorized_signer` (which equals `payer` if no delegate was bound at `open`). `open` rejects `authorized_signer` values that are not valid Ed25519 public-key points.
 
 **Replay protection.** `channel_id` (a PDA, hence program- and seed-specific) + strictly monotonic `cumulative_amount > settled` + optional `expires_at`. No explicit nonce. This strict watermark rule applies to `settle` and to `settleAndFinalize` when a voucher is supplied. A supplied `settleAndFinalize` voucher with `cumulative_amount <= settled` is invalid and MUST cause the `settleAndFinalize` instruction to reject; if no additional settlement is needed, call `settleAndFinalize` without a voucher to finalize the current `settled` watermark.
 
@@ -137,7 +137,7 @@ Total 48 bytes, stored align-1 (`[u8; 8]` arrays for the two ints). Field order 
 
 | Instruction | From → To | Guard |
 |---|---|---|
-| `open` | `NONEXISTENT → OPEN` | payer signer; channel PDA matches seeds and is uninitialized; `deposit > 0`; `grace_period > 0`; `payer != payee`; `count ≤ MAX_DISTRIBUTION_RECIPIENTS`; exact preimage length; `bps[i] > 0 ∀ i ∈ [0, count)`; `Σ bps[0..count] ≤ 10000`; recipients unique; no recipient equals the derived channel PDA |
+| `open` | `NONEXISTENT → OPEN` | payer signer; `authorized_signer` is a valid Ed25519 public key; channel PDA matches seeds and is uninitialized; `deposit > 0`; `grace_period > 0`; `payer != payee`; `payee` may be on-curve or a program-derived address (PDA); `count ≤ MAX_DISTRIBUTION_RECIPIENTS`; exact preimage length; `bps[i] > 0 ∀ i ∈ [0, count)`; `Σ bps[0..count] ≤ 10000`; recipients unique; no recipient equals the derived channel PDA |
 | `settle` | `OPEN → OPEN` | channel is `OPEN`; preceding Ed25519 ix exists; voucher channel id matches the channel PDA; voucher signer equals `authorized_signer`; voucher fresh†; `settled < voucher.cumulative ≤ deposit` |
 | `topUp` | `OPEN → OPEN` | payer signer equals channel `payer`; `amount > 0`; channel is `OPEN`; mint/source/escrow token accounts match channel |
 | `settleAndFinalize` | `OPEN → FINALIZED` | merchant signer equals channel `payee`; voucher optional (if present: preceding Ed25519 ix, signer equals `authorized_signer`, voucher fresh†, `settled < voucher.cumulative ≤ deposit`) |
@@ -151,6 +151,8 @@ Total 48 bytes, stored align-1 (`[u8; 8]` arrays for the two ints). Field order 
 † **voucher fresh** = `voucher.expires_at == 0` OR `now < voucher.expires_at`. Expired vouchers MUST be rejected to prevent merchants from settling stale authorizations after the payer's TTL has passed.
 
 ‡ **`closureStartedAt` semantics:** Set by `requestClose`. Gates `finalize` via `now >= closureStartedAt + grace_period`. Reset to `0` on transition to `FINALIZED`. Only `CLOSING` carries a live timestamp. Once `FINALIZED`, `distribute` and `withdrawPayer` are immediately callable. The payer's worst-case wait is one `grace_period`.
+
+**PDA payees.** `open` intentionally does not require `payee` to be on-curve. Direct `settleAndFinalize` transactions still require a signer equal to `Channel.payee`, so program-derived address (PDA) payees can use the cooperative-close path only when their owning program invokes payment channels via CPI with signer seeds. Permissionless `settle`, `finalize`, and `distribute` do not depend on a payee signature.
 
 ## Instructions
 
