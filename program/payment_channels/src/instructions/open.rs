@@ -225,6 +225,9 @@ pub fn process(
     if deposit == 0 {
         return Err(PaymentChannelsError::DepositMustBeNonZero.into());
     }
+    if args.grace_period() < 1 {
+        return Err(PaymentChannelsError::GracePeriodMustBeNonZero.into());
+    }
 
     let (channel_address, bump) = Channel::find_pda(
         accs.payer.address(),

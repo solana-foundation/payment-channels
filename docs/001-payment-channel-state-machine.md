@@ -56,7 +56,7 @@ pub struct Channel {
     pub settlement:         SettlementWatermarks, // [ 20..36 )
     pub closure_started_at: i64,      // [ 36..44 )  unix ts; set by `requestClose`, gates `finalize`
     pub payer_withdrawn_at: i64,      // [ 44..52 )  unix ts; 0 = not yet withdrawn
-    pub grace_period:       u32,      // [ 52..56 )  seconds; set at `open`
+    pub grace_period:       u32,      // [ 52..56 )  seconds; set at `open`; must be non-zero
     pub distribution_hash:  [u8; 32], // [ 56..88 )  Blake3 digest of the canonical splits preimage, computed on-chain at `open`
     pub payer:              Address,  // [ 88..120)  refund destination + payer-authority signer
     pub payee:              Address,  // [120..152)  PDA seed binding + implicit-remainder destination on `distribute`
@@ -142,7 +142,7 @@ Total 48 bytes, stored align-1 (`[u8; 8]` arrays for the two ints). Field order 
 
 | Instruction | From → To | Guard |
 |---|---|---|
-| `open` | `NONEXISTENT → OPEN` | payer signer; channel PDA matches seeds and is uninitialized; `deposit > 0`; `payer != payee`; `count ≤ MAX_DISTRIBUTION_RECIPIENTS`; exact preimage length; `bps[i] > 0 ∀ i ∈ [0, count)`; `Σ bps[0..count] ≤ 10000`; recipients unique; no recipient equals the derived channel PDA |
+| `open` | `NONEXISTENT → OPEN` | payer signer; channel PDA matches seeds and is uninitialized; `deposit > 0`; `grace_period > 0`; `payer != payee`; `count ≤ MAX_DISTRIBUTION_RECIPIENTS`; exact preimage length; `bps[i] > 0 ∀ i ∈ [0, count)`; `Σ bps[0..count] ≤ 10000`; recipients unique; no recipient equals the derived channel PDA |
 | `settle` | `OPEN → OPEN` | channel is `OPEN`; preceding Ed25519 ix exists; voucher channel id matches the channel PDA; voucher signer equals `authorized_signer`; voucher fresh†; `settled < voucher.cumulative ≤ deposit` |
 | `topUp` | `OPEN → OPEN` | payer signer equals channel `payer`; `amount > 0`; channel is `OPEN`; mint/source/escrow token accounts match channel |
 | `settleAndFinalize` | `OPEN → FINALIZED` | merchant signer equals channel `payee`; voucher optional (if present: preceding Ed25519 ix, signer equals `authorized_signer`, voucher fresh†, `settled < voucher.cumulative ≤ deposit`) |
@@ -181,16 +181,16 @@ count (u32 LE) || [ recipient (32 bytes) || bps (u16 LE) ] × count
 ## Token Program Support
 
 Every token-moving instruction receives a `token_program` account and accepts
-only the classic SPL Token program or Token-2022. ATAs are derived as
+only the SPL Token program or Token-2022. ATAs are derived as
 `ATA(owner, mint, token_program)`, and transfers/closures use common
 Token-2022 CPI helpers (`TransferChecked`, `CloseAccount`) with the supplied
-program id, so extensionless Token-2022 and classic SPL Token share one path.
+program id, so extensionless Token-2022 and SPL Token share one path.
 
 Defensive validation runs before any escrow movement or `payout_watermark` mutation:
 
 - `open` validates the mint and the payer's source token account. The channel's escrow ATA is created in-band by the ATA program after the address is checked against `find_program_address([channel, token_program, mint], …)`, so it needs no extension scan.
 - `distribute` validates the mint and every token account it touches: the channel escrow, the payer refund ATA, the treasury ATA, and each recipient ATA.
-- Classic SPL Token mints/accounts must use the base layouts (strict length equality).
+- SPL Token mints/accounts must use the base layouts (strict length equality).
 - Token-2022 mints/accounts are parsed with the account-type byte and TLV extension trailer.
 - Token-2022 mint extensions are allowed only for an explicitly enumerated set: `MetadataPointer`, `TokenMetadata`, `GroupPointer`, `TokenGroup`, `GroupMemberPointer`, `TokenGroupMember`. The list is fixed; future extensions, even ones that would not affect transfer semantics, are rejected until added here.
 - Token-2022 token-account extensions are allowed only for base accounts and `ImmutableOwner`.

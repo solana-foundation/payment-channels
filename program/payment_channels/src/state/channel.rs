@@ -39,6 +39,15 @@ pub enum ChannelStatus {
     Closing = 2,
 }
 
+impl ChannelStatus {
+    /// Whether the channel is in [`Finalized`](Self::Finalized), gating
+    /// refund/sweep/tombstone branches in `distribute`.
+    #[inline]
+    pub const fn is_finalized(&self) -> bool {
+        matches!(self, Self::Finalized)
+    }
+}
+
 impl TryFrom<u8> for ChannelStatus {
     type Error = ProgramError;
 

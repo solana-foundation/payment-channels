@@ -39,9 +39,7 @@ pub(crate) mod tlv {
 /// Sentinel `type` field marking the end of the populated TLV trailer.
 const UNINITIALIZED: u16 = 0;
 
-/// Token-2022 extension type ids accepted by this program. Discriminants are
-/// part of the Token-2022 wire format; mirrored here so the program stays
-/// no_std/no_alloc. Asserted against upstream in the test module.
+/// Token-2022 extension type ids accepted by this program (wire-format discriminants).
 #[repr(u16)]
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub(crate) enum ExtensionType {
@@ -181,7 +179,7 @@ impl<'a> Iterator for ExtensionTlv<'a> {
 }
 
 /// Walks the Token-2022 TLV trailer and rejects any type not whitelisted by
-/// `P`. Extension uniqueness is enforced by the upstream initializer.
+/// `P`. Extension uniqueness is enforced at initialization.
 pub(crate) fn scan_tlv_extensions<P: ExtensionPolicy>(
     trailer: &[u8],
 ) -> Result<(), TokenExtensionError> {

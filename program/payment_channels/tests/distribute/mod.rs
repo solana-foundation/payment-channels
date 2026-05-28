@@ -33,16 +33,6 @@ pub(super) struct Split {
     pub bps: u16,
 }
 
-/// `constants::TREASURY_OWNER` mirror — alternating `0xBE 0xEF` × 16.
-pub(super) fn treasury_owner() -> Pubkey {
-    let mut b = [0u8; 32];
-    for i in 0..16 {
-        b[i * 2] = 0xBE;
-        b[i * 2 + 1] = 0xEF;
-    }
-    Pubkey::new_from_array(b)
-}
-
 /// Builds the u32-prefixed recipient vector accepted by the generated client.
 pub(super) fn build_recipients(splits: &[Split]) -> Vec<DistributionEntry> {
     splits

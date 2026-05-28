@@ -32,13 +32,14 @@ Actors: **C** = client (payer). **S** = server (merchant).
 
 ### Notes
 
-- **Minimum-deposit constraint:** `POST /channel/open` requires `payload.depositAmount >= challenge.methodDetails.minimumDeposit`. Enforced at the HTTP layer, not on-chain.
+- **Minimum-deposit constraint:** `POST /channel/open` requires both `payload.depositAmount` and the decoded `open` instruction's `deposit` to be at least `challenge.methodDetails.minimumDeposit`. Enforced at the HTTP layer, not on-chain.
+- **Grace-period constraint:** New-channel `POST /channel/open` requires `payload.gracePeriodSeconds == challenge.methodDetails.gracePeriodSeconds`. Before signing or submitting the transaction, the server MUST decode the `open` instruction data and reject unless encoded `grace_period` equals the same positive `u32`. The on-chain program rejects zero grace periods, but merchant-specific close-window policy is enforced at the HTTP layer.
 - **Server-submitted ixs:** `settle`, `settleAndFinalize`, and `distribute` are submitted directly by the server. In the cooperative path, the server triggers `distribute` (often bundled with `settleAndFinalize`) and may run mid-session distributes from `OPEN`.
 - **Escape routes are direct-to-chain:** The client submits these directly to Solana RPC:
   - `requestClose`: Payer-signed. Callable in `OPEN`. Starts the grace period.
   - `withdraw_payer`: Payer-signed. Callable in `FINALIZED`. Refunds `deposit - settled`.
   - `finalize`: Permissionless. Post-grace. Transitions `CLOSING -> FINALIZED`.
-  - `distribute`: Permissionless in `OPEN` and `FINALIZED`. Caller supplies splits preimage; program verifies hash against `Channel.distribution_hash`. From `OPEN`, it pays cumulative floor deltas between `payout_watermark` and `settled` for each recipient and the payee's implicit remainder share, then advances `payout_watermark` to `settled`. Zero-delta shares are skipped, and floor dust remains in escrow so later cumulative deltas can still claim it. From `FINALIZED`, it runs the final cumulative floor deltas, refunds `deposit - settled` to the payer (if `payerWithdrawnAt == 0`), sweeps final irreducible residual dust to treasury, and tombstones the PDA.
+  - `distribute`: Permissionless in `OPEN` and `FINALIZED`. Caller supplies splits preimage; program verifies hash against `Channel.distribution_hash`. From `OPEN`, it pays cumulative floor deltas between `payout_watermark` and `settled` for each recipient and the payee's implicit remainder share, then advances `payout_watermark` to `settled`. Zero-delta shares are skipped, and floor dust remains in escrow so later cumulative deltas can still claim it. From `FINALIZED`, it runs the final cumulative floor deltas, refunds `deposit - settled` to the payer (if `payerWithdrawnAt == 0`), sweeps final irreducible residual dust to treasury, and tombstones the PDA. **SDK note:** distributions with 32 recipients require a version 0 transaction and an address lookup table indexing recipient ATAs; legacy transactions cannot fit the account-key budget.
 - **Escape-route self-sufficiency:** Clients persist the 402 challenge and `channelId` to independently invoke escape routes.
 - **Distribution commitment:** The PDA stores a 32-byte Blake3 digest of the splits preimage. Splits are passed to `open` and hashed on-chain, making them publicly recoverable from instruction data. `distribute` requires the caller to supply the preimage for hash verification.
 - **PDA-canonical bump:** The `open` instruction data does not carry a client-supplied bump byte; the on-chain program derives the canonical bump via `find_program_address` and validates the channel PDA address directly. Clients MUST NOT include a `bump` field in the `POST /channel/open` payload, and servers MUST reject envelopes containing the field with HTTP 400. Silently accepting and ignoring a wire `bump` would mask client-side derivation bugs whose wrong bump pairs with a correct PDA address — exactly the inconsistency the on-chain address check cannot catch. Implementations whose deserializers currently model `bump` as a required field MUST remove it.
@@ -48,8 +49,8 @@ Actors: **C** = client (payer). **S** = server (merchant).
 
 To avoid paying Solana network fees for invalid transactions and to ensure protocol security, the server MUST perform the following validations off-chain before submitting any transactions:
 
-1. **`POST /channel/open` Payload Validation:** The server MUST strictly validate that the `distributionSplits`, `payee`, and `mint` in the payload exactly match what it requested in the `402` challenge. Failing to do so allows a malicious client to alter the distribution to themselves.
-2. **Voucher Validation:** Before accepting a metered request or submitting `settle` or `settleAndFinalize` with a voucher, the server MUST verify the Ed25519 signature over the Borsh-serialized voucher, check that `settled < cumulativeAmount <= deposit`, and ensure the voucher is fresh (`expiresAt` is null or in the future). The same validation applies to any `voucher` carried in `POST /channel/close`.
+1. **`POST /channel/open` Transaction Validation:** The server MUST treat the submitted base64 transaction, not the JSON envelope, as the authoritative open request. Before signing, paying fees for, or submitting it, the server MUST decode the transaction and validate the payment-channel instruction targets `challenge.methodDetails.channelProgram`, uses the `open` discriminator, and matches the challenge and payload exactly: `payer`, `payee`, `mint`, `authorizedSigner`, `salt`, `deposit`, `grace_period`, and the explicit `distributionSplits` preimage. The decoded `payee`, `mint`, `distributionSplits`, and `grace_period` MUST match the `402` challenge; the decoded `deposit` MUST equal `payload.depositAmount` and satisfy `deposit >= challenge.methodDetails.minimumDeposit`; and the decoded `authorizedSigner` MUST equal `payload.authorizedSigner` while still allowing a delegated signer distinct from `payer`. The server MUST rederive the channel PDA from the decoded `payer`, `payee`, `mint`, `authorizedSigner`, and `salt`, verify it equals both the decoded `channel` account and `payload.channelId`, and verify the decoded escrow account is the ATA for `(channel, mint, tokenProgram)`. The decoded `tokenProgram` MUST match the challenged token program when supplied, otherwise one of the supported token programs for the mint. Reject any request where the envelope and decoded transaction disagree. Failing to do so allows a malicious client to alter the distribution to themselves, shorten the close window, underfund escrow, or open a different channel than the server will later meter.
+2. **Voucher Validation:** Before accepting a metered request or submitting `settle` or `settleAndFinalize` with a voucher, the server MUST validate the `SignedVoucher` against the active channel context. `SignedVoucher.voucher.channelId` MUST equal the active channel PDA, `SignedVoucher.signer` MUST equal the channel's `authorizedSigner`, and the Ed25519 signature MUST verify under that `authorizedSigner` over the Borsh-serialized voucher payload. The server MUST also check that `settled < cumulativeAmount <= deposit` and that the voucher is fresh (`expiresAt` is null or in the future). For metered requests, the server MUST persist the highest accepted cumulative watermark per active session and reject any voucher with `cumulativeAmount <= acceptedCumulative`, even when on-chain `settled` lags behind off-chain metering. The same channel, signer, signature, freshness, and on-chain watermark validation applies to any `SignedVoucher` carried in `POST /channel/close`.
 
 **Challenge `request` object** (JCS-canonicalized then base64url-nopad into the `request` auth-param of `WWW-Authenticate: Payment`):
 
@@ -71,7 +72,7 @@ To avoid paying Solana network fees for invalid transactions and to ensure proto
     "feePayerKey": "<pubkey base58 — REQUIRED when feePayer=true>",
     "minVoucherDelta": "<u64 decimal string — OPTIONAL; server-policy hint, not enforced on-chain>",
     "ttlSeconds": <integer — OPTIONAL; server-policy hint for voucher `expiresAt`, not enforced on-chain>,
-    "gracePeriodSeconds": <integer — OPTIONAL, recommended 900>,
+    "gracePeriodSeconds": <integer — REQUIRED for new channel opens; merchant-selected close window in seconds, recommended 900>,
 
     // Solana-session extensions (not in MPP core; documented in Extensions section):
     "distributionSplits": [
@@ -84,11 +85,11 @@ To avoid paying Solana network fees for invalid transactions and to ensure proto
     "minimumDeposit": "<u64 decimal string — hard floor enforced at HTTP layer, not on-chain>"
   }
 }
-
-`authorizedSigner` is client-chosen and carried in the open credential's `payload`.
 ```
 
-**SignedVoucher** (carried in `payload.voucher` of credentials; the inner `voucher` object is Borsh-serialized and Ed25519-signed by the payer, producing the base58 `signature`):
+`authorizedSigner` is client-chosen and carried in the open credential's `payload`. It may equal `payer` or be a delegated signer, but once the channel is opened it is the only valid voucher signer for that channel.
+
+**SignedVoucher** (carried in `payload.voucher` of credentials; the inner `voucher` object is Borsh-serialized and Ed25519-signed by the channel's `authorizedSigner`, producing the base58 `signature`):
 
 ```json
 {
@@ -97,7 +98,7 @@ To avoid paying Solana network fees for invalid transactions and to ensure proto
     "cumulativeAmount": "<u64 decimal string>",
     "expiresAt": "<RFC 3339 timestamp — OPTIONAL>"
   },
-  "signer": "<payer pubkey base58>",
+  "signer": "<authorizedSigner pubkey base58>",
   "signature": "<base58 Ed25519 sig over Borsh(voucher)>",
   "signatureType": "ed25519"
 }
@@ -240,6 +241,7 @@ Content-Type: application/json
     "authorizedSigner": "PayerAbcdef1234567890abcdef1234567890abcde",
     "salt": "42",
     "depositAmount": "1000000",
+    "gracePeriodSeconds": 900,
     "distributionSplits": [
       { "recipient": "PayeeMerchant1234567890abcdefghijklmnop", "shareBps": 9500 },
       { "recipient": "PltfrmFee456789abcdefghijklmnopqrstuv",   "shareBps":  500 }
@@ -325,7 +327,7 @@ Content-Type: application/json
 }
 ```
 
-`voucher` is OPTIONAL. When present, it MUST strictly advance the on-chain watermark (`settled < voucher.cumulativeAmount`); a supplied voucher at or below the current `settled` watermark is invalid and MUST cause `settleAndFinalize` to reject. If no final settle is needed, send the close request without a voucher so the channel finalizes at the current on-chain `settled` watermark.
+`voucher` is OPTIONAL. When present, the carried `SignedVoucher` MUST be bound to the close request's active channel: `SignedVoucher.voucher.channelId` equals `payload.channelId`, `SignedVoucher.signer` equals the channel's `authorizedSigner`, and the Ed25519 signature verifies under that signer. It MUST strictly advance the on-chain watermark (`settled < voucher.cumulativeAmount`); a supplied voucher at or below the current `settled` watermark is invalid and MUST cause `settleAndFinalize` to reject. If no final settle is needed, send the close request without a voucher so the channel finalizes at the current on-chain `settled` watermark.
 
 **Example 6: Successful response with `Payment-Receipt` (S -> C)**
 

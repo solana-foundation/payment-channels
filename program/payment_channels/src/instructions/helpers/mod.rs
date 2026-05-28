@@ -5,9 +5,11 @@ pub mod distribution;
 pub mod ed25519;
 pub mod hash;
 pub mod token;
+pub mod transfer;
 pub mod voucher;
 
 pub use distribution::{DistributionEntry, DistributionPreimage, MAX_DISTRIBUTION_RECIPIENTS};
+pub use transfer::Transfer;
 
 use crate::state::channel::CHANNEL_SEED;
 use pinocchio::cpi::Seed;

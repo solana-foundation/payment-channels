@@ -8,8 +8,6 @@
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 use payment_channels::PaymentChannelsError;
-use payment_channels::VOUCHER_PAYLOAD_SIZE;
-use payment_channels::ed25519;
 use payment_channels::instructions::distribute::DISCRIMINATOR;
 use payment_channels::instructions::open::DISCRIMINATOR as OPEN_DISCRIMINATOR;
 use payment_channels_client::instructions::{Settle, SettleInstructionArgs, WithdrawPayer};
@@ -24,7 +22,7 @@ use solana_transaction_error::TransactionError;
 
 use super::{
     MAX_DISTRIBUTION_RECIPIENTS, STATUS_CLOSING, STATUS_FINALIZED, STATUS_OPEN, Split, TOKEN_2022,
-    build_distribute_ix, build_recipients, treasury_owner,
+    build_distribute_ix, build_recipients,
 };
 use crate::common::token_2022::{
     EXT_CPI_GUARD, EXT_GROUP_MEMBER_POINTER, EXT_GROUP_POINTER, EXT_MEMO_TRANSFER,
@@ -33,10 +31,14 @@ use crate::common::token_2022::{
     TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN, add_account_extension,
     add_mint_extension,
 };
+use solana_compute_budget::compute_budget_limits::MAX_COMPUTE_UNIT_LIMIT;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
+
 use crate::common::{
     ATA_PROGRAM, INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM,
-    SYSVAR_RENT, compute_budget_ix, cu_tracker, ed25519_program_id, event_authority,
-    expect_custom_err, expect_instruction_err, set_clock, token_balance,
+    SYSVAR_RENT, event_authority, expect_custom_err, expect_instruction_err, mutate_channel,
+    read_channel, set_clock, token_balance, treasury_owner,
+    voucher::{build_ed25519_ix, voucher_payload},
 };
 
 const GRACE_PERIOD: u32 = 3600;
@@ -52,14 +54,10 @@ fn set_token_balance(svm: &mut LiteSVM, token_account: &Pubkey, amount: u64) {
 }
 
 fn read_payout_watermark(svm: &LiteSVM, channel: &Pubkey) -> u64 {
-    let acct = svm.get_account(channel).expect("channel exists");
-    let mut buf = [0u8; 8];
-    buf.copy_from_slice(&acct.data[28..36]);
-    u64::from_le_bytes(buf)
+    read_channel(svm, channel, |ch| ch.payout_watermark())
 }
 
-/// Rent-exempt lamports for the 1-byte tombstone, computed via the same
-/// canonical formula `Rent::try_minimum_balance` runs on-chain.
+/// Rent-exempt lamports for the 1-byte tombstone PDA.
 fn tombstone_rent_lamports() -> u64 {
     solana_rent::Rent::default().minimum_balance(1)
 }
@@ -79,29 +77,19 @@ fn assert_tombstone(svm: &LiteSVM, channel: &Pubkey) {
 }
 
 // ---------------------------------------------------------------------------
-// Direct byte writes to `Channel.status` / `settlement.payout_watermark` /
+// Typed mutations to `Channel.status` / `settlement.payout_watermark` /
 // `payer_withdrawn_at`.
 
-fn mutate_channel<F: FnOnce(&mut Vec<u8>)>(svm: &mut LiteSVM, channel: &Pubkey, f: F) {
-    let mut acct = svm.get_account(channel).expect("channel exists");
-    f(&mut acct.data);
-    svm.set_account(*channel, acct).expect("overwrite channel");
-}
-
 fn set_status(svm: &mut LiteSVM, channel: &Pubkey, status: u8) {
-    mutate_channel(svm, channel, |data| data[3] = status);
+    mutate_channel(svm, channel, |ch| ch.status = status);
 }
 
 fn set_payout_watermark(svm: &mut LiteSVM, channel: &Pubkey, payout_watermark: u64) {
-    mutate_channel(svm, channel, |data| {
-        data[28..36].copy_from_slice(&payout_watermark.to_le_bytes());
-    });
+    mutate_channel(svm, channel, |ch| ch.set_payout_watermark(payout_watermark));
 }
 
 fn set_payer_withdrawn_at(svm: &mut LiteSVM, channel: &Pubkey, ts: i64) {
-    mutate_channel(svm, channel, |data| {
-        data[44..52].copy_from_slice(&ts.to_le_bytes());
-    });
+    mutate_channel(svm, channel, |ch| ch.set_payer_withdrawn_at(ts));
 }
 
 // ---------------------------------------------------------------------------
@@ -265,7 +253,7 @@ fn open_channel(
         &[payer],
         svm.latest_blockhash(),
     );
-    cu_tracker::send_and_record(svm, tx).expect("open should succeed");
+    svm.send_transaction(tx).expect("open should succeed");
 
     OpenedChannel {
         channel,
@@ -278,46 +266,6 @@ fn open_channel(
 // ---------------------------------------------------------------------------
 // Settle helper — drives the precompile + settle bundle to advance the
 // `settled` watermark.
-
-fn voucher_payload(voucher: &VoucherArgs) -> [u8; VOUCHER_PAYLOAD_SIZE] {
-    borsh::to_vec(voucher)
-        .expect("voucher borsh encoding")
-        .try_into()
-        .expect("voucher payload matches VOUCHER_PAYLOAD_SIZE")
-}
-
-fn build_ed25519_ix(
-    pubkey: &[u8; ed25519::PUBKEY_SERIALIZED_SIZE],
-    signature: &[u8; ed25519::SIGNATURE_SERIALIZED_SIZE],
-    message: &[u8; VOUCHER_PAYLOAD_SIZE],
-) -> Instruction {
-    let mut data = Vec::with_capacity(ed25519::MESSAGE_OFFSET + VOUCHER_PAYLOAD_SIZE);
-    data.push(1u8);
-    data.push(0u8);
-
-    let pubkey_offset = ed25519::PUBKEY_OFFSET as u16;
-    let signature_offset = ed25519::SIGNATURE_OFFSET as u16;
-    let message_offset = ed25519::MESSAGE_OFFSET as u16;
-    let message_size = VOUCHER_PAYLOAD_SIZE as u16;
-
-    data.extend_from_slice(&signature_offset.to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes());
-    data.extend_from_slice(&pubkey_offset.to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes());
-    data.extend_from_slice(&message_offset.to_le_bytes());
-    data.extend_from_slice(&message_size.to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes());
-
-    data.extend_from_slice(pubkey);
-    data.extend_from_slice(signature);
-    data.extend_from_slice(message);
-
-    Instruction {
-        program_id: ed25519_program_id(),
-        accounts: Vec::new(),
-        data,
-    }
-}
 
 fn build_settle_ix(channel: &Pubkey, voucher: VoucherArgs) -> Instruction {
     Settle {
@@ -355,15 +303,14 @@ fn settle_to(
         &[fee_payer],
         svm.latest_blockhash(),
     );
-    cu_tracker::send_and_record(svm, tx).expect("settle should succeed");
+    svm.send_transaction(tx).expect("settle should succeed");
 }
 
 // ---------------------------------------------------------------------------
 // Scenario fixture — owns the SVM and every account a `distribute` call
 // needs. `status`, `settlement.payout_watermark`, and `payer_withdrawn_at`
-// are mutated through the byte-level mutators above pending real
+// are mutated through the typed mutators above pending real
 // `request_close` / `finalize` / `withdraw_payer` instructions.
-
 struct Scenario {
     svm: LiteSVM,
     fee_payer: Keypair,
@@ -458,7 +405,7 @@ impl Scenario {
         }
 
         if status != STATUS_OPEN {
-            set_status(&mut svm, &channel, status);
+            mutate_channel(&mut svm, &channel, |ch| ch.status = status);
         }
 
         let treasury_ata = CreateAssociatedTokenAccount::new(&mut svm, &fee_payer, &mint)
@@ -532,12 +479,42 @@ impl Scenario {
         self.svm.expire_blockhash();
         let blockhash = self.svm.latest_blockhash();
         let tx = Transaction::new_signed_with_payer(
-            &[compute_budget_ix(1_400_000), ix],
+            &[
+                ComputeBudgetInstruction::set_compute_unit_limit(MAX_COMPUTE_UNIT_LIMIT),
+                ix,
+            ],
             Some(&self.fee_payer.pubkey()),
             &[&self.fee_payer],
             blockhash,
         );
-        cu_tracker::send_and_record(&mut self.svm, tx)
+        self.svm.send_transaction(tx)
+    }
+
+    /// Versioned-tx path for the N=32 distribute tests. An ALT is always
+    /// installed because the worst-case ix exceeds the 32 static-key legacy
+    /// limit. `compute_unit_limit` is per-call-site: SPL batched paths fit in
+    /// the default 200k cap (`None`); Token-2022 paths overrun it and need
+    /// to increase it to `Some(MAX_COMPUTE_UNIT_LIMIT)`.
+    fn send_v0_distribute(
+        &mut self,
+        recipient_atas_for_alt: Vec<Pubkey>,
+        compute_unit_limit: Option<u32>,
+    ) -> litesvm::types::TransactionResult {
+        let (_alt_key, alt_account) = crate::common::lookup_table::install_lookup_table(
+            &mut self.svm,
+            recipient_atas_for_alt,
+        );
+        let prefix: Vec<Instruction> = compute_unit_limit
+            .map(|units| vec![ComputeBudgetInstruction::set_compute_unit_limit(units)])
+            .unwrap_or_default();
+        let tx = crate::common::lookup_table::build_v0_transaction_with_prefix(
+            &self.svm,
+            &self.fee_payer,
+            &prefix,
+            &[self.distribute_ix()],
+            &alt_account,
+        );
+        self.svm.send_transaction(tx)
     }
 }
 
@@ -557,7 +534,7 @@ fn send_withdraw_payer(s: &mut Scenario) {
         &[&s.payer_keypair],
         s.svm.latest_blockhash(),
     );
-    cu_tracker::send_and_record(&mut s.svm, tx).expect("withdraw_payer ok");
+    s.svm.send_transaction(tx).expect("withdraw_payer ok");
 }
 
 // ===========================================================================
@@ -1104,11 +1081,9 @@ fn bad_preimage_hash() {
     let payout_watermark = 0;
     let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
 
-    let mut acct = s.svm.get_account(&s.channel).unwrap();
-    acct.data[56] ^= 0xFF;
-    s.svm
-        .set_account(s.channel, acct)
-        .expect("overwrite channel");
+    mutate_channel(&mut s.svm, &s.channel, |ch| {
+        ch.distribution_hash[0] ^= 0xFF;
+    });
     let res = s.send(s.distribute_ix());
     expect_custom_err(res, PaymentChannelsError::InvalidDistributionHash);
 }
@@ -1511,6 +1486,309 @@ fn many_distinct_recipients_accepted() {
     assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
 }
 
+#[test]
+fn happy_path_spl_token_max_recipients_plus_payee() {
+    // SPL batched chunking at N=32 recipients + payee = 33 logical slots
+    // across 5 chunks (8+8+8+8+1).
+    const N: usize = MAX_DISTRIBUTION_RECIPIENTS;
+    const RECIPIENT_BPS: u16 = 100;
+    let splits: Vec<Split> = (0..N)
+        .map(|_| Split {
+            owner: Pubkey::new_unique(),
+            bps: RECIPIENT_BPS,
+        })
+        .collect();
+    let deposit = 200_000;
+    let settled = 100_000;
+    let payout_watermark = 0;
+    let mut s = Scenario::build_with_token_program(
+        splits,
+        deposit,
+        settled,
+        payout_watermark,
+        STATUS_OPEN,
+        SPL_TOKEN,
+    );
+
+    s.send_v0_distribute(s.recipient_atas.clone(), None)
+        .expect("spl distribute max recipients ok");
+
+    assert_eq!(s.recipient_atas.len(), N);
+    let unique: std::collections::HashSet<_> = s.recipient_atas.iter().collect();
+    assert_eq!(unique.len(), N);
+    for ata in &s.recipient_atas {
+        assert_eq!(token_balance(&s.svm, ata), 1_000);
+    }
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 68_000);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.channel_ata), deposit - settled);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
+}
+
+#[test]
+fn happy_path_spl_token_finalized_max_recipients_plus_payee_refund_sweep() {
+    // Worst-case FINALIZED distribute: every payout phase present —
+    // N=32 recipients + payee + payer refund + sweep = 35 logical slots
+    // across 5 chunks (8+8+8+8+3), followed by a standalone escrow-close CPI
+    // in the shared tombstone tail.
+    const N: usize = MAX_DISTRIBUTION_RECIPIENTS;
+    const RECIPIENT_BPS: u16 = 100;
+    let splits: Vec<Split> = (0..N)
+        .map(|_| Split {
+            owner: Pubkey::new_unique(),
+            bps: RECIPIENT_BPS,
+        })
+        .collect();
+    let deposit: u64 = 200_000;
+    let settled: u64 = 99_999;
+    let payout_watermark: u64 = 0;
+    let mut s = Scenario::build_with_token_program(
+        splits,
+        deposit,
+        settled,
+        payout_watermark,
+        STATUS_FINALIZED,
+        SPL_TOKEN,
+    );
+
+    let escrow_before = token_balance(&s.svm, &s.channel_ata);
+    let payer_sol_before = s.svm.get_account(&s.payer).unwrap().lamports;
+    let channel_lamports_before = s.svm.get_account(&s.channel).unwrap().lamports;
+    let channel_ata_lamports_before = s.svm.get_account(&s.channel_ata).unwrap().lamports;
+
+    s.send_v0_distribute(s.recipient_atas.clone(), None)
+        .expect("spl finalized max recipients ok");
+
+    let expected_per_recipient: u64 = 999;
+    let expected_payee: u64 = 67_999;
+    let expected_payer_refund: u64 = deposit - settled;
+    let expected_treasury_sweep: u64 =
+        escrow_before - 32 * expected_per_recipient - expected_payee - expected_payer_refund;
+    assert_eq!(expected_treasury_sweep, 32);
+
+    assert_eq!(s.recipient_atas.len(), N);
+    let unique: std::collections::HashSet<_> = s.recipient_atas.iter().collect();
+    assert_eq!(unique.len(), N);
+    for ata in &s.recipient_atas {
+        assert_eq!(token_balance(&s.svm, ata), expected_per_recipient);
+    }
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), expected_payee);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), expected_payer_refund);
+    assert_eq!(
+        token_balance(&s.svm, &s.treasury_ata),
+        expected_treasury_sweep
+    );
+
+    assert_tombstone(&s.svm, &s.channel);
+
+    // Payer recovers channel-rent delta + escrow-ATA rent on the SOL leg.
+    let payer_sol_after = s.svm.get_account(&s.payer).unwrap().lamports;
+    let channel_rent_delta = channel_lamports_before - tombstone_rent_lamports();
+    assert_eq!(
+        payer_sol_after - payer_sol_before,
+        channel_rent_delta + channel_ata_lamports_before
+    );
+}
+
+#[test]
+fn spl_token_finalized_zero_pool_still_refunds_and_tombstones() {
+    // pool == 0: recipient slots zero-skip and payee has no payable amount;
+    // only payer refund, sweep, and close phases run.
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 1000,
+    }];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let payout_watermark = 100_000;
+    let mut s = Scenario::build_with_token_program(
+        splits,
+        deposit,
+        settled,
+        payout_watermark,
+        STATUS_FINALIZED,
+        SPL_TOKEN,
+    );
+
+    // Simulate the post-OPEN escrow balance: just the refund headroom left.
+    set_token_balance(&mut s.svm, &s.channel_ata, deposit - settled);
+
+    s.send(s.distribute_ix())
+        .expect("spl finalized zero pool ok");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
+    assert_tombstone(&s.svm, &s.channel);
+}
+
+#[test]
+fn spl_token_finalized_already_withdrawn() {
+    // `payer_withdrawn_at != 0` skips payer refund when pool > 0.
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5000,
+    }];
+    let deposit = 200_000;
+    let settled = 150_000;
+    let payout_watermark = 0;
+    let mut s = Scenario::build_with_token_program(
+        splits,
+        deposit,
+        settled,
+        payout_watermark,
+        STATUS_FINALIZED,
+        SPL_TOKEN,
+    );
+
+    // Simulate post-`withdraw_payer` state: stamp + trim escrow accordingly.
+    mutate_channel(&mut s.svm, &s.channel, |ch| {
+        ch.set_payer_withdrawn_at(1_700_000_000)
+    });
+    set_token_balance(&mut s.svm, &s.channel_ata, settled - payout_watermark);
+
+    s.send(s.distribute_ix())
+        .expect("spl finalized already-withdrawn ok");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
+    assert_tombstone(&s.svm, &s.channel);
+}
+
+#[test]
+fn spl_token_finalized_chunk_boundary() {
+    // N=7 recipients + payee = 8 exactly fills one chunk; the FINALIZED
+    // tail (refund + sweep) spills into a second chunk of 2, followed by a
+    // standalone escrow-close CPI in the shared tombstone tail.
+    const N: usize = 7;
+    const RECIPIENT_BPS: u16 = 1000;
+    let splits: Vec<Split> = (0..N)
+        .map(|_| Split {
+            owner: Pubkey::new_unique(),
+            bps: RECIPIENT_BPS,
+        })
+        .collect();
+    let deposit: u64 = 200_000;
+    let settled: u64 = 99_999;
+    let payout_watermark: u64 = 0;
+    let mut s = Scenario::build_with_token_program(
+        splits,
+        deposit,
+        settled,
+        payout_watermark,
+        STATUS_FINALIZED,
+        SPL_TOKEN,
+    );
+
+    let escrow_before = token_balance(&s.svm, &s.channel_ata);
+    let payer_sol_before = s.svm.get_account(&s.payer).unwrap().lamports;
+    let channel_lamports_before = s.svm.get_account(&s.channel).unwrap().lamports;
+    let channel_ata_lamports_before = s.svm.get_account(&s.channel_ata).unwrap().lamports;
+
+    s.send(s.distribute_ix())
+        .expect("spl finalized chunk-boundary ok");
+
+    let expected_per_recipient: u64 = 9_999;
+    let expected_payee: u64 = 29_999;
+    let expected_payer_refund: u64 = deposit - settled;
+    let expected_treasury_sweep: u64 = escrow_before
+        - (N as u64) * expected_per_recipient
+        - expected_payee
+        - expected_payer_refund;
+    assert_eq!(expected_treasury_sweep, 7);
+
+    for ata in &s.recipient_atas {
+        assert_eq!(token_balance(&s.svm, ata), expected_per_recipient);
+    }
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), expected_payee);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), expected_payer_refund);
+    assert_eq!(
+        token_balance(&s.svm, &s.treasury_ata),
+        expected_treasury_sweep
+    );
+    assert_tombstone(&s.svm, &s.channel);
+
+    let payer_sol_after = s.svm.get_account(&s.payer).unwrap().lamports;
+    let channel_rent_delta = channel_lamports_before - tombstone_rent_lamports();
+    assert_eq!(
+        payer_sol_after - payer_sol_before,
+        channel_rent_delta + channel_ata_lamports_before
+    );
+}
+
+#[test]
+fn token_2022_max_recipients_plus_payee_finalized() {
+    // Token-2022 uses direct TransferChecked CPIs (no SPL Batch); worst case
+    // is 32 recipients + payee + refund + sweep = 35 CPIs before close.
+    const N: usize = MAX_DISTRIBUTION_RECIPIENTS;
+    const RECIPIENT_BPS: u16 = 100;
+    let splits: Vec<Split> = (0..N)
+        .map(|_| Split {
+            owner: Pubkey::new_unique(),
+            bps: RECIPIENT_BPS,
+        })
+        .collect();
+    let deposit: u64 = 200_000;
+    let settled: u64 = 99_999;
+    let payout_watermark: u64 = 0;
+    let mut s = Scenario::build_with_token_program(
+        splits,
+        deposit,
+        settled,
+        payout_watermark,
+        STATUS_FINALIZED,
+        TOKEN_2022,
+    );
+
+    let escrow_before = token_balance(&s.svm, &s.channel_ata);
+    // Token-2022 FINALIZED at N=32 needs to increase compute budget limit; default CU cap (200k) is too low.
+    s.send_v0_distribute(s.recipient_atas.clone(), Some(MAX_COMPUTE_UNIT_LIMIT))
+        .expect("token-2022 max recipients ok");
+
+    let expected_per_recipient: u64 = 999;
+    let expected_payee: u64 = 67_999;
+    let expected_payer_refund: u64 = deposit - settled;
+    let expected_treasury_sweep: u64 =
+        escrow_before - 32 * expected_per_recipient - expected_payee - expected_payer_refund;
+    assert_eq!(expected_treasury_sweep, 32);
+
+    for ata in &s.recipient_atas {
+        assert_eq!(token_balance(&s.svm, ata), expected_per_recipient);
+    }
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), expected_payee);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), expected_payer_refund);
+    assert_eq!(
+        token_balance(&s.svm, &s.treasury_ata),
+        expected_treasury_sweep
+    );
+    assert_tombstone(&s.svm, &s.channel);
+}
+
+#[test]
+fn spl_token_legacy_tx_rejects_max_recipients() {
+    const N: usize = MAX_DISTRIBUTION_RECIPIENTS;
+    let splits: Vec<Split> = (0..N)
+        .map(|_| Split {
+            owner: Pubkey::new_unique(),
+            bps: 100,
+        })
+        .collect();
+    let mut s =
+        Scenario::build_with_token_program(splits, 200_000, 100_000, 0, STATUS_OPEN, SPL_TOKEN);
+
+    // Legacy txs with 40 instruction accounts exceed the static key budget;
+    // LiteSVM rejects the message during compute-budget sanitization.
+    let outcome =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| s.send(s.distribute_ix())));
+    match outcome {
+        Err(_) => {}
+        Ok(res) => assert!(res.is_err(), "legacy tx should fail at N=32 without ALT"),
+    }
+}
+
 // ===========================================================================
 // LiteSVM-only tombstone tests. Mollusk variants for `distribute` / `top_up`
 // rejection on a tombstoned channel live in their respective `integration.rs`
@@ -1562,7 +1840,7 @@ fn settle_on_tombstoned_channel_rejects() {
         blockhash,
     );
     expect_instruction_err(
-        cu_tracker::send_and_record(&mut s.svm, tx),
+        s.svm.send_transaction(tx),
         InstructionError::InvalidAccountData,
     );
     assert_tombstone(&s.svm, &s.channel);
@@ -1599,10 +1877,7 @@ fn reopen_at_same_seeds_rejects_across_tx() {
         &[&s.payer_keypair],
         blockhash,
     );
-    expect_instruction_err(
-        cu_tracker::send_and_record(&mut s.svm, tx),
-        InstructionError::Custom(0),
-    );
+    expect_instruction_err(s.svm.send_transaction(tx), InstructionError::Custom(0));
     // Tombstone bytes preserved — no partial reinit happened.
     assert_tombstone(&s.svm, &s.channel);
 }
@@ -1646,14 +1921,16 @@ fn reopen_at_same_seeds_rejects_same_tx() {
 
     let blockhash = s.svm.latest_blockhash();
     let tx = Transaction::new_signed_with_payer(
-        &[compute_budget_ix(1_400_000), distribute_ix, open_ix],
+        &[
+            ComputeBudgetInstruction::set_compute_unit_limit(MAX_COMPUTE_UNIT_LIMIT),
+            distribute_ix,
+            open_ix,
+        ],
         Some(&s.payer_keypair.pubkey()),
         &[&s.payer_keypair],
         blockhash,
     );
-    let err = cu_tracker::send_and_record(&mut s.svm, tx)
-        .expect_err("tx should fail")
-        .err;
+    let err = s.svm.send_transaction(tx).expect_err("tx should fail").err;
     // Lock down both the failing ix index (open is at index 2 — after
     // compute-budget at 0 and distribute at 1) and the variant. A regression
     // that shifts the failure to a different ix or a different system error
@@ -1666,18 +1943,11 @@ fn reopen_at_same_seeds_rejects_same_tx() {
     }
 
     // Tx reverted: channel is restored to its pre-tx FINALIZED state.
-    let acct = s.svm.get_account(&s.channel).expect("channel exists");
-    assert_eq!(
-        acct.data.len(),
-        216,
-        "channel data restored to live size after revert",
-    );
-    assert_eq!(
-        acct.data[0], 1,
-        "discriminator restored to Channel after revert",
-    );
-    assert_eq!(
-        acct.data[3], STATUS_FINALIZED,
-        "status restored after revert",
-    );
+    read_channel(&s.svm, &s.channel, |ch| {
+        assert_eq!(
+            ch.discriminator, 1,
+            "discriminator restored to Channel after revert",
+        );
+        assert_eq!(ch.status, STATUS_FINALIZED, "status restored after revert");
+    });
 }

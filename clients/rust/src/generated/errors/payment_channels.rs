@@ -82,6 +82,9 @@ pub enum PaymentChannelsError {
     /// 200 - Deposit must be non-zero
     #[error("Deposit must be non-zero")]
     DepositMustBeNonZero = 0xC8,
+    /// 201 - Grace period must be non-zero
+    #[error("Grace period must be non-zero")]
+    GracePeriodMustBeNonZero = 0xC9,
     /// 230 - Missing Ed25519 precompile ix at current-1
     #[error("Missing Ed25519 precompile ix at current-1")]
     MissingEd25519Verification = 0xE6,
@@ -181,6 +184,9 @@ pub enum PaymentChannelsError {
     /// 2412 - Payer lamports overflow on rent refund
     #[error("Payer lamports overflow on rent refund")]
     DistributePayerBalanceOverflow = 0x96C,
+    /// 2413 - Transfer queue capacity exceeded
+    #[error("Transfer queue capacity exceeded")]
+    DistributeTransferQueueOverflow = 0x96D,
 }
 
 impl From<PaymentChannelsError> for solana_program_error::ProgramError {

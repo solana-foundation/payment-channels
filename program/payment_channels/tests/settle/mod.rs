@@ -57,8 +57,8 @@ impl SettleRun {
             vec![
                 AccountMeta::new(channel_pubkey, false),
                 // Pre-`verify_voucher` guards reject before the sysvar is read,
-                // so a unique-pubkey dummy (mirroring `settle_and_finalize/mod.rs`)
-                // sidesteps Mollusk's special handling of `Sysvar1nstructions…`.
+                // so a unique-pubkey dummy sidesteps Mollusk's special handling
+                // of `Sysvar1nstructions…`.
                 AccountMeta::new_readonly(Pubkey::new_unique(), false),
             ],
         );

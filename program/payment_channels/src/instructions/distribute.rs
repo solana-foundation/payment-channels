@@ -1,5 +1,6 @@
 #[cfg(feature = "idl")]
 use alloc::vec::Vec;
+
 #[cfg(feature = "idl")]
 use codama::CodamaType;
 use pinocchio::{
@@ -15,13 +16,12 @@ use crate::helpers::accounts::view::{
     PayerTokenAccountView, TokenContext, TokenProgramAccountView, TreasuryTokenAccountView,
 };
 use crate::helpers::accounts::view::{PayerAccountView, RecipientTokenAccountsView};
-use crate::instructions::helpers::{DistributionEntry, DistributionPreimage, channel_signer_seeds};
-use crate::state::channel::{Channel, ChannelStatus, SettlementWatermarks};
+#[cfg(feature = "idl")]
+use crate::instructions::helpers::DistributionEntry;
+use crate::instructions::helpers::{DistributionPreimage, Transfer, channel_signer_seeds};
+use crate::state::channel::{Channel, ChannelStatus};
 use crate::state::closed_channel::ClosedChannel;
-use crate::{
-    errors::PaymentChannelsError,
-    helpers::accounts::view::{ChannelAccountView, Checked},
-};
+use crate::{errors::PaymentChannelsError, helpers::accounts::view::ChannelAccountView};
 
 /// Instruction discriminator byte for `distribute`.
 pub const DISCRIMINATOR: u8 = 7;
@@ -187,8 +187,6 @@ pub fn process(
         .recipient_token_accounts
         .check(args.recipients.entries, &channel_ctx.token_ctx)?;
 
-    let payee_bps = args.recipients.payee_bps();
-
     // SettlementWatermarks owns the invariant between the authorized settled
     // watermark and the already-accounted payout watermark.
     let settlement = ch.settlement();
@@ -210,6 +208,8 @@ pub fn process(
     // this payer-withdrawal gate without writing back before tombstoning.
     let deposit = ch.deposit();
     let payer_withdrawn_at = ch.payer_withdrawn_at();
+    let is_finalized = status.is_finalized();
+    let payee_bps = args.recipients.payee_bps();
 
     // Release the data borrow before token CPIs and the later state update.
     drop(ch);
@@ -224,95 +224,55 @@ pub fn process(
     );
     let signers = [Signer::from(&signer_seeds)];
 
-    transfer_pool(
-        &recipient_token_accounts,
-        &channel_ctx,
-        &payee_token_account,
-        args.recipients.entries,
-        payee_bps,
-        settlement,
-        &signers,
-    )?;
+    // Collect payouts first; CPIs run in one shot at `flush` below.
+    let mut transfer = Transfer::new(&channel_ctx, &signers);
 
-    match status {
-        ChannelStatus::Open => {
-            let mut ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
-            ch.settlement_mut().mark_as_settled();
-        }
-        ChannelStatus::Finalized => {
-            // Payer refund branch — one-shot, gated by snapshotted payer_withdrawn_at.
-            if payer_withdrawn_at == 0 && deposit > settled {
-                channel_ctx.transfer_checked_signed(
-                    &payer_ctx.payer_token_account.as_any(),
-                    deposit - settled,
-                    &signers,
-                )?;
-            }
-            sweep_finalized_residual(&channel_ctx, &treasury_token_account, &signers)?;
-            tombstone_finalized_channel(&mut channel_ctx, &mut payer_ctx, &signers)?;
-        }
-        // Unreachable: status gate already passed
-        ChannelStatus::Closing => return Err(PaymentChannelsError::ChannelNotDistributable.into()),
-    }
-
-    Ok(())
-}
-
-/// Transfers cumulative floor deltas to explicit recipients and the payee's
-/// implicit remainder share. Residual dust stays in escrow between `OPEN`
-/// distributions and is released automatically when a later cumulative
-/// entitlement crosses the next whole token. In FINALIZED, any remaining final
-/// dust is swept to treasury by the close path.
-///
-/// All recipient and fixed token accounts have already been validated, so this
-/// helper is only responsible for payout math and signed token CPIs.
-#[allow(clippy::too_many_arguments)]
-fn transfer_pool(
-    recipients: &RecipientTokenAccountsView<'_, Checked>,
-    channel_ctx: &ChannelContext,
-    payee_token_account: &PayeeTokenAccountView<'_, Checked>,
-    entries: &[DistributionEntry],
-    payee_bps: u32,
-    settlement: SettlementWatermarks,
-    signers: &[Signer<'_, '_>],
-) -> ProgramResult {
-    if settlement.is_fully_accounted()? {
-        return Ok(());
-    }
-
-    for (entry, recipient_token_account) in entries.iter().zip(recipients.iter_as_any()) {
+    for (entry, recipient) in args
+        .recipients
+        .entries
+        .iter()
+        .zip(recipient_token_accounts.iter())
+    {
         let amount = settlement.delta_for_bps(entry.bps() as u32)?;
-        if amount > 0 {
-            channel_ctx.transfer_checked_signed(&recipient_token_account, amount, signers)?;
-        }
+        transfer.push(recipient, amount)?;
     }
 
     if payee_bps != 0 {
-        let payee_floor = settlement.delta_for_bps(payee_bps)?;
-        if payee_floor > 0 {
-            channel_ctx.transfer_checked_signed(
-                &payee_token_account.as_any(),
-                payee_floor,
-                signers,
-            )?;
+        let payee_share = settlement.delta_for_bps(payee_bps)?;
+        transfer.push(&payee_token_account, payee_share)?;
+    }
+
+    if is_finalized {
+        if payer_withdrawn_at == 0 && deposit > settled {
+            let payer_refund = deposit - settled;
+            transfer.push(&payer_ctx.payer_token_account, payer_refund)?;
         }
+
+        let escrow_at_entry = channel_ctx
+            .token_ctx
+            .token_program
+            .amount(&channel_ctx.channel_token_account.as_any())?;
+
+        // Invariant: escrow_at_entry == scheduled_outflow() + treasury_sweep.
+        // Treasury captures bps flooring dust not assigned to recipients/payee.
+        let treasury_sweep = escrow_at_entry
+            .checked_sub(transfer.scheduled_outflow())
+            .ok_or(PaymentChannelsError::DistributeBalanceCalculationOverflow)?;
+        transfer.push(&treasury_token_account, treasury_sweep)?;
+    }
+
+    // Execute every queued transfer (direct CPI or batched SPL `Batch`).
+    transfer.flush()?;
+
+    if is_finalized {
+        // Close escrow ATA and tombstone the channel PDA in place.
+        tombstone_finalized_channel(&mut channel_ctx, &mut payer_ctx, &signers)?;
+    } else {
+        let mut ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
+        ch.settlement_mut().mark_as_settled();
     }
 
     Ok(())
-}
-
-/// Sweeps all tokens left in the finalized escrow to treasury after recipient
-/// payouts and any payer refund have completed.
-fn sweep_finalized_residual(
-    channel_ctx: &ChannelContext<'_>,
-    treasury_token_account: &TreasuryTokenAccountView<'_, Checked>,
-    signers: &[Signer<'_, '_>],
-) -> ProgramResult {
-    let residual = channel_ctx
-        .token_ctx
-        .token_program
-        .amount(&channel_ctx.channel_token_account.as_any())?;
-    channel_ctx.transfer_checked_signed(&treasury_token_account.as_any(), residual, signers)
 }
 
 /// Closes the finalized channel's escrow token account and tombstones the
@@ -372,6 +332,7 @@ mod tests {
     use alloc::{vec, vec::Vec};
 
     use super::*;
+    use crate::state::channel::SettlementWatermarks;
 
     fn assert_cumulative_deltas_match_single_final_distribution(bps: &[u32], checkpoints: &[u64]) {
         let mut previous = 0;
