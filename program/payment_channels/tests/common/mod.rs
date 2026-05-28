@@ -2,6 +2,7 @@
 
 #![allow(dead_code)]
 
+pub mod lookup_table;
 pub mod token_2022;
 pub mod voucher;
 

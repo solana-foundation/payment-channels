@@ -5,7 +5,10 @@ pub mod distribution;
 pub mod ed25519;
 pub mod hash;
 pub mod token;
+pub mod transfer;
 pub mod voucher;
+
+pub use transfer::Transfer;
 
 pub use distribution::{
     DistributionEntry, DistributionPreimage, MAX_DISTRIBUTION_RECIPIENTS, floor_bps_share,

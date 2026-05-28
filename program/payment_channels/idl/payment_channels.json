@@ -796,6 +796,12 @@
         "kind": "errorNode",
         "message": "Payer lamports overflow on rent refund",
         "name": "distributePayerBalanceOverflow"
+      },
+      {
+        "code": 2413,
+        "kind": "errorNode",
+        "message": "Transfer queue capacity exceeded",
+        "name": "distributeTransferQueueOverflow"
       }
     ],
     "events": [],

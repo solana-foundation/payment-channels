@@ -3500,6 +3500,8 @@ dependencies = [
  "solana-address 2.6.0",
  "solana-address-lookup-table-interface",
  "solana-clock",
+ "solana-compute-budget",
+ "solana-compute-budget-interface",
  "solana-instruction",
  "solana-instructions-sysvar",
  "solana-keypair",

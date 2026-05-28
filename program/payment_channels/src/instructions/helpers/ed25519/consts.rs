@@ -2,8 +2,7 @@
 //!
 //! Byte widths, offsets record position, and canonical inline-ix region
 //! offsets for the native `Ed25519SigVerify` program. Sourced from the
-//! Solana precompile spec; names mirror the `solana_sdk::ed25519_program`
-//! module so off-chain callers and on-chain consumers share a vocabulary.
+//! Solana precompile spec.
 //!
 //! https://solana.com/docs/core/programs/precompiles#verify-ed25519-signature
 

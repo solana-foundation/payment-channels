@@ -148,4 +148,6 @@ pub enum PaymentChannelsError {
     DistributeBalanceCalculationOverflow = 2411,
     #[error("Payer lamports overflow on rent refund")]
     DistributePayerBalanceOverflow = 2412,
+    #[error("Transfer queue capacity exceeded")]
+    DistributeTransferQueueOverflow = 2413,
 }

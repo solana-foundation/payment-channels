@@ -1,5 +1,6 @@
 #[cfg(feature = "idl")]
 use alloc::vec::Vec;
+
 #[cfg(feature = "idl")]
 use codama::CodamaType;
 use pinocchio::{
@@ -15,15 +16,14 @@ use crate::helpers::accounts::view::{
     PayerTokenAccountView, TokenContext, TokenProgramAccountView, TreasuryTokenAccountView,
 };
 use crate::helpers::accounts::view::{PayerAccountView, RecipientTokenAccountsView};
+#[cfg(feature = "idl")]
+use crate::instructions::helpers::DistributionEntry;
 use crate::instructions::helpers::{
-    DistributionEntry, DistributionPreimage, channel_signer_seeds, floor_bps_share,
+    DistributionPreimage, Transfer, channel_signer_seeds, floor_bps_share,
 };
 use crate::state::channel::{Channel, ChannelStatus};
 use crate::state::closed_channel::ClosedChannel;
-use crate::{
-    errors::PaymentChannelsError,
-    helpers::accounts::view::{ChannelAccountView, Checked},
-};
+use crate::{errors::PaymentChannelsError, helpers::accounts::view::ChannelAccountView};
 
 /// Instruction discriminator byte for `distribute`.
 pub const DISCRIMINATOR: u8 = 7;
@@ -214,11 +214,13 @@ pub fn process(
     let deposit = ch.deposit();
     let settled = ch.settled();
     let payer_withdrawn_at = ch.payer_withdrawn_at();
+    let is_finalized = status.is_finalized();
+    let payee_bps = args.recipients.payee_bps();
 
     if pool > 0 {
         ch.set_paid_out(settled);
     }
-    if status == ChannelStatus::Finalized && payer_withdrawn_at == 0 {
+    if is_finalized && payer_withdrawn_at == 0 {
         ch.set_payer_withdrawn_at(now);
     }
 
@@ -235,102 +237,54 @@ pub fn process(
     );
     let signers = [Signer::from(&signer_seeds)];
 
-    transfer_pool(
-        &recipient_token_accounts,
-        &channel_ctx,
-        &payee_token_account,
-        args.recipients.entries,
-        args.recipients.payee_bps(),
-        pool,
-        &signers,
-    )?;
+    // Collect payouts first; CPIs run in one shot at `flush` below.
+    let mut transfer = Transfer::new(&channel_ctx, &signers);
 
-    if status == ChannelStatus::Finalized {
-        // Payer refund branch — one-shot, gated by payer_withdrawn_at.
+    for (entry, recipient) in args
+        .recipients
+        .entries
+        .iter()
+        .zip(recipient_token_accounts.iter())
+    {
+        let amount = floor_bps_share(pool, entry.bps() as u32)?;
+        transfer.push(recipient, amount)?;
+    }
+
+    if payee_bps != 0 {
+        let payee_share = floor_bps_share(pool, payee_bps)?;
+        transfer.push(&payee_token_account, payee_share)?;
+    }
+
+    if is_finalized {
         if payer_withdrawn_at == 0 && deposit > settled {
-            channel_ctx.transfer_checked_signed(
-                &payer_ctx.payer_token_account.as_any(),
-                deposit - settled,
-                &signers,
-            )?;
+            let payer_refund = deposit - settled;
+            transfer.push(&payer_ctx.payer_token_account, payer_refund)?;
         }
-        sweep_finalized_residual(&channel_ctx, &treasury_token_account, &signers)?;
+
+        let escrow_at_entry = channel_ctx
+            .token_ctx
+            .token_program
+            .amount(&channel_ctx.channel_token_account.as_any())?;
+
+        // Invariant: escrow_at_entry == scheduled_outflow() + treasury_sweep.
+        // Treasury captures bps flooring dust not assigned to recipients/payee.
+        let treasury_sweep = escrow_at_entry
+            .checked_sub(transfer.scheduled_outflow())
+            .ok_or(PaymentChannelsError::DistributeBalanceCalculationOverflow)?;
+        transfer.push(&treasury_token_account, treasury_sweep)?;
+    }
+
+    // Execute every queued transfer (direct CPI or batched SPL `Batch`).
+    transfer.flush()?;
+
+    if is_finalized {
+        // Close escrow ATA and tombstone the channel PDA in place.
         tombstone_finalized_channel(&mut channel_ctx, &mut payer_ctx, &signers)?;
     }
 
     Ok(())
 }
 
-/// Transfers the newly settled pool to explicit recipients and the payee's
-/// implicit remainder share. Flooring residual remains in the escrow ATA until
-/// `FINALIZED`, when it is swept to treasury just before close.
-///
-/// All recipient and fixed token accounts have already been validated, so this
-/// helper is only responsible for payout math and signed token CPIs.
-#[allow(clippy::too_many_arguments)]
-fn transfer_pool(
-    recipients: &RecipientTokenAccountsView<'_, Checked>,
-    channel_ctx: &ChannelContext,
-    payee_token_account: &PayeeTokenAccountView<'_, Checked>,
-    entries: &[DistributionEntry],
-    payee_bps: u32,
-    pool: u64,
-    signers: &[Signer<'_, '_>],
-) -> ProgramResult {
-    if pool == 0 {
-        return Ok(());
-    }
-
-    let mut sum_paid: u64 = 0;
-    for (entry, recipient_token_account) in entries.iter().zip(recipients.iter_as_any()) {
-        let amount = floor_bps_share(pool, entry.bps() as u32)?;
-        channel_ctx.transfer_checked_signed(&recipient_token_account, amount, signers)?;
-        sum_paid = sum_paid
-            .checked_add(amount)
-            .expect("invariant: Σ floor(pool · bpsᵢ / 10_000) ≤ pool ≤ u64::MAX");
-    }
-
-    let payee_share = if payee_bps != 0 {
-        let share = floor_bps_share(pool, payee_bps)?;
-
-        channel_ctx.transfer_checked_signed(&payee_token_account.as_any(), share, signers)?;
-
-        share
-    } else {
-        0
-    };
-
-    let transferred = sum_paid
-        .checked_add(payee_share)
-        .expect("invariant: Σ shares ≤ pool ≤ u64::MAX");
-    debug_assert!(
-        transferred <= pool,
-        "invariant: Σ floor shares can never exceed pool when Σ bps ≤ 10_000",
-    );
-    Ok(())
-}
-
-/// Sweeps all tokens left in the finalized escrow to treasury after recipient
-/// payouts and any payer refund have completed.
-fn sweep_finalized_residual(
-    channel_ctx: &ChannelContext<'_>,
-    treasury_token_account: &TreasuryTokenAccountView<'_, Checked>,
-    signers: &[Signer<'_, '_>],
-) -> ProgramResult {
-    let residual = channel_ctx
-        .token_ctx
-        .token_program
-        .amount(&channel_ctx.channel_token_account.as_any())?;
-    channel_ctx.transfer_checked_signed(&treasury_token_account.as_any(), residual, signers)
-}
-
-/// Closes the finalized channel's escrow token account and tombstones the
-/// Channel PDA in place: shrinks the data buffer to
-/// [`ClosedChannel::LEN`], writes the [`AccountDiscriminator::ClosedChannel`]
-/// payload, and refunds the freed rent delta to the payer. The PDA stays
-/// alive forever — program-owned, non-empty — so the system program rejects
-/// any future `CreateAccount` against the same seeds, blocking voucher
-/// replay against a re-initialized channel.
 fn tombstone_finalized_channel(
     channel_ctx: &mut ChannelContext<'_>,
     payer_ctx: &mut PayerContext,

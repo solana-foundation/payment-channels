@@ -175,16 +175,16 @@ count (u32 LE) || [ recipient (32 bytes) || bps (u16 LE) ] × count
 ## Token Program Support
 
 Every token-moving instruction receives a `token_program` account and accepts
-only the classic SPL Token program or Token-2022. ATAs are derived as
+only the SPL Token program or Token-2022. ATAs are derived as
 `ATA(owner, mint, token_program)`, and transfers/closures use common
 Token-2022 CPI helpers (`TransferChecked`, `CloseAccount`) with the supplied
-program id, so extensionless Token-2022 and classic SPL Token share one path.
+program id, so extensionless Token-2022 and SPL Token share one path.
 
 Defensive validation runs before any escrow movement or `paid_out` mutation:
 
 - `open` validates the mint and the payer's source token account. The channel's escrow ATA is created in-band by the ATA program after the address is checked against `find_program_address([channel, token_program, mint], …)`, so it needs no extension scan.
 - `distribute` validates the mint and every token account it touches: the channel escrow, the payer refund ATA, the treasury ATA, and each recipient ATA.
-- Classic SPL Token mints/accounts must use the base layouts (strict length equality).
+- SPL Token mints/accounts must use the base layouts (strict length equality).
 - Token-2022 mints/accounts are parsed with the account-type byte and TLV extension trailer.
 - Token-2022 mint extensions are allowed only for an explicitly enumerated set: `MetadataPointer`, `TokenMetadata`, `GroupPointer`, `TokenGroup`, `GroupMemberPointer`, `TokenGroupMember`. The list is fixed; future extensions, even ones that would not affect transfer semantics, are rejected until added here.
 - Token-2022 token-account extensions are allowed only for base accounts and `ImmutableOwner`.

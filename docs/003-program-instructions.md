@@ -145,6 +145,12 @@ Permissionless post-grace crank.
 
 Permissionless crank. Verifies the committed splits preimage (Blake3) against `Channel.distribution_hash`, then pays `pool = settled − paid_out` to the merchant side: each recipient gets `floor(pool * bps[i] / 10000)` and the **payee** gets the implicit remainder `floor(pool * (10000 − Σ bps) / 10000)`. From `OPEN`, flooring residual remains in the channel ATA. From `FINALIZED`, the residual is swept to the treasury ATA, the payer receives the unspent `deposit − settled` headroom (gated by `payer_withdrawn_at == 0`), and the escrow ATA + Channel PDA are tombstoned.
 
+**Client transaction format:** at `count == 32`, callers MUST use **version 0 transactions with an address lookup table** indexing recipient ATAs. The instruction uses 8 fixed accounts plus up to 32 recipient ATAs (40 total); legacy transactions cannot fit the static account-key budget (~32 keys including fee payer and program id).
+
+**CPI profile:** SPL Token batches non-zero payouts via inner `Batch` CPIs (up to 8 transfers per invoke when ≥2 transfers are queued). Token-2022 uses one `TransferChecked` CPI per non-zero payout.
+
+**Treasury sweep (FINALIZED):** `treasury_sweep = escrow_balance_at_entry − sum(queued_payouts)`; the sweep captures bps flooring dust not assigned to recipients or the payee.
+
 **Args**
 
 | Name | Type | Description |
@@ -192,7 +198,7 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 
 ## Error Codes
 
-`PaymentChannelsError` is surfaced to clients as `ProgramError::Custom(code)`. Codes are grouped by category and each variant maps 1:1 to a numeric value below. The canonical source is `program/payment_channels/src/errors.rs`; this table mirrors it for client integrators.
+`PaymentChannelsError` is surfaced to clients as `ProgramError::Custom(code)`. Codes are grouped by category and each variant maps 1:1 to a numeric value below. The canonical source is `program/payment_channels/src/errors.rs`; the table below lists all variants for client integrators.
 
 ### General channel validation
 
@@ -299,8 +305,9 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | 2408 | `NothingToDistribute` | `pool == 0` while channel is `OPEN` (no newly settled funds). |
 | 2409 | `RecipientAccountCountMismatch` | Number of recipient ATAs in the account tail does not equal the preimage entry count. |
 | 2410 | `DistributePoolOverflow` | `settled − paid_out` underflowed (defensive — `paid_out ≤ settled` invariant). |
-| 2411 | `DistributeBalanceCalculationOverflow` | `current_lamports − new_min` underflowed during tombstone rent rebalance. |
+| 2411 | `DistributeBalanceCalculationOverflow` | Escrow/treasury arithmetic underflow or tombstone rent rebalance underflow. |
 | 2412 | `DistributePayerBalanceOverflow` | Payer lamports `+ delta` would overflow `u64` during tombstone rent refund. |
+| 2413 | `DistributeTransferQueueOverflow` | Transfer queue capacity exceeded (defensive — distribute queues at most 35 payouts). |
 
 ## Appendix
 
