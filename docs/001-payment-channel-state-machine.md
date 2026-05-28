@@ -210,9 +210,9 @@ Each row below would either trap funds, distort the `deposit`/`settled` accounti
 
 ### Mint trust model
 
-`open` and `topUp` do NOT inspect or reject the mint's base-layout authorities — specifically the **freeze authority** and the **mint authority**. The program treats a mint's classic SPL-level controls as out of scope; the merchant is responsible for vetting which mints they accept channels in.
+`open` and `topUp` do NOT inspect or reject the mint's base-layout authorities — specifically the **freeze authority** and the **mint authority**. Vetting the mint is the merchant's responsibility.
 
-The freeze authority is the load-bearing case. If a channel is opened against a mint whose freeze authority is live, that authority can call `FreezeAccount` on the channel's escrow ATA at any point in the channel lifecycle. Once frozen, the escrow ATA is no longer in the `Initialized` state required by the shared ATA validator, so every value-moving instruction rejects:
+Freeze authority is the main actor. A live freeze authority can freeze the channel's escrow ATA at any time. Once frozen, the escrow ATA is no longer `Initialized`, so every value-moving instruction rejects:
 
 - `topUp` cannot add collateral.
 - `distribute` cannot release `settled - paid_out` to recipients or the payee.
