@@ -26,6 +26,8 @@ The **Signer** column lists transaction-level signers where applicable; `Ed25519
 
 Payer-signed initializer. Creates the active channel PDA, creates its escrow ATA, transfers `deposit` from the payer token account, stores the exact Blake3 hash of the distribution preimage, and emits `Opened`.
 
+> **Mint trust model.** `open` does not reject mints with a live freeze authority (or mint authority). A merchant accepting a channel denominated in mint `M` is implicitly accepting that `M`'s freeze authority can freeze the channel's escrow ATA and wedge `topUp`, `distribute`, and `withdrawPayer` until thawed. This is intentional so that mainstream stablecoins (USDC, USDT, PYUSD, …) remain usable; merchants are expected to vet the mint off-chain. See [ADR-001 → Mint trust model](./001-payment-channel-state-machine.md#mint-trust-model).
+
 **Args**
 
 Wire after the discriminator:
