@@ -71,10 +71,10 @@ pub struct DistributeAccounts<'a> {
     /// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `== 0` and
     /// `deposit > settled`.
     pub payer_token_account: PayerTokenAccountView<'a>,
-    /// Implicit-remainder destination: receives
-    /// `floor(pool * (10_000 − Σ bps) / 10_000)` whenever `payee_bps > 0`.
-    /// Always supplied because the accounts schema is fixed; the transfer
-    /// call is skipped at the call site when `Σ bps == 10_000`.
+    /// Implicit-remainder destination for
+    /// `floor(pool * (10_000 − Σ bps) / 10_000)`. Always supplied because the
+    /// accounts schema is fixed; zero-share payouts still validate the
+    /// canonical ATA and then no-op in `Transfer`.
     pub payee_token_account: PayeeTokenAccountView<'a>,
     /// Treasury destination: receives flooring residual when the channel is
     /// finalized and ready to close.
@@ -214,11 +214,8 @@ pub fn process(
     let settled = ch.settled();
     let payer_withdrawn_at = ch.payer_withdrawn_at();
     let is_finalized = status.is_finalized();
-    let payee_bps = args.recipients.payee_bps();
 
-    if pool > 0 {
-        ch.set_paid_out(settled);
-    }
+    ch.set_paid_out(settled);
     if is_finalized && payer_withdrawn_at == 0 {
         ch.set_payer_withdrawn_at(now);
     }
@@ -258,11 +255,7 @@ pub fn process(
         )?;
     }
 
-    let payee_share = if payee_bps != 0 {
-        floor_bps_share(pool, payee_bps)?
-    } else {
-        0
-    };
+    let payee_share = floor_bps_share(pool, args.recipients.payee_bps())?;
     transfer.push(
         channel_ctx.token_ctx.payout_destination(
             PayoutBeneficiary::Payee,
