@@ -203,11 +203,6 @@ pub fn process(
     let salt_bytes: [u8; 8] = salt.to_le_bytes();
     let bump_byte: [u8; 1] = [ch.bump];
 
-    // Snapshot owner addresses for beneficiary payout validation after `ch`
-    // is dropped.
-    let payee_owner: Address = Address::new_from_array(payee_bytes);
-    let payer_owner: Address = Address::new_from_array(payer_bytes);
-
     // Snapshot accounting fields, then update channel state before any CPI.
     // Runtime rollback protects these writes if a later transfer or close fails.
     let deposit = ch.deposit();
@@ -260,7 +255,7 @@ pub fn process(
         channel_ctx.token_ctx.payout_destination(
             PayoutBeneficiary::Payee,
             &accs.payee_token_account,
-            &payee_owner,
+            &Address::new_from_array(payee_bytes),
             payee_share,
             &treasury_token_account,
         )?,
@@ -278,7 +273,7 @@ pub fn process(
                 channel_ctx.token_ctx.payout_destination(
                     PayoutBeneficiary::Payer,
                     &accs.payer_token_account,
-                    &payer_owner,
+                    &Address::new_from_array(payer_bytes),
                     payer_refund,
                     &treasury_token_account,
                 )?,

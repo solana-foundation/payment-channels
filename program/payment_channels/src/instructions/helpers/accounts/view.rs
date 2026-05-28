@@ -8,7 +8,6 @@ use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer};
 use crate::{
     PaymentChannelsError, TREASURY_OWNER,
     helpers::{
-        DistributionEntry,
         accounts::validation::{AccountValidationError, AccountValidator},
         token::{MintExtensionPolicy, TokenExtensionError, base_layout, scan_tlv_extensions, tlv},
     },
@@ -135,76 +134,11 @@ impl<'a> TreasuryTokenAccountView<'a, Unchecked> {
     }
 }
 
-impl<'a> PayeeTokenAccountView<'a, Unchecked> {
-    pub fn check(
-        self,
-        payee: &Address,
-        token_ctx: &TokenContext<'a>,
-    ) -> Result<PayeeTokenAccountView<'a, Checked>, PaymentChannelsError> {
-        self.inner
-            .validate_as_ata_checked(payee, token_ctx)
-            .map_err(|err| match err {
-                AccountValidationError::AddressMismatch => {
-                    PaymentChannelsError::PayeeAccountMismatch
-                }
-                AccountValidationError::MalformedTokenAccountData => {
-                    PaymentChannelsError::InvalidPayeeTokenAccount
-                }
-                AccountValidationError::TokenExtensionError(_) => {
-                    PaymentChannelsError::InvalidPayeeTokenExtensions
-                }
-            })?;
-
-        Ok(PayeeTokenAccountView {
-            inner: self.inner,
-            _s: Default::default(),
-        })
-    }
-}
-
 // Edge case-specific manual implementations
 
 pub struct RecipientTokenAccountsView<'a, S: State = Unchecked> {
     inner: &'a mut [AccountView],
     _s: PhantomData<S>,
-}
-
-impl<'a> RecipientTokenAccountsView<'a, Unchecked> {
-    pub fn check(
-        self,
-        entries: &[DistributionEntry],
-        token_ctx: &TokenContext<'a>,
-    ) -> Result<RecipientTokenAccountsView<'a, Checked>, PaymentChannelsError> {
-        for (entry, account) in entries.iter().zip(self.inner.iter()) {
-            account
-                .validate_as_ata_checked(&entry.recipient, token_ctx)
-                .map_err(|err| match err {
-                    AccountValidationError::AddressMismatch => {
-                        PaymentChannelsError::RecipientAccountMismatch
-                    }
-                    AccountValidationError::MalformedTokenAccountData => {
-                        PaymentChannelsError::InvalidRecipientTokenAccount
-                    }
-                    AccountValidationError::TokenExtensionError(_) => {
-                        PaymentChannelsError::InvalidRecipientTokenExtensions
-                    }
-                })?;
-        }
-
-        Ok(RecipientTokenAccountsView {
-            inner: self.inner,
-            _s: Default::default(),
-        })
-    }
-}
-
-impl<'a> RecipientTokenAccountsView<'a, Checked> {
-    pub fn iter_as_any(&self) -> impl Iterator<Item = AnyTokenAccountView<'_, Checked>> {
-        self.iter().map(|acc| AnyTokenAccountView::<Checked> {
-            inner: acc,
-            _s: Default::default(),
-        })
-    }
 }
 
 impl<'a> From<&'a mut [AccountView]> for RecipientTokenAccountsView<'a, Unchecked> {
@@ -259,17 +193,6 @@ pub struct TokenContext<'a> {
     pub token_program: TokenProgramAccountView<'a, Checked>,
     pub decimals: u8,
     pub kind: TokenProgramKind,
-}
-
-/// Result of validating a beneficiary ATA for a payout.
-pub(crate) enum RedirectableAta<'a> {
-    /// Canonical ATA passed full validation and can receive the transfer.
-    Valid(
-        /// Checked token account view for the beneficiary destination.
-        AnyTokenAccountView<'a, Checked>,
-    ),
-    /// Canonical ATA failed only by a redirectable condition.
-    RedirectToTreasury,
 }
 
 #[derive(Clone, Copy)]
@@ -383,34 +306,6 @@ impl<'a> TokenContext<'a> {
         account.validate_as_ata_unchecked(owner, self.token_program.address(), self.mint.address())
     }
 
-    /// Validates the canonical ATA address, base token account data, and allowed extensions.
-    pub(crate) fn validate_ata_checked<'b>(
-        &self,
-        account: &'b AccountView,
-        owner: &Address,
-    ) -> Result<AnyTokenAccountView<'b, Checked>, AccountValidationError> {
-        account.validate_as_ata_checked(owner, self)?;
-        Ok(AnyTokenAccountView {
-            inner: account,
-            _s: PhantomData,
-        })
-    }
-
-    /// Validates a beneficiary ATA, converting unsupported account extensions into a redirect.
-    pub(crate) fn validate_redirectable_ata<'b>(
-        &self,
-        account: &'b AccountView,
-        owner: &Address,
-    ) -> Result<RedirectableAta<'b>, AccountValidationError> {
-        match self.validate_ata_checked(account, owner) {
-            Ok(checked) => Ok(RedirectableAta::Valid(checked)),
-            Err(AccountValidationError::TokenExtensionError(
-                TokenExtensionError::UnsupportedTokenExtension,
-            )) => Ok(RedirectableAta::RedirectToTreasury),
-            Err(err) => Err(err),
-        }
-    }
-
     pub(crate) fn payout_destination<'b>(
         &self,
         beneficiary: PayoutBeneficiary,
@@ -419,15 +314,23 @@ impl<'a> TokenContext<'a> {
         amount: u64,
         treasury: &'b TreasuryTokenAccountView<'_, Checked>,
     ) -> Result<&'b AccountView, PaymentChannelsError> {
+        // Zero-share payouts no-op in `Transfer`; only the canonical ATA
+        // address is checked so a poisoned zero-share beneficiary cannot veto
+        // the crank.
         if amount == 0 {
-            self.validate_ata_address(account, owner)
-                .map_err(|err| beneficiary.map_account_error(err))?;
-            return Ok(account);
+            return self
+                .validate_ata_address(account, owner)
+                .map(|()| account)
+                .map_err(|err| beneficiary.map_account_error(err));
         }
 
-        match self.validate_redirectable_ata(account, owner) {
-            Ok(RedirectableAta::Valid(_destination)) => Ok(account),
-            Ok(RedirectableAta::RedirectToTreasury) => Ok(&**treasury),
+        // A well-formed-but-unsupported extension forfeits the share to
+        // treasury; every other validation failure is fatal.
+        match account.validate_as_ata_checked(owner, self) {
+            Ok(()) => Ok(account),
+            Err(AccountValidationError::TokenExtensionError(
+                TokenExtensionError::UnsupportedTokenExtension,
+            )) => Ok(&**treasury),
             Err(err) => Err(beneficiary.map_account_error(err)),
         }
     }
