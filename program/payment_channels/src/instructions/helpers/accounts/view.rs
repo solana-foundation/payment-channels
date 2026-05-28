@@ -272,6 +272,47 @@ pub(crate) enum RedirectableAta<'a> {
     RedirectToTreasury,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum PayoutBeneficiary {
+    Recipient,
+    Payee,
+    Payer,
+}
+
+impl PayoutBeneficiary {
+    fn map_account_error(self, err: AccountValidationError) -> PaymentChannelsError {
+        match (self, err) {
+            (Self::Recipient, AccountValidationError::AddressMismatch) => {
+                PaymentChannelsError::RecipientAccountMismatch
+            }
+            (Self::Recipient, AccountValidationError::MalformedTokenAccountData) => {
+                PaymentChannelsError::InvalidRecipientTokenAccount
+            }
+            (Self::Recipient, AccountValidationError::TokenExtensionError(_)) => {
+                PaymentChannelsError::InvalidRecipientTokenExtensions
+            }
+            (Self::Payee, AccountValidationError::AddressMismatch) => {
+                PaymentChannelsError::PayeeAccountMismatch
+            }
+            (Self::Payee, AccountValidationError::MalformedTokenAccountData) => {
+                PaymentChannelsError::InvalidPayeeTokenAccount
+            }
+            (Self::Payee, AccountValidationError::TokenExtensionError(_)) => {
+                PaymentChannelsError::InvalidPayeeTokenExtensions
+            }
+            (Self::Payer, AccountValidationError::AddressMismatch) => {
+                PaymentChannelsError::PayerAccountMismatch
+            }
+            (Self::Payer, AccountValidationError::MalformedTokenAccountData) => {
+                PaymentChannelsError::InvalidPayerTokenAccount
+            }
+            (Self::Payer, AccountValidationError::TokenExtensionError(_)) => {
+                PaymentChannelsError::InvalidPayerTokenExtensions
+            }
+        }
+    }
+}
+
 impl<'a> TokenContext<'a> {
     pub fn new(
         mint: MintAccountView<'a, Unchecked>,
@@ -367,6 +408,27 @@ impl<'a> TokenContext<'a> {
                 TokenExtensionError::UnsupportedTokenExtension,
             )) => Ok(RedirectableAta::RedirectToTreasury),
             Err(err) => Err(err),
+        }
+    }
+
+    pub(crate) fn payout_destination<'b>(
+        &self,
+        beneficiary: PayoutBeneficiary,
+        account: &'b AccountView,
+        owner: &Address,
+        amount: u64,
+        treasury: &'b TreasuryTokenAccountView<'_, Checked>,
+    ) -> Result<&'b AccountView, PaymentChannelsError> {
+        if amount == 0 {
+            self.validate_ata_address(account, owner)
+                .map_err(|err| beneficiary.map_account_error(err))?;
+            return Ok(account);
+        }
+
+        match self.validate_redirectable_ata(account, owner) {
+            Ok(RedirectableAta::Valid(_destination)) => Ok(account),
+            Ok(RedirectableAta::RedirectToTreasury) => Ok(&**treasury),
+            Err(err) => Err(beneficiary.map_account_error(err)),
         }
     }
 }

@@ -12,13 +12,10 @@ use pinocchio::{
 use pinocchio_token_2022::instructions::CloseAccount;
 
 use crate::errors::PaymentChannelsError;
-use crate::helpers::accounts::{
-    validation::AccountValidationError,
-    view::{
-        ChannelAccountView, ChannelContext, ChannelTokenAccountView, Checked, MintAccountView,
-        PayeeTokenAccountView, PayerAccountView, PayerTokenAccountView, RecipientTokenAccountsView,
-        RedirectableAta, TokenContext, TokenProgramAccountView, TreasuryTokenAccountView,
-    },
+use crate::helpers::accounts::view::{
+    ChannelAccountView, ChannelContext, ChannelTokenAccountView, MintAccountView,
+    PayeeTokenAccountView, PayerAccountView, PayerTokenAccountView, PayoutBeneficiary,
+    RecipientTokenAccountsView, TokenContext, TokenProgramAccountView, TreasuryTokenAccountView,
 };
 #[cfg(feature = "idl")]
 use crate::instructions::helpers::DistributionEntry;
@@ -206,9 +203,8 @@ pub fn process(
     let salt_bytes: [u8; 8] = salt.to_le_bytes();
     let bump_byte: [u8; 1] = [ch.bump];
 
-    // Snapshot owner addresses for inline ATA validation inside
-    // `transfer_pool` and the FINALIZED refund branch — both of which run
-    // after `ch` is dropped.
+    // Snapshot owner addresses for beneficiary payout validation after `ch`
+    // is dropped.
     let payee_owner: Address = Address::new_from_array(payee_bytes);
     let payer_owner: Address = Address::new_from_array(payer_bytes);
 
@@ -250,14 +246,15 @@ pub fn process(
         .zip(accs.recipient_token_accounts.iter())
     {
         let amount = floor_bps_share(pool, entry.bps() as u32)?;
-        push_or_redirect(
-            &mut transfer,
-            &channel_ctx.token_ctx,
-            recipient_account,
-            &entry.recipient,
+        transfer.push(
+            channel_ctx.token_ctx.payout_destination(
+                PayoutBeneficiary::Recipient,
+                recipient_account,
+                &entry.recipient,
+                amount,
+                &treasury_token_account,
+            )?,
             amount,
-            &treasury_token_account,
-            map_recipient_account_error,
         )?;
     }
 
@@ -266,14 +263,15 @@ pub fn process(
     } else {
         0
     };
-    push_or_redirect(
-        &mut transfer,
-        &channel_ctx.token_ctx,
-        &accs.payee_token_account,
-        &payee_owner,
+    transfer.push(
+        channel_ctx.token_ctx.payout_destination(
+            PayoutBeneficiary::Payee,
+            &accs.payee_token_account,
+            &payee_owner,
+            payee_share,
+            &treasury_token_account,
+        )?,
         payee_share,
-        &treasury_token_account,
-        map_payee_account_error,
     )?;
 
     if is_finalized {
@@ -283,14 +281,15 @@ pub fn process(
         // redirected to treasury and the channel can still close.
         if payer_withdrawn_at == 0 && deposit > settled {
             let payer_refund = deposit - settled;
-            push_or_redirect(
-                &mut transfer,
-                &channel_ctx.token_ctx,
-                &accs.payer_token_account,
-                &payer_owner,
+            transfer.push(
+                channel_ctx.token_ctx.payout_destination(
+                    PayoutBeneficiary::Payer,
+                    &accs.payer_token_account,
+                    &payer_owner,
+                    payer_refund,
+                    &treasury_token_account,
+                )?,
                 payer_refund,
-                &treasury_token_account,
-                map_payer_account_error,
             )?;
         }
 
@@ -316,79 +315,6 @@ pub fn process(
     }
 
     Ok(())
-}
-
-fn map_beneficiary_account_error(
-    err: AccountValidationError,
-    address_mismatch: PaymentChannelsError,
-    invalid_account: PaymentChannelsError,
-    invalid_extensions: PaymentChannelsError,
-) -> PaymentChannelsError {
-    match err {
-        AccountValidationError::AddressMismatch => address_mismatch,
-        AccountValidationError::MalformedTokenAccountData => invalid_account,
-        AccountValidationError::TokenExtensionError(_) => invalid_extensions,
-    }
-}
-
-fn map_recipient_account_error(err: AccountValidationError) -> PaymentChannelsError {
-    map_beneficiary_account_error(
-        err,
-        PaymentChannelsError::RecipientAccountMismatch,
-        PaymentChannelsError::InvalidRecipientTokenAccount,
-        PaymentChannelsError::InvalidRecipientTokenExtensions,
-    )
-}
-
-fn map_payee_account_error(err: AccountValidationError) -> PaymentChannelsError {
-    map_beneficiary_account_error(
-        err,
-        PaymentChannelsError::PayeeAccountMismatch,
-        PaymentChannelsError::InvalidPayeeTokenAccount,
-        PaymentChannelsError::InvalidPayeeTokenExtensions,
-    )
-}
-
-fn map_payer_account_error(err: AccountValidationError) -> PaymentChannelsError {
-    map_beneficiary_account_error(
-        err,
-        PaymentChannelsError::PayerAccountMismatch,
-        PaymentChannelsError::InvalidPayerTokenAccount,
-        PaymentChannelsError::InvalidPayerTokenExtensions,
-    )
-}
-
-/// Queues a nonzero beneficiary payout to its ATA or redirects unsupported
-/// Token-2022 account extensions to treasury. Zero-amount payouts prove only
-/// the canonical ATA address and emit no token CPI.
-#[allow(clippy::too_many_arguments)]
-fn push_or_redirect<'a>(
-    transfer: &mut Transfer<'a>,
-    token_ctx: &TokenContext<'a>,
-    token_account: &'a AccountView,
-    owner: &Address,
-    amount: u64,
-    treasury: &'a TreasuryTokenAccountView<'a, Checked>,
-    map_account_error: fn(AccountValidationError) -> PaymentChannelsError,
-) -> ProgramResult {
-    if amount == 0 {
-        token_ctx
-            .validate_ata_address(token_account, owner)
-            .map_err(|err| ProgramError::from(map_account_error(err)))?;
-        return Ok(());
-    }
-
-    match token_ctx.validate_redirectable_ata(token_account, owner) {
-        Ok(RedirectableAta::Valid(_destination)) => {
-            transfer.push(token_account, amount)?;
-            Ok(())
-        }
-        Ok(RedirectableAta::RedirectToTreasury) => {
-            transfer.push(treasury, amount)?;
-            Ok(())
-        }
-        Err(err) => Err(map_account_error(err).into()),
-    }
 }
 
 /// Closes the finalized channel's escrow token account and tombstones the
