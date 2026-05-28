@@ -1,8 +1,8 @@
-# Compute-unit profiler. Runs `just bench` on every PR and upserts
-# `bench_report.md` (written by the integration-test binary on exit) as a
-# PR comment keyed on the `<!-- bench-report -->` marker.
+# Compute-unit profiler. Runs `just bench` on both the PR HEAD and the PR's
+# merge base (typically `main`), then upserts a side-by-side comparison
+# comment keyed on the `<!-- bench-report -->` marker.
 
-name: Benchmark
+name: benchmark
 
 on:
   pull_request:
@@ -19,11 +19,13 @@ permissions:
 jobs:
   compute-units:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 1
+          # Need full history so we can check out the base branch (main) in
+          # the same working tree for the baseline benchmark run.
+          fetch-depth: 0
 
       - uses: ./.github/actions/setup
         with:
@@ -31,10 +33,37 @@ jobs:
           rust-cache-key: "benchmark"
           save-rust-cache: "true"
 
-      - name: Run benchmark
+      - name: Stash diff script
+        # `git checkout` will overwrite tracked files when we switch to the
+        # base branch — the diff script lives only on the PR HEAD until this
+        # workflow lands on main, so cache a copy outside the working tree.
+        run: cp scripts/bench_diff.mjs /tmp/bench_diff.mjs
+
+      - name: Bench on base branch
+        run: |
+          set -euo pipefail
+          PR_SHA=$(git rev-parse HEAD)
+          BASE_REF="origin/${{ github.event.pull_request.base.ref }}"
+          echo "Benching base: $BASE_REF"
+          # `-f` because `bench_report.md` is tracked and gets dirtied by
+          # the bench run; we don't care about preserving that state.
+          git checkout -f "$BASE_REF" --quiet
+          just bench
+          cp program/payment_channels/bench_report.md /tmp/bench_base.md
+          git checkout -f "$PR_SHA" --quiet
+
+      - name: Bench on PR HEAD
         run: just bench
 
-      - name: Post bench report comment
+      - name: Diff
+        run: |
+          set -euo pipefail
+          node /tmp/bench_diff.mjs \
+            /tmp/bench_base.md \
+            program/payment_channels/bench_report.md \
+            > /tmp/bench_diff.md
+
+      - name: Post comment
         if: github.event.pull_request.head.repo.full_name == github.repository
         env:
           GH_TOKEN: ${{ github.token }}
@@ -42,9 +71,12 @@ jobs:
           set -euo pipefail
           PR=${{ github.event.pull_request.number }}
           MARKER="<!-- bench-report -->"
+          BASE_REF="${{ github.event.pull_request.base.ref }}"
           REPORT="$MARKER
 
-          $(cat program/payment_channels/bench_report.md)"
+          # CU Benchmark — \`$BASE_REF\` vs this PR
+
+          $(cat /tmp/bench_diff.md)"
 
           COMMENT_ID=$(gh api "repos/${{ github.repository }}/issues/${PR}/comments" \
             --jq ".[] | select(.body | contains(\"$MARKER\")) | .id" | head -1)
