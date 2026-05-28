@@ -66,6 +66,8 @@ pub enum PaymentChannelsError {
     // general object validations
     #[error("Deposit must be non-zero")]
     DepositMustBeNonZero = 200,
+    #[error("Grace period must be non-zero")]
+    GracePeriodMustBeNonZero = 201,
 
     // voucher validation
     #[error("Missing Ed25519 precompile ix at current-1")]
@@ -146,4 +148,6 @@ pub enum PaymentChannelsError {
     DistributeBalanceCalculationOverflow = 2411,
     #[error("Payer lamports overflow on rent refund")]
     DistributePayerBalanceOverflow = 2412,
+    #[error("Transfer queue capacity exceeded")]
+    DistributeTransferQueueOverflow = 2413,
 }

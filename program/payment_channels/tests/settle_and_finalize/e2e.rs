@@ -3,9 +3,8 @@
 #![allow(clippy::result_large_err)]
 
 use litesvm::LiteSVM;
-use payment_channels::ed25519;
+use payment_channels::PaymentChannelsError;
 use payment_channels::state::channel::ChannelStatus;
-use payment_channels::{PaymentChannelsError, VOUCHER_PAYLOAD_SIZE};
 use payment_channels_client::instructions::{SettleAndFinalize, SettleAndFinalizeInstructionArgs};
 use payment_channels_client::types::{SettleAndFinalizeArgs, VoucherArgs};
 use solana_account::Account;
@@ -17,16 +16,11 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 
 use crate::common::{
-    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, cu_tracker, ed25519_program_id,
-    expect_custom_err,
+    ChannelBuilder, INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, expect_custom_err,
+    read_channel,
+    voucher::{build_ed25519_ix, voucher_payload},
 };
 
-/// Inject a 216-byte Channel owned by PROGRAM_ID.
-///
-/// Byte offsets (from channel.rs layout):
-///  0  discriminator, 1  version, 3  status
-/// 12..20 deposit, 20..28 settled, 36..44 closure_started_at, 52..56 grace_period
-/// 88..120 payer, 120..152 payee, 152..184 authorized_signer, 184..216 mint
 #[allow(clippy::too_many_arguments)]
 fn seed_channel(
     svm: &mut LiteSVM,
@@ -39,16 +33,15 @@ fn seed_channel(
     payee: &Pubkey,
     authorized_signer: &Pubkey,
 ) {
-    let mut data = vec![0u8; 216];
-    data[0] = 1; // AccountDiscriminator::Channel
-    data[1] = 1; // CURRENT_CHANNEL_VERSION
-    data[3] = status as u8;
-    data[12..20].copy_from_slice(&deposit.to_le_bytes());
-    data[20..28].copy_from_slice(&settled.to_le_bytes());
-    data[36..44].copy_from_slice(&closure_started_at.to_le_bytes());
-    data[52..56].copy_from_slice(&grace_period.to_le_bytes());
-    data[120..152].copy_from_slice(&payee.to_bytes());
-    data[152..184].copy_from_slice(&authorized_signer.to_bytes());
+    let data = ChannelBuilder::new()
+        .status(status)
+        .deposit(deposit)
+        .settled(settled)
+        .closure_started_at(closure_started_at)
+        .grace_period(grace_period)
+        .payee(*payee)
+        .authorized_signer(*authorized_signer)
+        .build();
     svm.set_account(
         *channel,
         Account {
@@ -60,52 +53,6 @@ fn seed_channel(
         },
     )
     .expect("set_account");
-}
-
-fn read_status(svm: &LiteSVM, channel: &Pubkey) -> u8 {
-    svm.get_account(channel).expect("channel exists").data[3]
-}
-
-fn read_settled(svm: &LiteSVM, channel: &Pubkey) -> u64 {
-    let data = svm.get_account(channel).expect("channel exists").data;
-    u64::from_le_bytes(data[20..28].try_into().unwrap())
-}
-
-fn read_closure_started_at(svm: &LiteSVM, channel: &Pubkey) -> i64 {
-    let data = svm.get_account(channel).expect("channel exists").data;
-    i64::from_le_bytes(data[36..44].try_into().unwrap())
-}
-
-fn voucher_payload(voucher: &VoucherArgs) -> [u8; VOUCHER_PAYLOAD_SIZE] {
-    borsh::to_vec(voucher)
-        .expect("voucher borsh encoding")
-        .try_into()
-        .expect("voucher payload matches VOUCHER_PAYLOAD_SIZE")
-}
-
-fn build_ed25519_ix(
-    pubkey: &[u8; ed25519::PUBKEY_SERIALIZED_SIZE],
-    signature: &[u8; ed25519::SIGNATURE_SERIALIZED_SIZE],
-    message: &[u8; VOUCHER_PAYLOAD_SIZE],
-) -> Instruction {
-    let mut data = Vec::with_capacity(ed25519::MESSAGE_OFFSET + VOUCHER_PAYLOAD_SIZE);
-    data.push(1u8);
-    data.push(0u8);
-    data.extend_from_slice(&(ed25519::SIGNATURE_OFFSET as u16).to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes());
-    data.extend_from_slice(&(ed25519::PUBKEY_OFFSET as u16).to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes());
-    data.extend_from_slice(&(ed25519::MESSAGE_OFFSET as u16).to_le_bytes());
-    data.extend_from_slice(&(VOUCHER_PAYLOAD_SIZE as u16).to_le_bytes());
-    data.extend_from_slice(&u16::MAX.to_le_bytes());
-    data.extend_from_slice(pubkey);
-    data.extend_from_slice(signature);
-    data.extend_from_slice(message);
-    Instruction {
-        program_id: ed25519_program_id(),
-        accounts: Vec::new(),
-        data,
-    }
 }
 
 fn build_saf_ix(channel: &Pubkey, args: SettleAndFinalizeArgs, merchant: &Pubkey) -> Instruction {
@@ -167,11 +114,13 @@ fn open_to_finalized_with_voucher() {
         &[&fee_payer, &merchant],
         svm.latest_blockhash(),
     );
-    cu_tracker::send_and_record(&mut svm, tx).expect("tx ok");
+    svm.send_transaction(tx).expect("tx ok");
 
-    assert_eq!(read_status(&svm, &channel), ChannelStatus::Finalized as u8);
-    assert_eq!(read_settled(&svm, &channel), cumulative);
-    assert_eq!(read_closure_started_at(&svm, &channel), 0);
+    read_channel(&svm, &channel, |ch| {
+        assert_eq!(ch.status, ChannelStatus::Finalized as u8);
+        assert_eq!(ch.settled(), cumulative);
+        assert_eq!(ch.closure_started_at(), 0);
+    });
 }
 
 // ─── error paths ─────────────────────────────────────────────────────────────
@@ -227,7 +176,7 @@ fn with_voucher_expired_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        cu_tracker::send_and_record(&mut svm, tx),
+        svm.send_transaction(tx),
         PaymentChannelsError::VoucherExpired,
     );
 }
@@ -279,7 +228,7 @@ fn with_voucher_wrong_authorized_signer_rejects() {
         svm.latest_blockhash(),
     );
     expect_custom_err(
-        cu_tracker::send_and_record(&mut svm, tx),
+        svm.send_transaction(tx),
         PaymentChannelsError::VoucherSignerMismatch,
     );
 }

@@ -94,18 +94,17 @@ impl<'a> TokenProgramAccountView<'a, Checked> {
         &self,
         account: &AnyTokenAccountView<'_, Checked>,
     ) -> Result<u64, PaymentChannelsError> {
-        if self.address() == &pinocchio_token::ID {
-            Ok(pinocchio_token::state::Account::from_account_view(account)
-                .map_err(|_| PaymentChannelsError::MalformedMintTokenAccountData)?
-                .amount())
-        } else if self.address() == &pinocchio_token_2022::ID {
-            Ok(
+        match TokenProgramKind::from_address(self.address())? {
+            TokenProgramKind::Spl => {
+                Ok(pinocchio_token::state::Account::from_account_view(account)
+                    .map_err(|_| PaymentChannelsError::MalformedMintTokenAccountData)?
+                    .amount())
+            }
+            TokenProgramKind::Token2022 => Ok(
                 pinocchio_token_2022::state::Account::from_account_view(account)
                     .map_err(|_| PaymentChannelsError::MalformedMintTokenAccountData)?
                     .amount(),
-            )
-        } else {
-            Err(PaymentChannelsError::InvalidMintTokenProgram)
+            ),
         }
     }
 }
@@ -121,8 +120,7 @@ impl<'a> TreasuryTokenAccountView<'a, Unchecked> {
                 AccountValidationError::AddressMismatch => {
                     PaymentChannelsError::TreasuryAccountMismatch
                 }
-                AccountValidationError::MalformedTokenAccountData
-                | AccountValidationError::InvalidTokenProgram => {
+                AccountValidationError::MalformedTokenAccountData => {
                     PaymentChannelsError::InvalidTreasuryTokenAccount
                 }
                 AccountValidationError::TokenExtensionError(_) => {
@@ -149,8 +147,7 @@ impl<'a> PayeeTokenAccountView<'a, Unchecked> {
                 AccountValidationError::AddressMismatch => {
                     PaymentChannelsError::PayeeAccountMismatch
                 }
-                AccountValidationError::MalformedTokenAccountData
-                | AccountValidationError::InvalidTokenProgram => {
+                AccountValidationError::MalformedTokenAccountData => {
                     PaymentChannelsError::InvalidPayeeTokenAccount
                 }
                 AccountValidationError::TokenExtensionError(_) => {
@@ -185,8 +182,7 @@ impl<'a> RecipientTokenAccountsView<'a, Unchecked> {
                     AccountValidationError::AddressMismatch => {
                         PaymentChannelsError::RecipientAccountMismatch
                     }
-                    AccountValidationError::MalformedTokenAccountData
-                    | AccountValidationError::InvalidTokenProgram => {
+                    AccountValidationError::MalformedTokenAccountData => {
                         PaymentChannelsError::InvalidRecipientTokenAccount
                     }
                     AccountValidationError::TokenExtensionError(_) => {
@@ -230,10 +226,39 @@ where
     }
 }
 
+/// Which token program backs this channel's mint and ATAs.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TokenProgramKind {
+    /// SPL Token program.
+    Spl,
+    /// Token-2022 program.
+    Token2022,
+}
+
+impl TokenProgramKind {
+    pub fn from_address(address: &Address) -> Result<Self, PaymentChannelsError> {
+        if address == &pinocchio_token::ID {
+            Ok(Self::Spl)
+        } else if address == &pinocchio_token_2022::ID {
+            Ok(Self::Token2022)
+        } else {
+            Err(PaymentChannelsError::InvalidMintTokenProgram)
+        }
+    }
+
+    /// Whether this token program exposes a `Batch` CPI for folding multiple
+    /// sub-instructions into a single invocation. SPL Token does; Token-2022
+    /// does not.
+    pub const fn supports_transfer_batching(self) -> bool {
+        matches!(self, Self::Spl)
+    }
+}
+
 pub struct TokenContext<'a> {
     pub mint: MintAccountView<'a, Checked>,
     pub token_program: TokenProgramAccountView<'a, Checked>,
     pub decimals: u8,
+    pub kind: TokenProgramKind,
 }
 
 /// Result of validating a beneficiary ATA for a payout.
@@ -252,30 +277,31 @@ impl<'a> TokenContext<'a> {
         mint: MintAccountView<'a, Unchecked>,
         token_program: TokenProgramAccountView<'a, Unchecked>,
     ) -> Result<Self, PaymentChannelsError> {
-        let decimals = if token_program.address() == &pinocchio_token::ID {
-            // pinocchio_token enforces owner == SPL classic + exact length.
-            pinocchio_token::state::Mint::from_account_view(&mint)
-                .map_err(|_| PaymentChannelsError::MintAccountMismatch)?
-                .decimals()
-        } else if token_program.address() == &pinocchio_token_2022::ID {
-            // pinocchio_token_2022 enforces owner == Token-2022 and (when
-            // extensions are present) the AccountType discriminator byte.
-            pinocchio_token_2022::state::Mint::from_account_view(&mint)
-                .map_err(|_| PaymentChannelsError::MintAccountMismatch)?
-                .decimals()
-        } else {
-            return Err(PaymentChannelsError::InvalidMintTokenProgram);
+        let kind = TokenProgramKind::from_address(token_program.address())?;
+
+        let decimals = match kind {
+            TokenProgramKind::Spl => {
+                // pinocchio_token enforces owner == SPL Token + exact length.
+                pinocchio_token::state::Mint::from_account_view(&mint)
+                    .map_err(|_| PaymentChannelsError::MintAccountMismatch)?
+                    .decimals()
+            }
+            TokenProgramKind::Token2022 => {
+                // pinocchio_token_2022 enforces owner == Token-2022 and (when
+                // extensions are present) the AccountType discriminator byte.
+                pinocchio_token_2022::state::Mint::from_account_view(&mint)
+                    .map_err(|_| PaymentChannelsError::MintAccountMismatch)?
+                    .decimals()
+            }
         };
 
-        if token_program.address() == &pinocchio_token_2022::ID {
+        if kind == TokenProgramKind::Token2022 {
             let data = mint
                 .try_borrow()
                 .map_err(|_| PaymentChannelsError::MintAccountMismatch)?;
             if data.len() > base_layout::MINT_LEN {
-                // Upstream's `validate_account_type` checks the discriminator at
-                // `Account::BASE_LEN` but doesn't enforce that the gap between the
-                // mint base region and that offset is zero — guard against
-                // smuggled bytes here, then walk the whitelisted TLV trailer.
+                // Require zero padding between mint base and AccountType offset,
+                // then walk the whitelisted TLV trailer.
                 let all_zero = data[base_layout::MINT_LEN..tlv::ACCOUNT_TYPE_OFFSET]
                     .iter()
                     .all(|b| *b == 0);
@@ -303,6 +329,7 @@ impl<'a> TokenContext<'a> {
                 _s: Default::default(),
             },
             decimals,
+            kind,
         })
     }
 
@@ -362,8 +389,7 @@ impl<'a> ChannelContext<'a> {
                 AccountValidationError::AddressMismatch => {
                     PaymentChannelsError::ChannelAccountMismatch
                 }
-                AccountValidationError::MalformedTokenAccountData
-                | AccountValidationError::InvalidTokenProgram => {
+                AccountValidationError::MalformedTokenAccountData => {
                     PaymentChannelsError::InvalidChannelTokenAccount
                 }
                 AccountValidationError::TokenExtensionError(_) => {
@@ -447,8 +473,7 @@ impl<'a> PayerContext<'a> {
                 AccountValidationError::AddressMismatch => {
                     PaymentChannelsError::PayerAccountMismatch
                 }
-                AccountValidationError::MalformedTokenAccountData
-                | AccountValidationError::InvalidTokenProgram => {
+                AccountValidationError::MalformedTokenAccountData => {
                     PaymentChannelsError::InvalidPayerTokenAccount
                 }
                 AccountValidationError::TokenExtensionError(_) => {

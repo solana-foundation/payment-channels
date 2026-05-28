@@ -42,6 +42,7 @@ solana-message           = "^3"
 solana-pubkey            = "^3"
 solana-rent              = "^3"
 solana-signer            = "^3"
+solana-system-interface  = "^3"
 solana-transaction       = "^3"
 solana-transaction-error = "^3"
 serde_json               = "1"
@@ -53,6 +54,9 @@ solana-program-error       = "^3"
 spl-token-2022-interface   = "2.1.0"
 tabled                     = "0.17"
 ctor                       = "0.2"
+solana-address-lookup-table-interface = { version = "^3", features = ["bincode"] }
+solana-compute-budget                 = { version = "^3", features = ["agave-unstable-api"] }
+solana-compute-budget-interface       = "^3"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

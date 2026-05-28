@@ -1,7 +1,7 @@
 use pinocchio::{AccountView, Address};
 
 use crate::helpers::{
-    accounts::view::TokenContext,
+    accounts::view::{TokenContext, TokenProgramKind},
     token::{
         TokenAccountExtensionPolicy, TokenExtensionError, base_layout, scan_tlv_extensions, tlv,
     },
@@ -10,7 +10,6 @@ use crate::helpers::{
 pub(crate) enum AccountValidationError {
     AddressMismatch,
     MalformedTokenAccountData,
-    InvalidTokenProgram,
     TokenExtensionError(TokenExtensionError),
 }
 
@@ -69,8 +68,8 @@ impl AccountValidator for AccountView {
             return Err(AccountValidationError::AddressMismatch);
         }
 
-        let (mint_addr, owner_addr, initialized) =
-            if token_ctx.token_program.address() == &pinocchio_token::ID {
+        let (mint_addr, owner_addr, initialized) = match token_ctx.kind {
+            TokenProgramKind::Spl => {
                 let acc = pinocchio_token::state::Account::from_account_view(self)
                     .map_err(|_| AccountValidationError::MalformedTokenAccountData)?;
                 let initialized = matches!(
@@ -78,7 +77,8 @@ impl AccountValidator for AccountView {
                     pinocchio_token::state::AccountState::Initialized
                 );
                 (*acc.mint(), *acc.owner(), initialized)
-            } else if token_ctx.token_program.address() == &pinocchio_token_2022::ID {
+            }
+            TokenProgramKind::Token2022 => {
                 let acc = pinocchio_token_2022::state::Account::from_account_view(self)
                     .map_err(|_| AccountValidationError::MalformedTokenAccountData)?;
                 let initialized = matches!(
@@ -86,22 +86,20 @@ impl AccountValidator for AccountView {
                     pinocchio_token_2022::state::AccountState::Initialized
                 );
                 (*acc.mint(), *acc.owner(), initialized)
-            } else {
-                return Err(AccountValidationError::InvalidTokenProgram);
-            };
+            }
+        };
 
         if &mint_addr != token_ctx.mint.address() || &owner_addr != owner || !initialized {
             return Err(AccountValidationError::AddressMismatch);
         }
 
-        if token_ctx.token_program.address() == &pinocchio_token_2022::ID {
+        if token_ctx.kind == TokenProgramKind::Token2022 {
             let data = self
                 .try_borrow()
                 .map_err(|_| AccountValidationError::MalformedTokenAccountData)?;
             if data.len() > base_layout::TOKEN_ACCOUNT_LEN {
-                // Token-account base layout already aligns with the AccountType
-                // discriminator offset, so there's no padding to police — go
-                // straight to the whitelisted TLV walk.
+                // No padding between token-account base and AccountType offset;
+                // walk the whitelisted TLV trailer.
                 scan_tlv_extensions::<TokenAccountExtensionPolicy>(&data[tlv::START..])
                     .map_err(AccountValidationError::from)?;
             }
