@@ -24,7 +24,7 @@ The **Signer** column lists transaction-level signers where applicable; `Ed25519
 
 ## `open` (1)
 
-Payer-signed initializer. Creates the active channel PDA, creates its escrow ATA, transfers `deposit` from the payer token account, stores the exact Blake3 hash of the distribution preimage, and emits `Opened`. The `authorized_signer` account must be a valid Ed25519 public key, but it does not need to sign `open`.
+Payer-signed initializer. Creates the active channel PDA, creates its escrow ATA, transfers `deposit` from the payer token account, stores the exact Blake3 hash of the distribution preimage, and emits `Opened`. The `authorized_signer` account must be a valid Ed25519 public key, but it does not need to sign `open`. The `payee` account is not curve-checked and may be a program-derived address (PDA) beneficiary.
 
 **Args**
 
@@ -48,7 +48,7 @@ salt(u64 LE) || deposit(u64 LE) || grace_period(u32 LE) || count(u32 LE) || entr
 | # | Name | Signer | Writable | Description |
 |---|---|---|---|---|
 | 0 | `payer` | yes | yes | Funds rent, deposit, and escrow ATA creation. Must own `payer_token_account`. |
-| 1 | `payee` | — | — | Channel payee and implicit-remainder recipient. Bound into PDA seeds and channel state. |
+| 1 | `payee` | — | — | Channel payee and implicit-remainder recipient. May be on-curve or a program-derived address (PDA); bound into PDA seeds and channel state. |
 | 2 | `mint` | — | — | SPL Token or Token-2022 mint for escrow/payouts. |
 | 3 | `authorized_signer` | — | — | Ed25519 voucher signer. Must be a valid Ed25519 public key; bound into PDA seeds and channel state. |
 | 4 | `channel` | — | yes | Channel PDA derived from `[b"channel", payer, payee, mint, authorized_signer, salt]`. |
@@ -101,7 +101,7 @@ Payer-signed deposit increase while the channel is `OPEN`.
 
 ## `settleAndFinalize` (4)
 
-Merchant/payee-signed cooperative close. Optionally applies one final voucher using the same Ed25519 verification path as `settle`, then moves the channel to `FINALIZED`.
+Merchant/payee-signed cooperative close. Optionally applies one final voucher using the same Ed25519 verification path as `settle`, then moves the channel to `FINALIZED`. A direct transaction requires an on-curve merchant signer equal to `Channel.payee`; if `payee` is a program-derived address (PDA), the owning program must invoke this instruction via CPI with signer seeds.
 
 **Args**
 
@@ -116,7 +116,7 @@ Current wire after the discriminator is fixed-size: `voucher(48) || has_voucher(
 
 | # | Name | Signer | Writable | Description |
 |---|---|---|---|---|
-| 0 | `merchant` | yes | — | Must equal channel `payee`. |
+| 0 | `merchant` | yes | — | Must equal channel `payee`; PDA payees require CPI signer seeds from the owning program. |
 | 1 | `channel` | — | yes | Channel whose `settled`, `status`, and `closure_started_at` may be updated. |
 | 2 | `instructions_sysvar` | — | — | Required by the current ABI; consulted when `has_voucher != 0`. |
 
