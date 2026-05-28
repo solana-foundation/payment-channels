@@ -58,7 +58,7 @@ fn open_sets_channel_fields() {
         assert_eq!(ch.salt(), SALT, "salt");
         assert_eq!(ch.deposit(), DEPOSIT, "deposit");
         assert_eq!(ch.settled(), 0, "settled");
-        assert_eq!(ch.paid_out(), 0, "paid_out");
+        assert_eq!(ch.payout_watermark(), 0, "payout_watermark");
         assert_eq!(ch.closure_started_at(), 0, "closure_started_at");
         assert_eq!(ch.payer_withdrawn_at(), 0, "payer_withdrawn_at");
         assert_eq!(ch.grace_period(), GRACE_PERIOD);
@@ -189,7 +189,7 @@ fn open_sets_channel_fields_token_2022() {
         assert_eq!(ch.salt(), SALT, "salt");
         assert_eq!(ch.deposit(), DEPOSIT, "deposit");
         assert_eq!(ch.settled(), 0, "settled");
-        assert_eq!(ch.paid_out(), 0, "paid_out");
+        assert_eq!(ch.payout_watermark(), 0, "payout_watermark");
         assert_eq!(ch.closure_started_at(), 0, "closure_started_at");
         assert_eq!(ch.payer_withdrawn_at(), 0, "payer_withdrawn_at");
         assert_eq!(ch.grace_period(), GRACE_PERIOD);

@@ -14,5 +14,6 @@ export * from "./openArgs";
 export * from "./opened";
 export * from "./settleAndFinalizeArgs";
 export * from "./settleArgs";
+export * from "./settlementWatermarks";
 export * from "./topUpArgs";
 export * from "./voucherArgs";

@@ -5,6 +5,7 @@
 //! <https://github.com/codama-idl/codama>
 //!
 
+use crate::generated::types::SettlementWatermarks;
 use borsh::BorshDeserialize;
 use borsh::BorshSerialize;
 use solana_address::Address;
@@ -17,8 +18,7 @@ pub struct Channel {
     pub status: u8,
     pub salt: u64,
     pub deposit: u64,
-    pub settled: u64,
-    pub paid_out: u64,
+    pub settlement: SettlementWatermarks,
     pub closure_started_at: i64,
     pub payer_withdrawn_at: i64,
     pub grace_period: u32,

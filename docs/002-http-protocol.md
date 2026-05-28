@@ -40,7 +40,7 @@ Actors: **C** = client (payer). **S** = server (merchant).
   - `requestClose`: Payer-signed. Callable in `OPEN`. Starts the grace period.
   - `withdraw_payer`: Payer-signed. Callable in `FINALIZED`. Refunds `deposit - settled`.
   - `finalize`: Permissionless. Post-grace. Transitions `CLOSING -> FINALIZED`.
-  - `distribute`: Permissionless in `OPEN` and `FINALIZED`. Caller supplies splits preimage; program verifies hash against `Channel.distribution_hash`. From `OPEN`, advances `paid_out` by paying `settled - paid_out` to recipients and leaves flooring residual in escrow (channel stays OPEN). From `FINALIZED`, also refunds `deposit - settled` to the payer (if `payerWithdrawnAt == 0`), sweeps residual to treasury, and tombstones the PDA. **SDK note:** distributions with 32 recipients require a version 0 transaction and an address lookup table indexing recipient ATAs; legacy transactions cannot fit the account-key budget.
+  - `distribute`: Permissionless in `OPEN` and `FINALIZED`. Caller supplies splits preimage; program verifies hash against `Channel.distribution_hash`. From `OPEN`, it pays cumulative floor deltas between `payout_watermark` and `settled` for each recipient and the payee's implicit remainder share, then advances `payout_watermark` to `settled`. Zero-delta shares are skipped, and floor dust remains in escrow so later cumulative deltas can still claim it. From `FINALIZED`, it runs the final cumulative floor deltas, refunds `deposit - settled` to the payer (if `payerWithdrawnAt == 0`), sweeps final irreducible residual dust to treasury, and tombstones the PDA. **SDK note:** distributions with 32 recipients require a version 0 transaction and an address lookup table indexing recipient ATAs; legacy transactions cannot fit the account-key budget.
 - **Escape-route self-sufficiency:** Clients persist the 402 challenge and `channelId` to independently invoke escape routes.
 - **Distribution commitment:** The PDA stores a 32-byte Blake3 digest of the splits preimage. Splits are passed to `open` and hashed on-chain, making them publicly recoverable from instruction data. `distribute` requires the caller to supply the preimage for hash verification.
 - **PDA-canonical bump:** The `open` instruction data does not carry a client-supplied bump byte; the on-chain program derives the canonical bump via `find_program_address` and validates the channel PDA address directly. Clients MUST NOT include a `bump` field in the `POST /channel/open` payload, and servers MUST reject envelopes containing the field with HTTP 400. Silently accepting and ignoring a wire `bump` would mask client-side derivation bugs whose wrong bump pairs with a correct PDA address — exactly the inconsistency the on-chain address check cannot catch. Implementations whose deserializers currently model `bump` as a required field MUST remove it.
@@ -130,7 +130,7 @@ sequenceDiagram
 
     Note over S: (optional) mid-session distribute
     S->>P: submit `distribute` ix (preimage)
-    P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients (per on-chain splits)<br/>paid_out = settled<br/>flooring residual stays in escrow<br/>state stays OPEN
+    P->>P: verify hash(preimage)<br/>transfer cumulative floor deltas -> recipients/payee<br/>payout_watermark = settled<br/>floor dust stays claimable<br/>state stays OPEN
     P-->>S: OK
 
     Note over S: Server decides to close
@@ -139,7 +139,7 @@ sequenceDiagram
     P-->>S: OK
 
     S->>P: submit `distribute` ix (preimage)
-    P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients (per on-chain splits)<br/>transfer (deposit − settled) → payer<br/>sweep residual → treasury<br/>realloc to 1 byte<br/>state = tombstoned
+    P->>P: verify hash(preimage)<br/>final cumulative deltas -> recipients/payee<br/>transfer (deposit − settled) → payer<br/>sweep irreducible residual → treasury<br/>realloc to 1 byte<br/>state = tombstoned
     P-->>S: OK
 ```
 
@@ -159,7 +159,7 @@ sequenceDiagram
         P-->>S: OK
 
         S->>P: submit `distribute` ix (preimage)
-        P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients (per on-chain splits)<br/>transfer (deposit − settled) → payer<br/>sweep residual → treasury<br/>realloc to 1 byte<br/>state = tombstoned
+        P->>P: verify hash(preimage)<br/>final cumulative deltas -> recipients/payee<br/>transfer (deposit − settled) → payer<br/>sweep irreducible residual → treasury<br/>realloc to 1 byte<br/>state = tombstoned
         P-->>S: OK
         S->>C: 200 + receipt { txHash, refunded }
     else Forced — server unresponsive
@@ -172,7 +172,7 @@ sequenceDiagram
         P->>P: freeze watermark<br/>state = FINALIZED
 
         A->>P: submit `distribute` ix (preimage)
-        P->>P: verify hash(preimage)<br/>transfer (settled − paid_out) → recipients (per on-chain splits)<br/>(if payerWithdrawnAt == 0) transfer (deposit − settled) → payer<br/>sweep residual → treasury<br/>realloc to 1 byte<br/>state = tombstoned
+        P->>P: verify hash(preimage)<br/>final cumulative deltas -> recipients/payee<br/>(if payerWithdrawnAt == 0) transfer (deposit − settled) → payer<br/>sweep irreducible residual → treasury<br/>realloc to 1 byte<br/>state = tombstoned
     end
 ```
 

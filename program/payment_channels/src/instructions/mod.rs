@@ -173,11 +173,14 @@ pub enum PaymentChannelsInstruction<'a> {
     Finalize = 6,
 
     /// Permissionless crank. Verifies the committed preimage and pays
-    /// [`settled`](crate::Channel::settled) `−`
-    /// [`paid_out`](crate::Channel::paid_out) across recipients (per-bps) +
-    /// payee's implicit remainder share. From `OPEN`, flooring residual stays
-    /// in escrow. From `FINALIZED`, residual is swept to treasury, the payer
-    /// receives the unspent
+    /// cumulative floor deltas between
+    /// [`payout_watermark`](crate::Channel::payout_watermark) and
+    /// [`settled`](crate::Channel::settled) across recipients (per-bps) +
+    /// payee's implicit remainder share. In `OPEN`, residual dust remains
+    /// claimable by future cumulative deltas while
+    /// [`payout_watermark`](crate::Channel::payout_watermark) advances to
+    /// [`settled`](crate::Channel::settled). From `FINALIZED`, final floor
+    /// residual is swept to treasury, the payer receives the unspent
     /// [`deposit`](crate::Channel::deposit) `−`
     /// [`settled`](crate::Channel::settled) headroom (if not already
     /// withdrawn) and tombstones the escrow ATA + the Channel PDA.
