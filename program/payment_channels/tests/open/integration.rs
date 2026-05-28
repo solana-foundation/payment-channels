@@ -20,9 +20,7 @@ use crate::common::token_2022::{
     TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN, add_account_extension,
     add_mint_extension,
 };
-use crate::common::{
-    PROGRAM_ID, ProgramLoader, SPL_TOKEN, cu_tracker, expect_custom_err, token_balance,
-};
+use crate::common::{PROGRAM_ID, ProgramLoader, SPL_TOKEN, expect_custom_err, token_balance};
 
 const SALT: u64 = 1;
 const DEPOSIT: u64 = 1_000_000;
@@ -170,7 +168,7 @@ fn off_curve_authorized_signer_rejected_before_mutation() {
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
     let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
     expect_custom_err(
-        cu_tracker::send_and_record(&mut svm, tx),
+        svm.send_transaction(tx),
         PaymentChannelsError::InvalidAuthorizedSigner,
     );
     assert!(svm.get_account(&channel).is_none());
@@ -306,7 +304,7 @@ fn non_ata_payer_token_account_rejected() {
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
     let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
     expect_custom_err(
-        cu_tracker::send_and_record(&mut svm, tx),
+        svm.send_transaction(tx),
         PaymentChannelsError::PayerAccountMismatch,
     );
 }
@@ -354,7 +352,7 @@ fn token_2022_allowed_mint_extensions_succeed() {
     );
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
     let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
-    cu_tracker::send_and_record(&mut svm, tx).expect("open should succeed");
+    svm.send_transaction(tx).expect("open should succeed");
 
     assert!(svm.get_account(&channel).is_some());
     assert_eq!(token_balance(&svm, &payer_token_account), 0);
@@ -400,7 +398,7 @@ fn unsupported_token_2022_mint_extensions_reject_before_channel_creation() {
         let msg = Message::new(&[ix], Some(&payer.pubkey()));
         let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
         expect_custom_err(
-            cu_tracker::send_and_record(&mut svm, tx),
+            svm.send_transaction(tx),
             PaymentChannelsError::MalformedMintTokenExtensions,
         );
         assert!(svm.get_account(&channel).is_none());
@@ -443,7 +441,7 @@ fn unsupported_token_2022_payer_account_extensions_reject_before_channel_creatio
         let msg = Message::new(&[ix], Some(&payer.pubkey()));
         let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
         expect_custom_err(
-            cu_tracker::send_and_record(&mut svm, tx),
+            svm.send_transaction(tx),
             PaymentChannelsError::InvalidPayerTokenExtensions,
         );
         assert!(svm.get_account(&channel).is_none());

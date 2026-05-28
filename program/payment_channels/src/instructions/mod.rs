@@ -228,9 +228,8 @@ pub enum PaymentChannelsInstruction<'a> {
 impl<'a> PaymentChannelsInstruction<'a> {
     /// Stable, lowercase-snake-case label for this variant. Used by the
     /// integration test CU tracker so report labels are derived from the
-    /// instruction enum (the same source of truth as on-chain dispatch)
-    /// rather than a hand-rolled mapping in test code. The exhaustive
-    /// `match` here means adding a variant without extending this method
+    /// instruction enum rather than a hand-rolled mapping in test code. The
+    /// exhaustive `match` here means adding a variant without extending this method
     /// fails to compile.
     pub fn name(&self) -> &'static str {
         match self {

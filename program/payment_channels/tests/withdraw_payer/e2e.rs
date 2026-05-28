@@ -10,20 +10,10 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-use crate::common::{ProgramLoader, SPL_TOKEN, cu_tracker, open_channel, set_clock, token_balance};
-
-/// Patch an existing channel account to FINALIZED status with the given settled amount.
-fn patch_channel_finalized(svm: &mut LiteSVM, channel: &Pubkey, settled: u64) {
-    let mut acct = svm.get_account(channel).expect("channel exists");
-    acct.data[3] = 1; // ChannelStatus::Finalized
-    acct.data[20..28].copy_from_slice(&settled.to_le_bytes());
-    svm.set_account(*channel, acct).expect("set_account");
-}
-
-fn read_payer_withdrawn_at(svm: &LiteSVM, channel: &Pubkey) -> i64 {
-    let acct = svm.get_account(channel).expect("channel exists");
-    i64::from_le_bytes(acct.data[44..52].try_into().unwrap())
-}
+use crate::common::{
+    ProgramLoader, SPL_TOKEN, mutate_channel, open_channel, read_channel, set_clock, token_balance,
+};
+use payment_channels::state::ChannelStatus;
 
 fn send_withdraw_payer(
     svm: &mut LiteSVM,
@@ -48,7 +38,7 @@ fn send_withdraw_payer(
         &[payer],
         svm.latest_blockhash(),
     );
-    cu_tracker::send_and_record(svm, tx)
+    svm.send_transaction(tx)
 }
 
 #[test]
@@ -92,7 +82,10 @@ fn withdraw_transfers_correct_amount() {
     assert_eq!(token_balance(&svm, &payer_ata), 0);
     assert_eq!(token_balance(&svm, &channel_ata), deposit);
 
-    patch_channel_finalized(&mut svm, &channel, settled);
+    mutate_channel(&mut svm, &channel, |ch| {
+        ch.status = ChannelStatus::Finalized as u8;
+        ch.set_settled(settled);
+    });
     set_clock(&mut svm, 1_000_000);
 
     send_withdraw_payer(&mut svm, &payer, &channel, &channel_ata, &payer_ata, &mint)
@@ -101,7 +94,10 @@ fn withdraw_transfers_correct_amount() {
     // Payer receives deposit - settled; escrow retains settled (for distribute).
     assert_eq!(token_balance(&svm, &payer_ata), deposit - settled);
     assert_eq!(token_balance(&svm, &channel_ata), settled);
-    assert_ne!(read_payer_withdrawn_at(&svm, &channel), 0);
+    assert_ne!(
+        read_channel(&svm, &channel, |ch| ch.payer_withdrawn_at()),
+        0
+    );
 }
 
 #[test]
@@ -141,7 +137,10 @@ fn withdraw_zero_refund_stamps_timestamp() {
     );
 
     // Fully settled: deposit == settled → refund = 0.
-    patch_channel_finalized(&mut svm, &channel, deposit);
+    mutate_channel(&mut svm, &channel, |ch| {
+        ch.status = ChannelStatus::Finalized as u8;
+        ch.set_settled(deposit);
+    });
     set_clock(&mut svm, 1_000_000);
 
     send_withdraw_payer(&mut svm, &payer, &channel, &channel_ata, &payer_ata, &mint)
@@ -150,5 +149,8 @@ fn withdraw_zero_refund_stamps_timestamp() {
     assert_eq!(token_balance(&svm, &payer_ata), 0);
     assert_eq!(token_balance(&svm, &channel_ata), deposit);
     // payer_withdrawn_at stamped — distribute cannot double-refund.
-    assert_ne!(read_payer_withdrawn_at(&svm, &channel), 0);
+    assert_ne!(
+        read_channel(&svm, &channel, |ch| ch.payer_withdrawn_at()),
+        0
+    );
 }
