@@ -2,6 +2,7 @@ use litesvm::LiteSVM;
 use mollusk_svm::result::ProgramResult;
 use payment_channels::PaymentChannelsError;
 use payment_channels::instructions::open::MAX_DISTRIBUTION_RECIPIENTS;
+use solana_keypair::Keypair;
 use solana_message::Message;
 use solana_program_error::ProgramError;
 use solana_pubkey::Pubkey;
@@ -19,7 +20,7 @@ use crate::common::token_2022::{
     TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN, add_account_extension,
     add_mint_extension,
 };
-use crate::common::{ProgramLoader, SPL_TOKEN, expect_custom_err, token_balance};
+use crate::common::{PROGRAM_ID, ProgramLoader, SPL_TOKEN, expect_custom_err, token_balance};
 
 const SALT: u64 = 1;
 const DEPOSIT: u64 = 1_000_000;
@@ -122,7 +123,7 @@ fn wrong_channel_pda_rejected() {
     let payer = Pubkey::new_unique();
     let payee = Pubkey::new_unique();
     let mint = Pubkey::new_unique();
-    let authorized_signer = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
     let wrong_channel = Pubkey::new_unique();
     assert_eq!(
         OpenRun {
@@ -138,6 +139,40 @@ fn wrong_channel_pda_rejected() {
             PaymentChannelsError::ChannelAddressMismatch as u32
         )),
     );
+}
+
+#[test]
+fn off_curve_authorized_signer_rejected_before_mutation() {
+    let mut svm = LiteSVM::load_program();
+
+    let payee = Pubkey::new_unique();
+    let (authorized_signer, _) =
+        Pubkey::find_program_address(&[b"invalid-authorized-signer"], &PROGRAM_ID);
+    let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
+    let (channel, channel_token_account) =
+        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
+
+    let ix = open_ix(
+        &payer.pubkey(),
+        &payee,
+        &mint,
+        &authorized_signer,
+        &channel,
+        &payer_token_account,
+        &channel_token_account,
+        SALT,
+        DEPOSIT,
+        GRACE,
+        1,
+    );
+    let msg = Message::new(&[ix], Some(&payer.pubkey()));
+    let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::InvalidAuthorizedSigner,
+    );
+    assert!(svm.get_account(&channel).is_none());
+    assert_eq!(token_balance(&svm, &payer_token_account), DEPOSIT);
 }
 
 #[test]
@@ -215,7 +250,7 @@ fn channel_pda_recipient_rejected() {
     let payer = Pubkey::new_unique();
     let payee = Pubkey::new_unique();
     let mint = Pubkey::new_unique();
-    let authorized_signer = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
     let (channel, channel_ata) = derive_pdas(&payer, &payee, &mint, &authorized_signer, SALT);
     assert_eq!(
         OpenRun {
@@ -242,7 +277,7 @@ fn non_ata_payer_token_account_rejected() {
     let mut svm = LiteSVM::load_program();
 
     let payee = Pubkey::new_unique();
-    let authorized_signer = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
     let (payer, mint, _payer_ata) = setup_funded_svm(&mut svm, DEPOSIT);
     let (channel, channel_token_account) =
         derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
@@ -279,7 +314,7 @@ fn token_2022_allowed_mint_extensions_succeed() {
     let mut svm = LiteSVM::load_program();
 
     let payee = Pubkey::new_unique();
-    let authorized_signer = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
     let (payer, mint, payer_token_account) =
         setup_funded_svm_with_token_program(&mut svm, DEPOSIT, &TOKEN_2022);
     for (extension_type, value_len) in [
@@ -334,7 +369,7 @@ fn unsupported_token_2022_mint_extensions_reject_before_channel_creation() {
         let mut svm = LiteSVM::load_program();
 
         let payee = Pubkey::new_unique();
-        let authorized_signer = Pubkey::new_unique();
+        let authorized_signer = Keypair::new().pubkey();
         let (payer, mint, payer_token_account) =
             setup_funded_svm_with_token_program(&mut svm, DEPOSIT, &TOKEN_2022);
         add_mint_extension(&mut svm, &mint, extension_type, value_len);
@@ -377,7 +412,7 @@ fn unsupported_token_2022_payer_account_extensions_reject_before_channel_creatio
         let mut svm = LiteSVM::load_program();
 
         let payee = Pubkey::new_unique();
-        let authorized_signer = Pubkey::new_unique();
+        let authorized_signer = Keypair::new().pubkey();
         let (payer, mint, payer_token_account) =
             setup_funded_svm_with_token_program(&mut svm, DEPOSIT, &TOKEN_2022);
         add_account_extension(&mut svm, &payer_token_account, extension_type, 1);
