@@ -918,7 +918,7 @@
           {
             "defaultValue": {
               "kind": "publicKeyValueNode",
-              "publicKey": "GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc"
+              "publicKey": "CQAyft83tN1w2bRofB5PZ79eVDU2xZUVo43LU1qL4zRg"
             },
             "isSigner": false,
             "isWritable": false,
@@ -1439,7 +1439,7 @@
         ]
       }
     ],
-    "publicKey": "GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc",
+    "publicKey": "CQAyft83tN1w2bRofB5PZ79eVDU2xZUVo43LU1qL4zRg",
     "version": "0.1.0"
   },
   "standard": "codama",

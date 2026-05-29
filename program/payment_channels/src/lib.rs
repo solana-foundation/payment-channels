@@ -33,7 +33,7 @@ pub use instructions::*;
 pub mod state;
 pub use state::*;
 
-declare_id!("GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc");
+declare_id!("CQAyft83tN1w2bRofB5PZ79eVDU2xZUVo43LU1qL4zRg");
 
 fn process_instruction(
     program_id: &Address,

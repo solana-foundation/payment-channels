@@ -8,4 +8,4 @@
 use solana_address::{Address, address};
 
 /// `payment_channels` program ID.
-pub const PAYMENT_CHANNELS_ID: Address = address!("GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc");
+pub const PAYMENT_CHANNELS_ID: Address = address!("CQAyft83tN1w2bRofB5PZ79eVDU2xZUVo43LU1qL4zRg");

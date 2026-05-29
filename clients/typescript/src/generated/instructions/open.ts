@@ -64,7 +64,7 @@ export type OpenInstruction<
   TAccountAssociatedTokenProgram extends string | AccountMeta<string> = string,
   TAccountEventAuthority extends string | AccountMeta<string> = string,
   TAccountSelfProgram extends string | AccountMeta<string> =
-    "GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc",
+    "CQAyft83tN1w2bRofB5PZ79eVDU2xZUVo43LU1qL4zRg",
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
 > = Instruction<TProgram> &
   InstructionWithData<ReadonlyUint8Array> &
@@ -276,7 +276,7 @@ export async function getOpenInstructionAsync<
   }
   if (!accounts.selfProgram.value) {
     accounts.selfProgram.value =
-      "GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc" as Address<"GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc">;
+      "CQAyft83tN1w2bRofB5PZ79eVDU2xZUVo43LU1qL4zRg" as Address<"CQAyft83tN1w2bRofB5PZ79eVDU2xZUVo43LU1qL4zRg">;
   }
 
   const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
@@ -444,7 +444,7 @@ export function getOpenInstruction<
   }
   if (!accounts.selfProgram.value) {
     accounts.selfProgram.value =
-      "GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc" as Address<"GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc">;
+      "CQAyft83tN1w2bRofB5PZ79eVDU2xZUVo43LU1qL4zRg" as Address<"CQAyft83tN1w2bRofB5PZ79eVDU2xZUVo43LU1qL4zRg">;
   }
 
   const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
