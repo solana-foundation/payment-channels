@@ -10,8 +10,6 @@ import {
   combineCodec,
   getStructDecoder,
   getStructEncoder,
-  getU8Decoder,
-  getU8Encoder,
   type FixedSizeCodec,
   type FixedSizeDecoder,
   type FixedSizeEncoder,
@@ -22,6 +20,7 @@ import {
   type VoucherArgs,
   type VoucherArgsArgs,
 } from ".";
+import { getU8Decoder, getU8Encoder } from "../../safe-codecs.js";
 
 export type SettleAndFinalizeArgs = {
   voucher: VoucherArgs;

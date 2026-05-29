@@ -10,8 +10,6 @@ import {
   combineCodec,
   getStructDecoder,
   getStructEncoder,
-  getU8Decoder,
-  getU8Encoder,
   SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
   SolanaError,
   transformEncoder,
@@ -32,6 +30,7 @@ import {
   getAccountMetaFactory,
   type ResolvedInstructionAccount,
 } from "@solana/program-client-core";
+import { getU8Decoder, getU8Encoder } from "../../safe-codecs.js";
 import { findEventAuthorityPda } from "../pdas";
 import { PAYMENT_CHANNELS_PROGRAM_ADDRESS } from "../programs";
 

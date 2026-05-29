@@ -12,10 +12,6 @@ import {
   getArrayEncoder,
   getStructDecoder,
   getStructEncoder,
-  getU32Decoder,
-  getU32Encoder,
-  getU64Decoder,
-  getU64Encoder,
   type Codec,
   type Decoder,
   type Encoder,
@@ -26,6 +22,12 @@ import {
   type DistributionEntry,
   type DistributionEntryArgs,
 } from ".";
+import {
+  getU32Decoder,
+  getU32Encoder,
+  getU64Decoder,
+  getU64Encoder,
+} from "../../safe-codecs.js";
 
 export type OpenArgs = {
   salt: bigint;
@@ -35,8 +37,8 @@ export type OpenArgs = {
 };
 
 export type OpenArgsArgs = {
-  salt: number | bigint;
-  deposit: number | bigint;
+  salt: bigint;
+  deposit: bigint;
   gracePeriod: number;
   recipients: Array<DistributionEntryArgs>;
 };

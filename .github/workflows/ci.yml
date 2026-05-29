@@ -103,3 +103,6 @@ jobs:
 
       - name: Test program
         run: just test-program
+
+      - name: Test client (vitest)
+        run: just test-client
