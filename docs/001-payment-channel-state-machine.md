@@ -217,6 +217,22 @@ Each row below would either trap funds, distort the `deposit`/`settled` accounti
 | `CpiGuard` / `MemoTransfer` account extensions | Distribution CPIs do not use delegate flow or memo pre-instructions |
 | `MintCloseAuthority` | Mint identity can be closed and recreated while channels reference the address |
 
+### Mint trust model
+
+`open` and `topUp` do NOT inspect or reject the mint's base-layout authorities — specifically the **freeze authority** and the **mint authority**. Vetting the mint is the merchant's responsibility.
+
+Freeze authority is the main actor. A live freeze authority can freeze the channel's escrow ATA at any time. Once frozen, the escrow ATA is no longer `Initialized`, so every value-moving instruction rejects:
+
+- `topUp` cannot add collateral.
+- `distribute` cannot release `settled - paid_out` to recipients or the payee.
+- `withdrawPayer` cannot refund `deposit - settled` to the payer.
+
+The channel stays wedged until the freeze authority thaws the escrow. There is no permissionless crank or alternate instruction that can unwind it, and the lockup blocks both the merchant payout leg and the payer refund leg — neither side can extract value while the freeze stands.
+
+This is intentional. Hard-rejecting any mint with a live freeze authority would exclude the majority of real-world stablecoins (USDC, USDT, PYUSD, EURC, …), all of which retain a freeze authority controlled by the issuer. The trust decision is therefore pushed off-chain: a merchant accepting payments in mint `M` is implicitly accepting that `M`'s freeze authority can wedge any channel denominated in `M`, and should only do so for mints whose freeze authority they consider acceptably governed.
+
+The same reasoning applies, less acutely, to the mint authority and to any Token-2022 update authority for allow-listed extensions: the program does not audit these at `open`, and merchants should treat the mint as a trust dependency of the channel, not a parameter the program defends against.
+
 ## TBD
 
 ### Replace tombstone with `init_id` generation marker
