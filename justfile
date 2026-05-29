@@ -71,10 +71,13 @@ build-client: generate-client
 
 # ---------- test ----------
 
-test: test-program
+test: test-program test-client
 
 test-program: generate-client
     cd {{program_dir}} && cargo test-sbf
+
+test-client: generate-client
+    cd {{ts_client_dir}} && pnpm run test
 
 # Run the parameterized CU benchmark scenarios and emit bench_report.md
 # next to Cargo.toml. `--test-threads=1` keeps logs interleaved-free and

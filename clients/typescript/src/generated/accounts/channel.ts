@@ -17,16 +17,8 @@ import {
   getAddressEncoder,
   getArrayDecoder,
   getArrayEncoder,
-  getI64Decoder,
-  getI64Encoder,
   getStructDecoder,
   getStructEncoder,
-  getU32Decoder,
-  getU32Encoder,
-  getU64Decoder,
-  getU64Encoder,
-  getU8Decoder,
-  getU8Encoder,
   type Account,
   type Address,
   type EncodedAccount,
@@ -38,6 +30,16 @@ import {
   type MaybeAccount,
   type MaybeEncodedAccount,
 } from "@solana/kit";
+import {
+  getI64Decoder,
+  getI64Encoder,
+  getU32Decoder,
+  getU32Encoder,
+  getU64Decoder,
+  getU64Encoder,
+  getU8Decoder,
+  getU8Encoder,
+} from "../../safe-codecs.js";
 import {
   getSettlementWatermarksDecoder,
   getSettlementWatermarksEncoder,
@@ -68,11 +70,11 @@ export type ChannelArgs = {
   version: number;
   bump: number;
   status: number;
-  salt: number | bigint;
-  deposit: number | bigint;
+  salt: bigint;
+  deposit: bigint;
   settlement: SettlementWatermarksArgs;
-  closureStartedAt: number | bigint;
-  payerWithdrawnAt: number | bigint;
+  closureStartedAt: bigint;
+  payerWithdrawnAt: bigint;
   gracePeriod: number;
   distributionHash: Array<number>;
   payer: Address;

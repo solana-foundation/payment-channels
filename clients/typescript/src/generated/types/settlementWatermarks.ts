@@ -10,18 +10,17 @@ import {
   combineCodec,
   getStructDecoder,
   getStructEncoder,
-  getU64Decoder,
-  getU64Encoder,
   type FixedSizeCodec,
   type FixedSizeDecoder,
   type FixedSizeEncoder,
 } from "@solana/kit";
+import { getU64Decoder, getU64Encoder } from "../../safe-codecs.js";
 
 export type SettlementWatermarks = { settled: bigint; payoutWatermark: bigint };
 
 export type SettlementWatermarksArgs = {
-  settled: number | bigint;
-  payoutWatermark: number | bigint;
+  settled: bigint;
+  payoutWatermark: bigint;
 };
 
 export function getSettlementWatermarksEncoder(): FixedSizeEncoder<SettlementWatermarksArgs> {

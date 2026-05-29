@@ -12,7 +12,17 @@ export default {
     ],
     js: {
       from: '@codama/renderers-js',
-      args: ['./clients/typescript', { formatCode: true, syncPackageJson: false }],
+      args: [
+        './clients/typescript',
+        {
+          formatCode: true,
+          syncPackageJson: false,
+          // Redirect number-codec imports to our guarded encoders
+          // that reject unsafe-integer JS numbers at runtime. The companion
+          // narrow-codama-types.mjs script handles the compile-time half.
+          dependencyMap: { solanaCodecsNumbers: '../../safe-codecs.js' },
+        },
+      ],
     },
     rust: {
       from: '@codama/renderers-rust',

@@ -15,8 +15,6 @@ import {
   fetchEncodedAccounts,
   getStructDecoder,
   getStructEncoder,
-  getU8Decoder,
-  getU8Encoder,
   type Account,
   type Address,
   type EncodedAccount,
@@ -28,6 +26,7 @@ import {
   type MaybeAccount,
   type MaybeEncodedAccount,
 } from "@solana/kit";
+import { getU8Decoder, getU8Encoder } from "../../safe-codecs.js";
 
 export type ClosedChannel = { discriminator: number };
 

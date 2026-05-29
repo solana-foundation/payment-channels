@@ -12,13 +12,12 @@ import {
   getAddressEncoder,
   getStructDecoder,
   getStructEncoder,
-  getU16Decoder,
-  getU16Encoder,
   type Address,
   type FixedSizeCodec,
   type FixedSizeDecoder,
   type FixedSizeEncoder,
 } from "@solana/kit";
+import { getU16Decoder, getU16Encoder } from "../../safe-codecs.js";
 
 export type DistributionEntry = { recipient: Address; bps: number };
 
