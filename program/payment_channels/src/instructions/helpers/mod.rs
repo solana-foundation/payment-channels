@@ -8,11 +8,8 @@ pub mod token;
 pub mod transfer;
 pub mod voucher;
 
+pub use distribution::{DistributionEntry, DistributionPreimage, MAX_DISTRIBUTION_RECIPIENTS};
 pub use transfer::Transfer;
-
-pub use distribution::{
-    DistributionEntry, DistributionPreimage, MAX_DISTRIBUTION_RECIPIENTS, floor_bps_share,
-};
 
 use crate::state::channel::CHANNEL_SEED;
 use pinocchio::cpi::Seed;

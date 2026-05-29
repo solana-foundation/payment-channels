@@ -70,8 +70,8 @@ fn add_malformed_account_extension(svm: &mut LiteSVM, token_account: &Pubkey) {
         .expect("overwrite token account");
 }
 
-fn read_paid_out(svm: &LiteSVM, channel: &Pubkey) -> u64 {
-    read_channel(svm, channel, |ch| ch.paid_out())
+fn read_payout_watermark(svm: &LiteSVM, channel: &Pubkey) -> u64 {
+    read_channel(svm, channel, |ch| ch.payout_watermark())
 }
 
 /// Rent-exempt lamports for the 1-byte tombstone PDA.
@@ -91,6 +91,22 @@ fn assert_tombstone(svm: &LiteSVM, channel: &Pubkey) {
         tombstone_rent_lamports(),
         "tombstone rent-exempt at 1 byte",
     );
+}
+
+// ---------------------------------------------------------------------------
+// Typed mutations to `Channel.status` / `settlement.payout_watermark` /
+// `payer_withdrawn_at`.
+
+fn set_status(svm: &mut LiteSVM, channel: &Pubkey, status: u8) {
+    mutate_channel(svm, channel, |ch| ch.status = status);
+}
+
+fn set_payout_watermark(svm: &mut LiteSVM, channel: &Pubkey, payout_watermark: u64) {
+    mutate_channel(svm, channel, |ch| ch.set_payout_watermark(payout_watermark));
+}
+
+fn set_payer_withdrawn_at(svm: &mut LiteSVM, channel: &Pubkey, ts: i64) {
+    mutate_channel(svm, channel, |ch| ch.set_payer_withdrawn_at(ts));
 }
 
 // ---------------------------------------------------------------------------
@@ -307,7 +323,11 @@ fn settle_to(
     svm.send_transaction(tx).expect("settle should succeed");
 }
 
-// Scenario fixture — owns the SVM and every account a `distribute` call needs.
+// ---------------------------------------------------------------------------
+// Scenario fixture — owns the SVM and every account a `distribute` call
+// needs. `status`, `settlement.payout_watermark`, and `payer_withdrawn_at`
+// are mutated through the typed mutators above pending real
+// `request_close` / `finalize` / `withdraw_payer` instructions.
 struct Scenario {
     svm: LiteSVM,
     fee_payer: Keypair,
@@ -327,15 +347,28 @@ struct Scenario {
 }
 
 impl Scenario {
-    fn build(splits: Vec<Split>, deposit: u64, settled: u64, paid_out: u64, status: u8) -> Self {
-        Self::build_with_token_program(splits, deposit, settled, paid_out, status, TOKEN_2022)
+    fn build(
+        splits: Vec<Split>,
+        deposit: u64,
+        settled: u64,
+        payout_watermark: u64,
+        status: u8,
+    ) -> Self {
+        Self::build_with_token_program(
+            splits,
+            deposit,
+            settled,
+            payout_watermark,
+            status,
+            TOKEN_2022,
+        )
     }
 
     fn build_with_token_program(
         splits: Vec<Split>,
         deposit: u64,
         settled: u64,
-        paid_out: u64,
+        payout_watermark: u64,
         status: u8,
         token_program: Pubkey,
     ) -> Self {
@@ -384,8 +417,8 @@ impl Scenario {
             );
         }
 
-        if paid_out > 0 {
-            mutate_channel(&mut svm, &channel, |ch| ch.set_paid_out(paid_out));
+        if payout_watermark > 0 {
+            set_payout_watermark(&mut svm, &channel, payout_watermark);
         }
 
         if status != STATUS_OPEN {
@@ -457,6 +490,10 @@ impl Scenario {
     }
 
     fn send(&mut self, ix: Instruction) -> litesvm::types::TransactionResult {
+        // LiteSVM doesn't auto-advance latest_blockhash, so back-to-back
+        // distribute_ix calls would collide on tx signature. Bump once per
+        // send so callers can loop without thinking about it.
+        self.svm.expire_blockhash();
         let blockhash = self.svm.latest_blockhash();
         let tx = Transaction::new_signed_with_payer(
             &[
@@ -498,6 +535,25 @@ impl Scenario {
     }
 }
 
+fn send_withdraw_payer(s: &mut Scenario) {
+    let withdraw_ix = WithdrawPayer {
+        payer: s.payer_keypair.pubkey(),
+        channel: s.channel,
+        channel_token_account: s.channel_ata,
+        payer_token_account: s.payer_ata,
+        mint: s.mint,
+        token_program: s.token_program,
+    }
+    .instruction();
+    let tx = Transaction::new_signed_with_payer(
+        &[withdraw_ix],
+        Some(&s.payer_keypair.pubkey()),
+        &[&s.payer_keypair],
+        s.svm.latest_blockhash(),
+    );
+    s.svm.send_transaction(tx).expect("withdraw_payer ok");
+}
+
 // ===========================================================================
 // Tests
 
@@ -519,10 +575,16 @@ fn happy_path_open_splits() {
     ];
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits.clone(), deposit, settled, paid_out, STATUS_OPEN);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(
+        splits.clone(),
+        deposit,
+        settled,
+        payout_watermark,
+        STATUS_OPEN,
+    );
 
-    let pool_amount = settled - paid_out;
+    let pool_amount = settled - payout_watermark;
     s.send(s.distribute_ix()).expect("distribute ok");
 
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 40_000);
@@ -531,11 +593,16 @@ fn happy_path_open_splits() {
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 20_000);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
-    assert_eq!(read_paid_out(&s.svm, &s.channel), paid_out + pool_amount);
+    assert_eq!(
+        read_payout_watermark(&s.svm, &s.channel),
+        payout_watermark + pool_amount
+    );
 }
 
 #[test]
-fn open_flooring_residual_stays_in_channel_ata() {
+fn open_flooring_residual_is_accounted_and_carried_forward() {
+    // settled=100, splits 2×3333 bps + payee 3334 bps:
+    // floor cumulative entitlements are 33 + 33 + 33, with residual=1.
     let splits = vec![
         Split {
             owner: Pubkey::new_unique(),
@@ -548,8 +615,8 @@ fn open_flooring_residual_stays_in_channel_ata() {
     ];
     let deposit = 200;
     let settled = 100;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
 
     s.send(s.distribute_ix()).expect("distribute ok");
 
@@ -558,7 +625,249 @@ fn open_flooring_residual_stays_in_channel_ata() {
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 33);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.channel_ata), 101);
-    assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
+}
+
+#[test]
+fn open_partial_flooring_residual_allows_zero_delta_share() {
+    // settled=2, split 9000 bps + payee 1000 bps:
+    // recipient cumulative floor is 1; payee is still 0.
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 9000,
+    }];
+    let deposit = 20;
+    let settled = 2;
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
+
+    s.send(s.distribute_ix()).expect("distribute ok");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 1);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.channel_ata), 19);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
+}
+
+#[test]
+fn open_pool_one_with_50_50_split_accounts_without_transfer() {
+    // settled=1, split 5000 bps + payee 5000 bps: both cumulative floors are 0.
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5000,
+    }];
+    let deposit = 2;
+    let settled = 1;
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
+
+    s.send(s.distribute_ix()).expect("distribute ok");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.channel_ata), deposit);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
+}
+
+#[test]
+fn open_pool_one_then_resettle_to_two_releases_residual() {
+    // settled=1 transfers nothing but accounts the watermark. After re-settle
+    // to 2, cumulative deltas release the prior residual as 1 + 1.
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5000,
+    }];
+    let deposit = 2;
+    let mut s = Scenario::build(splits, deposit, 1, 0, STATUS_OPEN);
+
+    s.send(s.distribute_ix())
+        .expect("settled=1 accounts residual without transfer");
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), 1);
+
+    settle_to(
+        &mut s.svm,
+        &s.fee_payer,
+        &s.channel,
+        &s.authorized_signer,
+        2,
+        0,
+    );
+
+    s.send(s.distribute_ix())
+        .expect("cumulative 50/50 deltas release residual");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 1);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 1);
+    assert_eq!(token_balance(&s.svm, &s.channel_ata), 0);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), 2);
+}
+
+#[test]
+fn one_bps_share_releases_at_ten_thousand_settled() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 1,
+    }];
+    let deposit = 10_000;
+    let mut s = Scenario::build(splits, deposit, 9_999, 0, STATUS_OPEN);
+
+    s.send(s.distribute_ix())
+        .expect("1 bps share remains below whole-token boundary");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 9_998);
+    assert_eq!(token_balance(&s.svm, &s.channel_ata), 2);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), 9_999);
+
+    settle_to(
+        &mut s.svm,
+        &s.fee_payer,
+        &s.channel,
+        &s.authorized_signer,
+        10_000,
+        0,
+    );
+    s.send(s.distribute_ix())
+        .expect("1 bps share crosses whole-token boundary");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 1);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 9_999);
+    assert_eq!(token_balance(&s.svm, &s.channel_ata), 0);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), 10_000);
+}
+
+#[test]
+fn finalized_after_open_zero_delta_distribution_refunds_and_sweeps_residual() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5000,
+    }];
+    let deposit = 10;
+    let settled = 1;
+    let mut s = Scenario::build(splits, deposit, settled, 0, STATUS_OPEN);
+
+    s.send(s.distribute_ix())
+        .expect("open zero-delta distribution ok");
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
+    assert_eq!(token_balance(&s.svm, &s.channel_ata), deposit);
+
+    set_status(&mut s.svm, &s.channel, STATUS_FINALIZED);
+    s.send(s.distribute_ix())
+        .expect("finalized zero-delta close ok");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), settled);
+    assert_tombstone(&s.svm, &s.channel);
+}
+
+#[test]
+fn finalized_after_withdraw_payer_sweeps_open_zero_delta_residual_once() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5000,
+    }];
+    let deposit = 10;
+    let settled = 1;
+    let mut s = Scenario::build(splits, deposit, settled, 0, STATUS_OPEN);
+
+    s.send(s.distribute_ix())
+        .expect("open zero-delta distribution ok");
+    set_status(&mut s.svm, &s.channel, STATUS_FINALIZED);
+
+    set_clock(&mut s.svm, 1_000_000);
+    send_withdraw_payer(&mut s);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
+
+    s.send(s.distribute_ix())
+        .expect("finalized residual sweep after withdraw ok");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), settled);
+    assert_tombstone(&s.svm, &s.channel);
+}
+
+#[test]
+fn repeated_open_micro_distributes_match_single_final_distribution() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5000,
+    }];
+    let deposit = 100;
+    let mut s = Scenario::build(splits, deposit, 0, 0, STATUS_OPEN);
+
+    for cumulative_amount in 1..=100 {
+        settle_to(
+            &mut s.svm,
+            &s.fee_payer,
+            &s.channel,
+            &s.authorized_signer,
+            cumulative_amount,
+            0,
+        );
+        s.send(s.distribute_ix())
+            .expect("micro distribute should not grind residual");
+        assert_eq!(read_payout_watermark(&s.svm, &s.channel), cumulative_amount);
+    }
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 50);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 50);
+    assert_eq!(token_balance(&s.svm, &s.channel_ata), 0);
+
+    set_status(&mut s.svm, &s.channel, STATUS_FINALIZED);
+    s.send(s.distribute_ix()).expect("finalized distribute ok");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 50);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 50);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
+    assert_tombstone(&s.svm, &s.channel);
+}
+
+#[test]
+fn uneven_three_share_micro_distributes_preserve_cumulative_entitlements() {
+    let splits = vec![
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 3333,
+        },
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 3333,
+        },
+    ];
+    let deposit = 6;
+    let mut s = Scenario::build(splits, deposit, 0, 0, STATUS_OPEN);
+
+    for cumulative_amount in 1..=6 {
+        settle_to(
+            &mut s.svm,
+            &s.fee_payer,
+            &s.channel,
+            &s.authorized_signer,
+            cumulative_amount,
+            0,
+        );
+        s.send(s.distribute_ix())
+            .expect("uneven three-share micro distribute ok");
+        assert_eq!(read_payout_watermark(&s.svm, &s.channel), cumulative_amount);
+    }
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 1);
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 1);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 2);
+    assert_eq!(token_balance(&s.svm, &s.channel_ata), 2);
+
+    set_status(&mut s.svm, &s.channel, STATUS_FINALIZED);
+    s.send(s.distribute_ix()).expect("finalized distribute ok");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 1);
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 1);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 2);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 2);
+    assert_tombstone(&s.svm, &s.channel);
 }
 
 #[test]
@@ -575,12 +884,12 @@ fn happy_path_open_splits_spl_token() {
     ];
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 0;
+    let payout_watermark = 0;
     let mut s = Scenario::build_with_token_program(
         splits,
         deposit,
         settled,
-        paid_out,
+        payout_watermark,
         STATUS_OPEN,
         SPL_TOKEN,
     );
@@ -591,7 +900,7 @@ fn happy_path_open_splits_spl_token() {
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 25_000);
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 50_000);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
-    assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
 }
 
 #[test]
@@ -602,8 +911,14 @@ fn happy_path_finalized_tombstone() {
     }];
     let deposit = 200_000;
     let settled = 150_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits.clone(), deposit, settled, paid_out, STATUS_FINALIZED);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(
+        splits.clone(),
+        deposit,
+        settled,
+        payout_watermark,
+        STATUS_FINALIZED,
+    );
 
     let payer_balance_before = s.svm.get_account(&s.payer).unwrap().lamports;
     let channel_lamports_before = s.svm.get_account(&s.channel).unwrap().lamports;
@@ -635,12 +950,12 @@ fn happy_path_finalized_tombstone_spl_token() {
     }];
     let deposit = 200_000;
     let settled = 150_000;
-    let paid_out = 0;
+    let payout_watermark = 0;
     let mut s = Scenario::build_with_token_program(
         splits,
         deposit,
         settled,
-        paid_out,
+        payout_watermark,
         STATUS_FINALIZED,
         SPL_TOKEN,
     );
@@ -674,22 +989,7 @@ fn distribute_after_withdraw_payer_skips_payer_refund() {
     set_clock(&mut s.svm, 1_000_000);
 
     // Payer claims their deposit − settled refund first.
-    let withdraw_ix = WithdrawPayer {
-        payer: s.payer_keypair.pubkey(),
-        channel: s.channel,
-        channel_token_account: s.channel_ata,
-        payer_token_account: s.payer_ata,
-        mint: s.mint,
-        token_program: s.token_program,
-    }
-    .instruction();
-    let tx = Transaction::new_signed_with_payer(
-        &[withdraw_ix],
-        Some(&s.payer_keypair.pubkey()),
-        &[&s.payer_keypair],
-        s.svm.latest_blockhash(),
-    );
-    s.svm.send_transaction(tx).expect("withdraw_payer ok");
+    send_withdraw_payer(&mut s);
 
     assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
 
@@ -711,8 +1011,8 @@ fn finalized_zero_pool_still_refunds_and_tombstones() {
     }];
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 100_000;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_FINALIZED);
+    let payout_watermark = 100_000;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_FINALIZED);
 
     set_token_balance(&mut s.svm, &s.channel_ata, deposit - settled);
 
@@ -726,7 +1026,7 @@ fn finalized_zero_pool_still_refunds_and_tombstones() {
 }
 
 #[test]
-fn finalized_sweeps_accumulated_flooring_residual_to_treasury() {
+fn finalized_sweeps_final_flooring_residual_to_treasury() {
     let splits = vec![
         Split {
             owner: Pubkey::new_unique(),
@@ -739,18 +1039,18 @@ fn finalized_sweeps_accumulated_flooring_residual_to_treasury() {
     ];
     let deposit = 250;
     let settled = 150;
-    let paid_out = 100;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_FINALIZED);
+    let payout_watermark = 100;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_FINALIZED);
 
-    set_token_balance(&mut s.svm, &s.channel_ata, deposit - paid_out + 1);
+    set_token_balance(&mut s.svm, &s.channel_ata, deposit - payout_watermark + 1);
 
     s.send(s.distribute_ix()).expect("distribute ok");
 
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 16);
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 16);
-    assert_eq!(token_balance(&s.svm, &s.payee_ata), 16);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 17);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
-    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 3);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 2);
     assert_tombstone(&s.svm, &s.channel);
 }
 
@@ -762,13 +1062,11 @@ fn happy_path_finalized_already_withdrawn() {
     }];
     let deposit = 200_000;
     let settled = 150_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_FINALIZED);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_FINALIZED);
 
-    mutate_channel(&mut s.svm, &s.channel, |ch| {
-        ch.set_payer_withdrawn_at(1_700_000_000)
-    });
-    set_token_balance(&mut s.svm, &s.channel_ata, settled - paid_out);
+    set_payer_withdrawn_at(&mut s.svm, &s.channel, 1_700_000_000);
+    set_token_balance(&mut s.svm, &s.channel_ata, settled - payout_watermark);
 
     let payer_balance_before = s.svm.get_account(&s.payer).unwrap().lamports;
     let channel_lamports_before = s.svm.get_account(&s.channel).unwrap().lamports;
@@ -797,8 +1095,8 @@ fn bad_preimage_hash() {
     }];
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
 
     mutate_channel(&mut s.svm, &s.channel, |ch| {
         ch.distribution_hash[0] ^= 0xFF;
@@ -815,8 +1113,8 @@ fn token_2022_allowed_mint_extensions_succeed() {
     }];
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
     for (extension_type, value_len) in [
         (EXT_METADATA_POINTER, POINTER_EXTENSION_LEN),
         (EXT_TOKEN_METADATA, TOKEN_METADATA_MIN_LEN),
@@ -833,7 +1131,7 @@ fn token_2022_allowed_mint_extensions_succeed() {
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 50_000);
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 50_000);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
-    assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
 }
 
 #[test]
@@ -849,15 +1147,18 @@ fn unsupported_token_2022_mint_extensions_reject_without_state_changes() {
         }];
         let deposit = 200_000;
         let settled = 100_000;
-        let paid_out = 0;
-        let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
-        let paid_out_before = read_paid_out(&s.svm, &s.channel);
+        let payout_watermark = 0;
+        let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
+        let payout_watermark_before = read_payout_watermark(&s.svm, &s.channel);
         add_mint_extension(&mut s.svm, &s.mint, extension_type, value_len);
 
         let res = s.send(s.distribute_ix());
 
         expect_custom_err(res, PaymentChannelsError::MalformedMintTokenExtensions);
-        assert_eq!(read_paid_out(&s.svm, &s.channel), paid_out_before);
+        assert_eq!(
+            read_payout_watermark(&s.svm, &s.channel),
+            payout_watermark_before
+        );
         assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
         assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
     }
@@ -871,9 +1172,9 @@ fn malformed_token_2022_account_extension_rejects_without_state_changes() {
     }];
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
-    let paid_out_before = read_paid_out(&s.svm, &s.channel);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
+    let payout_watermark_before = read_payout_watermark(&s.svm, &s.channel);
     add_malformed_account_extension(&mut s.svm, &s.recipient_atas[0]);
 
     let res = s.send(s.distribute_ix());
@@ -882,7 +1183,10 @@ fn malformed_token_2022_account_extension_rejects_without_state_changes() {
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
-    assert_eq!(read_paid_out(&s.svm, &s.channel), paid_out_before);
+    assert_eq!(
+        read_payout_watermark(&s.svm, &s.channel),
+        payout_watermark_before
+    );
 }
 
 // ===========================================================================
@@ -903,8 +1207,8 @@ fn poisoned_recipient_redirects_share_to_treasury_in_open() {
     ];
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
     add_account_extension(&mut s.svm, &s.recipient_atas[0], EXT_MEMO_TRANSFER, 1);
 
     s.send(s.distribute_ix())
@@ -915,7 +1219,7 @@ fn poisoned_recipient_redirects_share_to_treasury_in_open() {
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 30_000);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 30_000);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
-    assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
 }
 
 #[test]
@@ -926,8 +1230,8 @@ fn poisoned_payee_redirects_remainder_to_treasury_in_open() {
     }];
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
     add_account_extension(&mut s.svm, &s.payee_ata, EXT_MEMO_TRANSFER, 1);
 
     s.send(s.distribute_ix())
@@ -936,7 +1240,7 @@ fn poisoned_payee_redirects_remainder_to_treasury_in_open() {
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 60_000);
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 40_000);
-    assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
 }
 
 #[test]
@@ -947,8 +1251,8 @@ fn zero_share_poisoned_payee_does_not_block_recipient_only_open_distribute() {
     }];
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
     add_account_extension(&mut s.svm, &s.payee_ata, EXT_MEMO_TRANSFER, 1);
 
     s.send(s.distribute_ix())
@@ -958,7 +1262,7 @@ fn zero_share_poisoned_payee_does_not_block_recipient_only_open_distribute() {
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
-    assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
 }
 
 #[test]
@@ -969,8 +1273,8 @@ fn zero_share_poisoned_payee_does_not_block_recipient_only_finalized_distribute(
     }];
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_FINALIZED);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_FINALIZED);
     add_account_extension(&mut s.svm, &s.payee_ata, EXT_MEMO_TRANSFER, 1);
 
     s.send(s.distribute_ix())
@@ -991,8 +1295,8 @@ fn poisoned_payer_ata_does_not_affect_open_distribute() {
     }];
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
     add_account_extension(&mut s.svm, &s.payer_ata, EXT_MEMO_TRANSFER, 1);
 
     s.send(s.distribute_ix())
@@ -1002,7 +1306,7 @@ fn poisoned_payer_ata_does_not_affect_open_distribute() {
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 50_000);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
-    assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
 }
 
 #[test]
@@ -1013,8 +1317,8 @@ fn poisoned_payer_ata_redirects_refund_to_treasury_in_finalized_with_refund() {
     }];
     let deposit = 200_000;
     let settled = 150_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_FINALIZED);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_FINALIZED);
     add_account_extension(&mut s.svm, &s.payer_ata, EXT_MEMO_TRANSFER, 1);
 
     s.send(s.distribute_ix())
@@ -1031,16 +1335,16 @@ fn poisoned_payer_ata_redirects_refund_to_treasury_in_finalized_with_refund() {
 fn num_recipients_zero_pays_full_pool_to_payee() {
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(vec![], deposit, settled, paid_out, STATUS_OPEN);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(vec![], deposit, settled, payout_watermark, STATUS_OPEN);
 
-    let pool_amount = settled - paid_out;
+    let pool_amount = settled - payout_watermark;
     s.send(s.distribute_ix()).expect("distribute ok");
 
     assert_eq!(token_balance(&s.svm, &s.payee_ata), pool_amount);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
-    assert_eq!(read_paid_out(&s.svm, &s.channel), pool_amount);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), pool_amount);
 }
 
 #[test]
@@ -1051,8 +1355,8 @@ fn wrong_recipient_ata() {
     }];
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
     let rogue_owner = Pubkey::new_unique();
     s.svm.airdrop(&rogue_owner, 1_000_000).ok();
     let rogue_ata = CreateAssociatedTokenAccount::new(&mut s.svm, &s.fee_payer, &s.mint)
@@ -1083,8 +1387,8 @@ fn wrong_treasury_ata() {
     }];
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
     let rogue_owner = Pubkey::new_unique();
     s.svm.airdrop(&rogue_owner, 1_000_000).ok();
     let rogue_ata = CreateAssociatedTokenAccount::new(&mut s.svm, &s.fee_payer, &s.mint)
@@ -1115,8 +1419,8 @@ fn wrong_token_program() {
     }];
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
     let system_id = Pubkey::default();
     let ix = build_distribute_ix(
         &s.channel,
@@ -1154,8 +1458,8 @@ fn status_closing_rejects() {
     }];
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_CLOSING);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_CLOSING);
     expect_custom_err(
         s.send(s.distribute_ix()),
         PaymentChannelsError::ChannelNotDistributable,
@@ -1170,8 +1474,8 @@ fn num_recipients_exceeds_max() {
     }];
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
 
     let mut data = vec![DISCRIMINATOR];
     data.extend_from_slice(&33u32.to_le_bytes());
@@ -1201,8 +1505,8 @@ fn recipient_tail_length_mismatch_rejects() {
     }];
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
     let ix = build_distribute_ix(
         &s.channel,
         &s.payer,
@@ -1235,8 +1539,8 @@ fn bps_sum_equals_10000_no_payee_share() {
     ];
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
 
     s.send(s.distribute_ix()).expect("distribute ok");
 
@@ -1245,7 +1549,7 @@ fn bps_sum_equals_10000_no_payee_share() {
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
-    assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
 }
 
 #[test]
@@ -1256,8 +1560,8 @@ fn bps_sum_equals_10000_still_validates_payee_ata() {
     }];
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
     let rogue_owner = Pubkey::new_unique();
     s.svm.airdrop(&rogue_owner, 1_000_000).ok();
     let rogue_ata = CreateAssociatedTokenAccount::new(&mut s.svm, &s.fee_payer, &s.mint)
@@ -1288,8 +1592,8 @@ fn wrong_payee_ata() {
     }];
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
     let rogue_owner = Pubkey::new_unique();
     s.svm.airdrop(&rogue_owner, 1_000_000).ok();
     let rogue_ata = CreateAssociatedTokenAccount::new(&mut s.svm, &s.fee_payer, &s.mint)
@@ -1326,8 +1630,8 @@ fn many_distinct_recipients_accepted() {
         .collect();
     let deposit = 2_000_000;
     let settled = 1_000_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_OPEN);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
 
     s.send(s.distribute_ix()).expect("distribute ok");
 
@@ -1337,7 +1641,7 @@ fn many_distinct_recipients_accepted() {
     for ata in &s.recipient_atas {
         assert_eq!(token_balance(&s.svm, ata), 100);
     }
-    assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
 }
 
 #[test]
@@ -1354,12 +1658,12 @@ fn happy_path_spl_token_max_recipients_plus_payee() {
         .collect();
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 0;
+    let payout_watermark = 0;
     let mut s = Scenario::build_with_token_program(
         splits,
         deposit,
         settled,
-        paid_out,
+        payout_watermark,
         STATUS_OPEN,
         SPL_TOKEN,
     );
@@ -1376,7 +1680,7 @@ fn happy_path_spl_token_max_recipients_plus_payee() {
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 68_000);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.channel_ata), deposit - settled);
-    assert_eq!(read_paid_out(&s.svm, &s.channel), settled);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
 }
 
 #[test]
@@ -1395,12 +1699,12 @@ fn happy_path_spl_token_finalized_max_recipients_plus_payee_refund_sweep() {
         .collect();
     let deposit: u64 = 200_000;
     let settled: u64 = 99_999;
-    let paid_out: u64 = 0;
+    let payout_watermark: u64 = 0;
     let mut s = Scenario::build_with_token_program(
         splits,
         deposit,
         settled,
-        paid_out,
+        payout_watermark,
         STATUS_FINALIZED,
         SPL_TOKEN,
     );
@@ -1454,12 +1758,12 @@ fn spl_token_finalized_zero_pool_still_refunds_and_tombstones() {
     }];
     let deposit = 200_000;
     let settled = 100_000;
-    let paid_out = 100_000;
+    let payout_watermark = 100_000;
     let mut s = Scenario::build_with_token_program(
         splits,
         deposit,
         settled,
-        paid_out,
+        payout_watermark,
         STATUS_FINALIZED,
         SPL_TOKEN,
     );
@@ -1486,12 +1790,12 @@ fn spl_token_finalized_already_withdrawn() {
     }];
     let deposit = 200_000;
     let settled = 150_000;
-    let paid_out = 0;
+    let payout_watermark = 0;
     let mut s = Scenario::build_with_token_program(
         splits,
         deposit,
         settled,
-        paid_out,
+        payout_watermark,
         STATUS_FINALIZED,
         SPL_TOKEN,
     );
@@ -1500,7 +1804,7 @@ fn spl_token_finalized_already_withdrawn() {
     mutate_channel(&mut s.svm, &s.channel, |ch| {
         ch.set_payer_withdrawn_at(1_700_000_000)
     });
-    set_token_balance(&mut s.svm, &s.channel_ata, settled - paid_out);
+    set_token_balance(&mut s.svm, &s.channel_ata, settled - payout_watermark);
 
     s.send(s.distribute_ix())
         .expect("spl finalized already-withdrawn ok");
@@ -1527,12 +1831,12 @@ fn spl_token_finalized_chunk_boundary() {
         .collect();
     let deposit: u64 = 200_000;
     let settled: u64 = 99_999;
-    let paid_out: u64 = 0;
+    let payout_watermark: u64 = 0;
     let mut s = Scenario::build_with_token_program(
         splits,
         deposit,
         settled,
-        paid_out,
+        payout_watermark,
         STATUS_FINALIZED,
         SPL_TOKEN,
     );
@@ -1587,12 +1891,12 @@ fn token_2022_max_recipients_plus_payee_finalized() {
         .collect();
     let deposit: u64 = 200_000;
     let settled: u64 = 99_999;
-    let paid_out: u64 = 0;
+    let payout_watermark: u64 = 0;
     let mut s = Scenario::build_with_token_program(
         splits,
         deposit,
         settled,
-        paid_out,
+        payout_watermark,
         STATUS_FINALIZED,
         TOKEN_2022,
     );
@@ -1661,8 +1965,8 @@ fn finalized_then_tombstoned() -> Scenario {
     }];
     let deposit = 200_000;
     let settled = 150_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits, deposit, settled, paid_out, STATUS_FINALIZED);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_FINALIZED);
     s.send(s.distribute_ix()).expect("distribute ok");
     assert_tombstone(&s.svm, &s.channel);
     s
@@ -1748,8 +2052,14 @@ fn reopen_at_same_seeds_rejects_same_tx() {
     }];
     let deposit = 200_000;
     let settled = 150_000;
-    let paid_out = 0;
-    let mut s = Scenario::build(splits.clone(), deposit, settled, paid_out, STATUS_FINALIZED);
+    let payout_watermark = 0;
+    let mut s = Scenario::build(
+        splits.clone(),
+        deposit,
+        settled,
+        payout_watermark,
+        STATUS_FINALIZED,
+    );
 
     let distribute_ix = s.distribute_ix();
     let open_ix = open_ix_for_splits(
