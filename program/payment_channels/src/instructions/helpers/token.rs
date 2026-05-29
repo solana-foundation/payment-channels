@@ -141,14 +141,10 @@ impl<'a> ExtensionTlv<'a> {
             return Ok(None);
         }
 
-        // Type whitelist is checked before the header-length probe so a
-        // forbidden 2-byte tail surfaces as `UnsupportedTokenExtension`
-        // rather than `MalformedTokenAccountData`.
-        let kind = ExtensionType::try_from(raw_type)?;
-
         if self.remaining.len() < tlv::HEADER_LEN {
             return Err(TokenExtensionError::MalformedTokenAccountData);
         }
+        let kind = ExtensionType::try_from(raw_type)?;
         let value_len = u16::from_le_bytes([self.remaining[2], self.remaining[3]]) as usize;
         let next_offset = tlv::HEADER_LEN
             .checked_add(value_len)
@@ -373,11 +369,12 @@ mod tlv_tests {
 
     #[test]
     fn scan_rejects_two_trailing_bytes_as_forbidden_type() {
-        // type=TransferFeeConfig (1) — must be rejected before the length check.
+        // type=TransferFeeConfig (1), but without length bytes the TLV
+        // record is malformed before extension policy is meaningful.
         let bytes = [0x01, 0x00];
         expect_err(
             scan_tlv_extensions::<MintExtensionPolicy>(&bytes),
-            TokenExtensionError::UnsupportedTokenExtension,
+            TokenExtensionError::MalformedTokenAccountData,
         );
     }
 

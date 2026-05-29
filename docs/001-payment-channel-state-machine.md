@@ -178,6 +178,7 @@ count (u32 LE) || [ recipient (32 bytes) || bps (u16 LE) ] × count
 - The payee receives the implicit remainder delta `floor(settled * (10000 - Σ bps) / 10000) - floor(payout_watermark * (10000 - Σ bps) / 10000)`.
 - During `OPEN`, residual dust from floor math remains in escrow while `payout_watermark` advances to `settled` as an accounted watermark. Later distributions compute cumulative floor deltas from that watermark, so previously residual value remains claimable when a share's cumulative entitlement crosses the next whole token.
 - During `FINALIZED`, the final cumulative floor delta runs once, then final irreducible residual dust is swept to the treasury ATA before the escrow ATA is closed.
+- Nonzero beneficiary shares redirect to treasury only when the canonical Token-2022 ATA has an unsupported account extension. Malformed extension TLV/data, uninitialized accounts, wrong mint/owner/address, invalid token program, mint failures, escrow failures, and treasury failures hard-fail. Zero-amount shares validate only the canonical ATA address.
 - Default `MAX_DISTRIBUTION_RECIPIENTS = 32`. Program-level constant; tunable per deployment.
 
 ## Token Program Support
@@ -196,7 +197,7 @@ Defensive validation runs before any escrow movement or `payout_watermark` mutat
 - Token-2022 mints/accounts are parsed with the account-type byte and TLV extension trailer.
 - Token-2022 mint extensions are allowed only for an explicitly enumerated set: `MetadataPointer`, `TokenMetadata`, `GroupPointer`, `TokenGroup`, `GroupMemberPointer`, `TokenGroupMember`. The list is fixed; future extensions, even ones that would not affect transfer semantics, are rejected until added here.
 - Token-2022 token-account extensions are allowed only for base accounts and `ImmutableOwner`.
-- Unknown, malformed, or unsupported extensions are rejected before any token transfer.
+- Unknown, malformed, or unsupported extensions are rejected before any token transfer, except for the beneficiary redirect case described above.
 
 ### Why the allow-list excludes the rest
 

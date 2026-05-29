@@ -28,8 +28,8 @@ use super::fixtures::{
 };
 use super::record;
 use crate::common::{
-    INSTRUCTIONS_SYSVAR, ProgramLoader, SPL_TOKEN, TOKEN_2022, compute_budget_ix, mutate_channel,
-    set_clock,
+    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, SPL_TOKEN, TOKEN_2022, compute_budget_ix,
+    event_authority, mutate_channel, set_clock,
     voucher::{build_ed25519_ix, voucher_payload},
 };
 
@@ -373,6 +373,8 @@ fn run_distribute(
         treasury_token_account: accts.treasury_ata,
         mint: f.mint,
         token_program: f.token_program,
+        event_authority: event_authority(),
+        self_program: PROGRAM_ID,
     }
     .instruction_with_remaining_accounts(
         DistributeInstructionArgs {
@@ -496,6 +498,8 @@ fn run_distribute_alt(
         treasury_token_account: accts.treasury_ata,
         mint: f.mint,
         token_program: f.token_program,
+        event_authority: event_authority(),
+        self_program: PROGRAM_ID,
     }
     .instruction_with_remaining_accounts(
         DistributeInstructionArgs {

@@ -9,6 +9,7 @@
 
 use litesvm::LiteSVM;
 use solana_pubkey::Pubkey;
+use spl_token_2022_interface::state::AccountState;
 
 pub const TOKEN_2022_BASE_MINT_LEN: usize = 82;
 pub const TOKEN_2022_BASE_ACCOUNT_LEN: usize = 165;
@@ -16,6 +17,9 @@ pub const TOKEN_2022_ACCOUNT_TYPE_OFFSET: usize = 165;
 pub const TOKEN_2022_TLV_START: usize = TOKEN_2022_ACCOUNT_TYPE_OFFSET + 1;
 pub const TOKEN_2022_ACCOUNT_TYPE_MINT: u8 = 1;
 pub const TOKEN_2022_ACCOUNT_TYPE_ACCOUNT: u8 = 2;
+/// Offset of the `Account.state` byte in the 165-byte SPL/Token-2022 base
+/// layout: mint (32) + owner (32) + amount (8) + delegate `COption` (4 + 32).
+pub const TOKEN_ACCOUNT_STATE_OFFSET: usize = 108;
 
 pub const EXT_TRANSFER_FEE_CONFIG: u16 = 1;
 pub const EXT_MINT_CLOSE_AUTHORITY: u16 = 3;
@@ -82,4 +86,31 @@ pub fn add_token_2022_extension(
     data.extend_from_slice(&extension_type.to_le_bytes());
     data.extend_from_slice(&(value_len as u16).to_le_bytes());
     data.resize(data.len() + value_len, 0);
+}
+
+/// Forces a token account's `state` byte to `state` (e.g. [`AccountState::Frozen`]),
+/// simulating a beneficiary that froze or never initialized their canonical ATA.
+pub fn set_token_account_state(svm: &mut LiteSVM, token_account: &Pubkey, state: AccountState) {
+    let mut acct = svm
+        .get_account(token_account)
+        .expect("token account exists");
+    acct.data[TOKEN_ACCOUNT_STATE_OFFSET] = match state {
+        AccountState::Uninitialized => 0,
+        AccountState::Initialized => 1,
+        AccountState::Frozen => 2,
+    };
+    svm.set_account(*token_account, acct)
+        .expect("overwrite token account");
+}
+
+/// Simulates the beneficiary closing their canonical ATA: drops the account
+/// data so the on-chain token-account view can no longer be constructed
+/// (`AccountValidationError::MalformedTokenAccountData`).
+pub fn close_token_account(svm: &mut LiteSVM, token_account: &Pubkey) {
+    let mut acct = svm
+        .get_account(token_account)
+        .expect("token account exists");
+    acct.data.clear();
+    svm.set_account(*token_account, acct)
+        .expect("overwrite token account");
 }

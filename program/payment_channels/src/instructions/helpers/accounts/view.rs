@@ -3,12 +3,16 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
-use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer};
+use borsh::BorshSerialize;
+#[cfg(feature = "idl")]
+use codama::CodamaType;
+use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer, error::ProgramError};
 
 use crate::{
     PaymentChannelsError, TREASURY_OWNER,
+    event_engine::{EventSerialize, emit_event},
+    events::PayoutRedirected,
     helpers::{
-        DistributionEntry,
         accounts::validation::{AccountValidationError, AccountValidator},
         token::{MintExtensionPolicy, TokenExtensionError, base_layout, scan_tlv_extensions, tlv},
     },
@@ -77,7 +81,6 @@ macro_rules! decl_account_view {
 }
 
 // General account view definitions
-
 decl_account_view!(
     ChannelAccountView,
     ChannelTokenAccountView,
@@ -118,13 +121,14 @@ impl<'a> TreasuryTokenAccountView<'a, Unchecked> {
         self.inner
             .validate_as_ata_checked(&TREASURY_OWNER, token_ctx)
             .map_err(|err| match err {
-                AccountValidationError::AddressMismatch => {
+                AccountValidationError::AddressMismatch
+                | AccountValidationError::AccountNotInitialized => {
                     PaymentChannelsError::TreasuryAccountMismatch
                 }
                 AccountValidationError::MalformedTokenAccountData => {
                     PaymentChannelsError::InvalidTreasuryTokenAccount
                 }
-                AccountValidationError::TokenExtensionError => {
+                AccountValidationError::TokenExtensionError(_) => {
                     PaymentChannelsError::InvalidTreasuryTokenExtensions
                 }
             })?;
@@ -136,76 +140,11 @@ impl<'a> TreasuryTokenAccountView<'a, Unchecked> {
     }
 }
 
-impl<'a> PayeeTokenAccountView<'a, Unchecked> {
-    pub fn check(
-        self,
-        payee: &Address,
-        token_ctx: &TokenContext<'a>,
-    ) -> Result<PayeeTokenAccountView<'a, Checked>, PaymentChannelsError> {
-        self.inner
-            .validate_as_ata_checked(payee, token_ctx)
-            .map_err(|err| match err {
-                AccountValidationError::AddressMismatch => {
-                    PaymentChannelsError::PayeeAccountMismatch
-                }
-                AccountValidationError::MalformedTokenAccountData => {
-                    PaymentChannelsError::InvalidPayeeTokenAccount
-                }
-                AccountValidationError::TokenExtensionError => {
-                    PaymentChannelsError::InvalidPayeeTokenExtensions
-                }
-            })?;
-
-        Ok(PayeeTokenAccountView {
-            inner: self.inner,
-            _s: Default::default(),
-        })
-    }
-}
-
 // Edge case-specific manual implementations
 
 pub struct RecipientTokenAccountsView<'a, S: State = Unchecked> {
     inner: &'a mut [AccountView],
     _s: PhantomData<S>,
-}
-
-impl<'a> RecipientTokenAccountsView<'a, Unchecked> {
-    pub fn check(
-        self,
-        entries: &[DistributionEntry],
-        token_ctx: &TokenContext<'a>,
-    ) -> Result<RecipientTokenAccountsView<'a, Checked>, PaymentChannelsError> {
-        for (entry, account) in entries.iter().zip(self.inner.iter()) {
-            account
-                .validate_as_ata_checked(&entry.recipient, token_ctx)
-                .map_err(|err| match err {
-                    AccountValidationError::AddressMismatch => {
-                        PaymentChannelsError::RecipientAccountMismatch
-                    }
-                    AccountValidationError::MalformedTokenAccountData => {
-                        PaymentChannelsError::InvalidRecipientTokenAccount
-                    }
-                    AccountValidationError::TokenExtensionError => {
-                        PaymentChannelsError::InvalidRecipientTokenExtensions
-                    }
-                })?;
-        }
-
-        Ok(RecipientTokenAccountsView {
-            inner: self.inner,
-            _s: Default::default(),
-        })
-    }
-}
-
-impl<'a> RecipientTokenAccountsView<'a, Checked> {
-    pub fn iter_as_any(&self) -> impl Iterator<Item = AnyTokenAccountView<'_, Checked>> {
-        self.iter().map(|acc| AnyTokenAccountView::<Checked> {
-            inner: acc,
-            _s: Default::default(),
-        })
-    }
 }
 
 impl<'a> From<&'a mut [AccountView]> for RecipientTokenAccountsView<'a, Unchecked> {
@@ -260,6 +199,79 @@ pub struct TokenContext<'a> {
     pub token_program: TokenProgramAccountView<'a, Checked>,
     pub decimals: u8,
     pub kind: TokenProgramKind,
+}
+
+/// Which payout role a [`crate::events::PayoutRedirected`] concerns. Borsh
+/// serializes the variant index (0 recipient, 1 payee, 2 payer) as one byte, so
+/// declaration order is part of the event wire format.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize)]
+#[cfg_attr(feature = "idl", derive(CodamaType))]
+#[repr(u8)]
+pub enum PayoutBeneficiary {
+    Recipient,
+    Payee,
+    Payer,
+}
+
+/// Why a nonzero payout was forfeited to the treasury. Borsh serializes the
+/// variant index (0/1/2) as one byte — declaration order is part of the
+/// [`crate::events::PayoutRedirected`] wire format.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize)]
+#[cfg_attr(feature = "idl", derive(CodamaType))]
+#[repr(u8)]
+pub enum RedirectReason {
+    /// Well-formed Token-2022 account carrying an unsupported extension.
+    UnsupportedExtension,
+    /// Canonical ATA could not be read as a token account (closed/malformed).
+    ClosedOrMalformed,
+    /// Canonical ATA is not in the `Initialized` state (frozen/uninitialized).
+    NotInitialized,
+}
+
+impl PayoutBeneficiary {
+    /// Total map from a validation failure to the beneficiary-specific error
+    /// surfaced to the cranker. `payout_destination` redirects the forfeitable
+    /// failures (closed/frozen/uninitialized ATA, unsupported extension) to
+    /// treasury before they would reach here, so on the payout path only
+    /// `AddressMismatch` and a malformed TLV extension trailer are fatal; the
+    /// mapping stays total so every variant has a defined error regardless.
+    fn map_account_error(self, err: AccountValidationError) -> PaymentChannelsError {
+        match (self, err) {
+            (Self::Recipient, AccountValidationError::AddressMismatch) => {
+                PaymentChannelsError::RecipientAccountMismatch
+            }
+            (
+                Self::Recipient,
+                AccountValidationError::MalformedTokenAccountData
+                | AccountValidationError::AccountNotInitialized,
+            ) => PaymentChannelsError::InvalidRecipientTokenAccount,
+            (Self::Recipient, AccountValidationError::TokenExtensionError(_)) => {
+                PaymentChannelsError::InvalidRecipientTokenExtensions
+            }
+            (Self::Payee, AccountValidationError::AddressMismatch) => {
+                PaymentChannelsError::PayeeAccountMismatch
+            }
+            (
+                Self::Payee,
+                AccountValidationError::MalformedTokenAccountData
+                | AccountValidationError::AccountNotInitialized,
+            ) => PaymentChannelsError::InvalidPayeeTokenAccount,
+            (Self::Payee, AccountValidationError::TokenExtensionError(_)) => {
+                PaymentChannelsError::InvalidPayeeTokenExtensions
+            }
+            (Self::Payer, AccountValidationError::AddressMismatch) => {
+                PaymentChannelsError::PayerAccountMismatch
+            }
+            (
+                Self::Payer,
+                AccountValidationError::MalformedTokenAccountData
+                | AccountValidationError::AccountNotInitialized,
+            ) => PaymentChannelsError::InvalidPayerTokenAccount,
+            (Self::Payer, AccountValidationError::TokenExtensionError(_)) => {
+                PaymentChannelsError::InvalidPayerTokenExtensions
+            }
+        }
+    }
 }
 
 impl<'a> TokenContext<'a> {
@@ -322,6 +334,72 @@ impl<'a> TokenContext<'a> {
             kind,
         })
     }
+
+    /// Validates only that `account` is the canonical ATA for `owner`.
+    pub(crate) fn validate_ata_address(
+        &self,
+        account: &AccountView,
+        owner: &Address,
+    ) -> Result<(), AccountValidationError> {
+        account.validate_as_ata_unchecked(owner, self.token_program.address(), self.mint.address())
+    }
+
+    /// Resolves where `beneficiary`'s share should land. A poisoned-but-self-
+    /// inflicted destination forfeits the nonzero share to `treasury` instead of
+    /// bricking the crank — an unsupported extension, a closed/unreadable
+    /// canonical ATA, or a frozen/uninitialized ATA — and emits a
+    /// [`PayoutRedirected`] self-CPI so the diversion is observable off-chain.
+    ///
+    /// The canonical ATA address is verified inside `validate_as_ata_checked`
+    /// before these states are reached, so they cannot mask a wrong account
+    /// passed by the cranker; a genuine address mismatch and a malformed TLV
+    /// extension trailer stay fatal.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn payout_destination<'b>(
+        &self,
+        beneficiary: PayoutBeneficiary,
+        account: &'b AccountView,
+        owner: &Address,
+        amount: u64,
+        treasury: &'b TreasuryTokenAccountView<'_, Checked>,
+        program_id: &Address,
+        event_authority: &AccountView,
+        self_program: &AccountView,
+        channel: &Address,
+    ) -> Result<&'b AccountView, ProgramError> {
+        // Zero-share payouts no-op in `Transfer`; only the canonical ATA
+        // address is checked so a poisoned zero-share beneficiary cannot veto
+        // the crank.
+        if amount == 0 {
+            return self
+                .validate_ata_address(account, owner)
+                .map(|()| account)
+                .map_err(|err| beneficiary.map_account_error(err).into());
+        }
+
+        let reason = match account.validate_as_ata_checked(owner, self) {
+            Ok(()) => return Ok(account),
+            Err(AccountValidationError::TokenExtensionError(
+                TokenExtensionError::UnsupportedTokenExtension,
+            )) => RedirectReason::UnsupportedExtension,
+            Err(AccountValidationError::MalformedTokenAccountData) => {
+                RedirectReason::ClosedOrMalformed
+            }
+            Err(AccountValidationError::AccountNotInitialized) => RedirectReason::NotInitialized,
+            Err(err) => return Err(beneficiary.map_account_error(err).into()),
+        };
+
+        let event = PayoutRedirected {
+            channel: *channel,
+            owner: *owner,
+            amount,
+            beneficiary,
+            reason,
+        };
+        let bytes = event.to_bytes_fixed::<{ PayoutRedirected::WIRE_LEN }>();
+        emit_event(program_id, event_authority, self_program, bytes.as_slice())?;
+        Ok(&**treasury)
+    }
 }
 
 pub struct ChannelContext<'a> {
@@ -339,13 +417,14 @@ impl<'a> ChannelContext<'a> {
         channel_token_account
             .validate_as_ata_checked(channel.address(), &token_ctx)
             .map_err(|err| match err {
-                AccountValidationError::AddressMismatch => {
+                AccountValidationError::AddressMismatch
+                | AccountValidationError::AccountNotInitialized => {
                     PaymentChannelsError::ChannelAccountMismatch
                 }
                 AccountValidationError::MalformedTokenAccountData => {
                     PaymentChannelsError::InvalidChannelTokenAccount
                 }
-                AccountValidationError::TokenExtensionError => {
+                AccountValidationError::TokenExtensionError(_) => {
                     PaymentChannelsError::InvalidChannelTokenExtensions
                 }
             })?;
@@ -423,13 +502,14 @@ impl<'a> PayerContext<'a> {
         payer_token_account
             .validate_as_ata_checked(payer.address(), token_ctx)
             .map_err(|err| match err {
-                AccountValidationError::AddressMismatch => {
+                AccountValidationError::AddressMismatch
+                | AccountValidationError::AccountNotInitialized => {
                     PaymentChannelsError::PayerAccountMismatch
                 }
                 AccountValidationError::MalformedTokenAccountData => {
                     PaymentChannelsError::InvalidPayerTokenAccount
                 }
-                AccountValidationError::TokenExtensionError => {
+                AccountValidationError::TokenExtensionError(_) => {
                     PaymentChannelsError::InvalidPayerTokenExtensions
                 }
             })?;

@@ -11,7 +11,9 @@ use payment_channels::PaymentChannelsError;
 use payment_channels::instructions::distribute::DISCRIMINATOR;
 use payment_channels::instructions::open::DISCRIMINATOR as OPEN_DISCRIMINATOR;
 use payment_channels_client::instructions::{Settle, SettleInstructionArgs, WithdrawPayer};
-use payment_channels_client::types::{DistributionEntry, SettleArgs, VoucherArgs};
+use payment_channels_client::types::{
+    DistributionEntry, PayoutBeneficiary, PayoutRedirected, RedirectReason, SettleArgs, VoucherArgs,
+};
 use solana_instruction::error::InstructionError;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
@@ -19,17 +21,20 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
+use spl_token_2022_interface::state::AccountState;
 
 use super::{
     MAX_DISTRIBUTION_RECIPIENTS, STATUS_CLOSING, STATUS_FINALIZED, STATUS_OPEN, Split, TOKEN_2022,
     build_distribute_ix, build_recipients,
 };
+use crate::common::events::events;
 use crate::common::token_2022::{
-    EXT_CPI_GUARD, EXT_GROUP_MEMBER_POINTER, EXT_GROUP_POINTER, EXT_MEMO_TRANSFER,
+    EXT_GROUP_MEMBER_POINTER, EXT_GROUP_POINTER, EXT_IMMUTABLE_OWNER, EXT_MEMO_TRANSFER,
     EXT_METADATA_POINTER, EXT_MINT_CLOSE_AUTHORITY, EXT_TOKEN_GROUP, EXT_TOKEN_GROUP_MEMBER,
     EXT_TOKEN_METADATA, EXT_TRANSFER_FEE_CONFIG, EXT_TRANSFER_HOOK, POINTER_EXTENSION_LEN,
-    TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN, add_account_extension,
-    add_mint_extension,
+    TOKEN_2022_ACCOUNT_TYPE_ACCOUNT, TOKEN_2022_ACCOUNT_TYPE_OFFSET, TOKEN_2022_BASE_ACCOUNT_LEN,
+    TOKEN_2022_TLV_START, TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN,
+    add_account_extension, add_mint_extension, close_token_account, set_token_account_state,
 };
 use solana_compute_budget::compute_budget_limits::MAX_COMPUTE_UNIT_LIMIT;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
@@ -49,6 +54,22 @@ fn set_token_balance(svm: &mut LiteSVM, token_account: &Pubkey, amount: u64) {
         .get_account(token_account)
         .expect("token account exists");
     acct.data[64..72].copy_from_slice(&amount.to_le_bytes());
+    svm.set_account(*token_account, acct)
+        .expect("overwrite token account");
+}
+
+fn add_malformed_account_extension(svm: &mut LiteSVM, token_account: &Pubkey) {
+    let mut acct = svm
+        .get_account(token_account)
+        .expect("token account exists");
+    if acct.data.len() < TOKEN_2022_TLV_START {
+        acct.data.resize(TOKEN_2022_TLV_START, 0);
+    }
+    acct.data[TOKEN_2022_BASE_ACCOUNT_LEN..TOKEN_2022_ACCOUNT_TYPE_OFFSET].fill(0);
+    acct.data[TOKEN_2022_ACCOUNT_TYPE_OFFSET] = TOKEN_2022_ACCOUNT_TYPE_ACCOUNT;
+    acct.data.truncate(TOKEN_2022_TLV_START);
+    acct.data
+        .extend_from_slice(&EXT_IMMUTABLE_OWNER.to_le_bytes());
     svm.set_account(*token_account, acct)
         .expect("overwrite token account");
 }
@@ -1148,29 +1169,296 @@ fn unsupported_token_2022_mint_extensions_reject_without_state_changes() {
 }
 
 #[test]
-fn unsupported_token_2022_account_extensions_reject_without_state_changes() {
-    for extension_type in [EXT_MEMO_TRANSFER, EXT_CPI_GUARD] {
-        let splits = vec![Split {
+fn malformed_token_2022_account_extension_rejects_without_state_changes() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5000,
+    }];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
+    let payout_watermark_before = read_payout_watermark(&s.svm, &s.channel);
+    add_malformed_account_extension(&mut s.svm, &s.recipient_atas[0]);
+
+    let res = s.send(s.distribute_ix());
+
+    expect_custom_err(res, PaymentChannelsError::InvalidRecipientTokenExtensions);
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
+    assert_eq!(
+        read_payout_watermark(&s.svm, &s.channel),
+        payout_watermark_before
+    );
+}
+
+// ===========================================================================
+// Skip-and-redirect: unsupported Token-2022 beneficiary account extensions
+// forfeit only the affected nonzero share to treasury.
+
+#[test]
+fn poisoned_recipient_redirects_share_to_treasury_in_open() {
+    let splits = vec![
+        Split {
             owner: Pubkey::new_unique(),
-            bps: 5000,
-        }];
-        let deposit = 200_000;
-        let settled = 100_000;
-        let payout_watermark = 0;
-        let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
-        let payout_watermark_before = read_payout_watermark(&s.svm, &s.channel);
-        add_account_extension(&mut s.svm, &s.recipient_atas[0], extension_type, 1);
+            bps: 3000,
+        },
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 4000,
+        },
+    ];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
+    let poisoned_owner = s.splits[0].owner;
+    add_account_extension(&mut s.svm, &s.recipient_atas[0], EXT_MEMO_TRANSFER, 1);
 
-        let res = s.send(s.distribute_ix());
+    let meta = s
+        .send(s.distribute_ix())
+        .expect("poisoned recipient forfeits, distribute still succeeds");
 
-        expect_custom_err(res, PaymentChannelsError::InvalidRecipientTokenExtensions);
-        assert_eq!(
-            read_payout_watermark(&s.svm, &s.channel),
-            payout_watermark_before
-        );
-        assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
-        assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
-    }
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 40_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 30_000);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 30_000);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
+
+    // The forfeit is observable as a single typed redirect event.
+    assert_eq!(
+        events::<PayoutRedirected>(&meta),
+        vec![PayoutRedirected {
+            channel: s.channel,
+            owner: poisoned_owner,
+            amount: 30_000,
+            beneficiary: PayoutBeneficiary::Recipient,
+            reason: RedirectReason::UnsupportedExtension,
+        }],
+    );
+}
+
+#[test]
+fn closed_recipient_ata_redirects_share_to_treasury_in_open() {
+    let splits = vec![
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 3000,
+        },
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 4000,
+        },
+    ];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let mut s = Scenario::build(splits, deposit, settled, 0, STATUS_OPEN);
+    let poisoned_owner = s.splits[0].owner;
+    close_token_account(&mut s.svm, &s.recipient_atas[0]);
+
+    let meta = s
+        .send(s.distribute_ix())
+        .expect("closed recipient ATA forfeits its share; distribute still succeeds");
+
+    // (recipient_atas[0] data is gone, so only the survivors are asserted.)
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 40_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 30_000);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 30_000);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
+
+    assert_eq!(
+        events::<PayoutRedirected>(&meta),
+        vec![PayoutRedirected {
+            channel: s.channel,
+            owner: poisoned_owner,
+            amount: 30_000,
+            beneficiary: PayoutBeneficiary::Recipient,
+            reason: RedirectReason::ClosedOrMalformed,
+        }],
+    );
+}
+
+#[test]
+fn frozen_recipient_ata_redirects_share_to_treasury_in_open() {
+    let splits = vec![
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 3000,
+        },
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 4000,
+        },
+    ];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let mut s = Scenario::build(splits, deposit, settled, 0, STATUS_OPEN);
+    let poisoned_owner = s.splits[0].owner;
+    set_token_account_state(&mut s.svm, &s.recipient_atas[0], AccountState::Frozen);
+
+    let meta = s
+        .send(s.distribute_ix())
+        .expect("frozen recipient ATA forfeits its share; distribute still succeeds");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 40_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 30_000);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 30_000);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
+
+    assert_eq!(
+        events::<PayoutRedirected>(&meta),
+        vec![PayoutRedirected {
+            channel: s.channel,
+            owner: poisoned_owner,
+            amount: 30_000,
+            beneficiary: PayoutBeneficiary::Recipient,
+            reason: RedirectReason::NotInitialized,
+        }],
+    );
+}
+
+#[test]
+fn frozen_payer_ata_redirects_refund_to_treasury_in_finalized() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5000,
+    }];
+    let deposit = 200_000;
+    let settled = 150_000;
+    let mut s = Scenario::build(splits, deposit, settled, 0, STATUS_FINALIZED);
+    set_token_account_state(&mut s.svm, &s.payer_ata, AccountState::Frozen);
+
+    let meta = s
+        .send(s.distribute_ix())
+        .expect("frozen payer ATA forfeits refund; tombstone completes");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), deposit - settled);
+    assert_tombstone(&s.svm, &s.channel);
+
+    assert_eq!(
+        events::<PayoutRedirected>(&meta),
+        vec![PayoutRedirected {
+            channel: s.channel,
+            owner: s.payer,
+            amount: deposit - settled,
+            beneficiary: PayoutBeneficiary::Payer,
+            reason: RedirectReason::NotInitialized,
+        }],
+    );
+}
+
+#[test]
+fn poisoned_payee_redirects_remainder_to_treasury_in_open() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 6000,
+    }];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
+    add_account_extension(&mut s.svm, &s.payee_ata, EXT_MEMO_TRANSFER, 1);
+
+    s.send(s.distribute_ix())
+        .expect("poisoned payee forfeits remainder");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 60_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 40_000);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
+}
+
+#[test]
+fn zero_share_poisoned_payee_does_not_block_recipient_only_open_distribute() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 10_000,
+    }];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
+    add_account_extension(&mut s.svm, &s.payee_ata, EXT_MEMO_TRANSFER, 1);
+
+    s.send(s.distribute_ix())
+        .expect("zero-share poisoned payee must not block recipient-only distribute");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), settled);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
+}
+
+#[test]
+fn zero_share_poisoned_payee_does_not_block_recipient_only_finalized_distribute() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 10_000,
+    }];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_FINALIZED);
+    add_account_extension(&mut s.svm, &s.payee_ata, EXT_MEMO_TRANSFER, 1);
+
+    s.send(s.distribute_ix())
+        .expect("zero-share poisoned payee must not block finalized close");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), settled);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
+    assert_tombstone(&s.svm, &s.channel);
+}
+
+#[test]
+fn poisoned_payer_ata_does_not_affect_open_distribute() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5000,
+    }];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
+    add_account_extension(&mut s.svm, &s.payer_ata, EXT_MEMO_TRANSFER, 1);
+
+    s.send(s.distribute_ix())
+        .expect("poisoned payer ATA must not block OPEN distribute");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 50_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 50_000);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
+}
+
+#[test]
+fn poisoned_payer_ata_redirects_refund_to_treasury_in_finalized_with_refund() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5000,
+    }];
+    let deposit = 200_000;
+    let settled = 150_000;
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_FINALIZED);
+    add_account_extension(&mut s.svm, &s.payer_ata, EXT_MEMO_TRANSFER, 1);
+
+    s.send(s.distribute_ix())
+        .expect("poisoned payer ATA forfeits refund; tombstone completes");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), deposit - settled);
+    assert_tombstone(&s.svm, &s.channel);
 }
 
 #[test]

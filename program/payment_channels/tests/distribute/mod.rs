@@ -18,7 +18,7 @@ use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
-use crate::common::{PROGRAM_ID, ProgramLoader, SPL_TOKEN, TOKEN_2022};
+use crate::common::{PROGRAM_ID, ProgramLoader, SPL_TOKEN, TOKEN_2022, event_authority};
 
 pub(super) const STATUS_OPEN: u8 = 0;
 pub(super) const STATUS_FINALIZED: u8 = 1;
@@ -44,7 +44,7 @@ pub(super) fn build_recipients(splits: &[Split]) -> Vec<DistributionEntry> {
         .collect()
 }
 
-/// Full distribute ix build with the 8-slot fixed head + dynamic recipient tail.
+/// Full distribute ix build with the 10-slot fixed head + dynamic recipient tail.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_distribute_ix(
     channel: &Pubkey,
@@ -71,6 +71,8 @@ pub(super) fn build_distribute_ix(
         treasury_token_account: Address::from(treasury_ata.to_bytes()),
         mint: Address::from(mint.to_bytes()),
         token_program: Address::from(token_program.to_bytes()),
+        event_authority: Address::from(event_authority().to_bytes()),
+        self_program: Address::from(PROGRAM_ID.to_bytes()),
     };
     accounts.instruction_with_remaining_accounts(
         DistributeInstructionArgs {
@@ -150,6 +152,9 @@ impl DistributeRun {
         let accounts: Vec<(Pubkey, Account)> = ix
             .accounts
             .iter()
+            // `self_program` (PROGRAM_ID) is served from Mollusk's loaded program
+            // cache; a dummy entry here would shadow it and trip UnsupportedProgramId.
+            .filter(|m| m.pubkey != PROGRAM_ID)
             .map(|m| {
                 let acc = if m.pubkey == self.channel {
                     channel_account.clone()

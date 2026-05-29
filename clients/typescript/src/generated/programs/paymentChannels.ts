@@ -39,7 +39,7 @@ import {
   type ClosedChannelArgs,
 } from "../accounts";
 import {
-  getDistributeInstruction,
+  getDistributeInstructionAsync,
   getEmitEventInstructionAsync,
   getFinalizeInstruction,
   getOpenInstructionAsync,
@@ -57,7 +57,7 @@ import {
   parseSettleInstruction,
   parseTopUpInstruction,
   parseWithdrawPayerInstruction,
-  type DistributeInput,
+  type DistributeAsyncInput,
   type EmitEventAsyncInput,
   type FinalizeInput,
   type OpenAsyncInput,
@@ -279,8 +279,9 @@ export type PaymentChannelsPluginInstructions = {
     input: FinalizeInput,
   ) => ReturnType<typeof getFinalizeInstruction> & SelfPlanAndSendFunctions;
   distribute: (
-    input: DistributeInput,
-  ) => ReturnType<typeof getDistributeInstruction> & SelfPlanAndSendFunctions;
+    input: DistributeAsyncInput,
+  ) => ReturnType<typeof getDistributeInstructionAsync> &
+    SelfPlanAndSendFunctions;
   withdrawPayer: (
     input: WithdrawPayerInput,
   ) => ReturnType<typeof getWithdrawPayerInstruction> &
@@ -335,7 +336,7 @@ export function paymentChannelsProgram() {
           distribute: (input) =>
             addSelfPlanAndSendFunctions(
               client,
-              getDistributeInstruction(input),
+              getDistributeInstructionAsync(input),
             ),
           withdrawPayer: (input) =>
             addSelfPlanAndSendFunctions(
