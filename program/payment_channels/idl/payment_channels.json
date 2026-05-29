@@ -183,6 +183,54 @@
       },
       {
         "kind": "definedTypeNode",
+        "name": "payoutRedirected",
+        "type": {
+          "fields": [
+            {
+              "kind": "structFieldTypeNode",
+              "name": "channel",
+              "type": {
+                "kind": "publicKeyTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "owner",
+              "type": {
+                "kind": "publicKeyTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "amount",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "beneficiary",
+              "type": {
+                "kind": "definedTypeLinkNode",
+                "name": "payoutBeneficiary"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "reason",
+              "type": {
+                "kind": "definedTypeLinkNode",
+                "name": "redirectReason"
+              }
+            }
+          ],
+          "kind": "structTypeNode"
+        }
+      },
+      {
+        "kind": "definedTypeNode",
         "name": "distributeArgs",
         "type": {
           "fields": [
@@ -207,6 +255,58 @@
             }
           ],
           "kind": "structTypeNode"
+        }
+      },
+      {
+        "kind": "definedTypeNode",
+        "name": "payoutBeneficiary",
+        "type": {
+          "kind": "enumTypeNode",
+          "size": {
+            "endian": "le",
+            "format": "u8",
+            "kind": "numberTypeNode"
+          },
+          "variants": [
+            {
+              "kind": "enumEmptyVariantTypeNode",
+              "name": "recipient"
+            },
+            {
+              "kind": "enumEmptyVariantTypeNode",
+              "name": "payee"
+            },
+            {
+              "kind": "enumEmptyVariantTypeNode",
+              "name": "payer"
+            }
+          ]
+        }
+      },
+      {
+        "kind": "definedTypeNode",
+        "name": "redirectReason",
+        "type": {
+          "kind": "enumTypeNode",
+          "size": {
+            "endian": "le",
+            "format": "u8",
+            "kind": "numberTypeNode"
+          },
+          "variants": [
+            {
+              "kind": "enumEmptyVariantTypeNode",
+              "name": "unsupportedExtension"
+            },
+            {
+              "kind": "enumEmptyVariantTypeNode",
+              "name": "closedOrMalformed"
+            },
+            {
+              "kind": "enumEmptyVariantTypeNode",
+              "name": "notInitialized"
+            }
+          ]
         }
       },
       {
@@ -1262,6 +1362,30 @@
             "isWritable": false,
             "kind": "instructionAccountNode",
             "name": "tokenProgram"
+          },
+          {
+            "defaultValue": {
+              "kind": "pdaValueNode",
+              "pda": {
+                "kind": "pdaLinkNode",
+                "name": "eventAuthority"
+              },
+              "seeds": []
+            },
+            "isSigner": false,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "eventAuthority"
+          },
+          {
+            "defaultValue": {
+              "kind": "publicKeyValueNode",
+              "publicKey": "GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc"
+            },
+            "isSigner": false,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "selfProgram"
           }
         ],
         "arguments": [

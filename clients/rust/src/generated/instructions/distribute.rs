@@ -29,6 +29,10 @@ pub struct Distribute {
     pub mint: solana_address::Address,
 
     pub token_program: solana_address::Address,
+
+    pub event_authority: solana_address::Address,
+
+    pub self_program: solana_address::Address,
 }
 
 impl Distribute {
@@ -42,7 +46,7 @@ impl Distribute {
         args: DistributeInstructionArgs,
         remaining_accounts: &[solana_instruction::AccountMeta],
     ) -> solana_instruction::Instruction {
-        let mut accounts = Vec::with_capacity(8 + remaining_accounts.len());
+        let mut accounts = Vec::with_capacity(10 + remaining_accounts.len());
         accounts.push(solana_instruction::AccountMeta::new(self.channel, false));
         accounts.push(solana_instruction::AccountMeta::new(self.payer, false));
         accounts.push(solana_instruction::AccountMeta::new(
@@ -66,6 +70,14 @@ impl Distribute {
         ));
         accounts.push(solana_instruction::AccountMeta::new_readonly(
             self.token_program,
+            false,
+        ));
+        accounts.push(solana_instruction::AccountMeta::new_readonly(
+            self.event_authority,
+            false,
+        ));
+        accounts.push(solana_instruction::AccountMeta::new_readonly(
+            self.self_program,
             false,
         ));
         accounts.extend_from_slice(remaining_accounts);
@@ -125,6 +137,8 @@ impl DistributeInstructionArgs {
 ///   5. `[writable]` treasury_token_account
 ///   6. `[]` mint
 ///   7. `[]` token_program
+///   8. `[]` event_authority
+///   9. `[optional]` self_program (default to `GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc`)
 #[derive(Clone, Debug, Default)]
 pub struct DistributeBuilder {
     channel: Option<solana_address::Address>,
@@ -135,6 +149,8 @@ pub struct DistributeBuilder {
     treasury_token_account: Option<solana_address::Address>,
     mint: Option<solana_address::Address>,
     token_program: Option<solana_address::Address>,
+    event_authority: Option<solana_address::Address>,
+    self_program: Option<solana_address::Address>,
     distribute_args: Option<DistributeArgs>,
     __remaining_accounts: Vec<solana_instruction::AccountMeta>,
 }
@@ -196,6 +212,17 @@ impl DistributeBuilder {
         self
     }
     #[inline(always)]
+    pub fn event_authority(&mut self, event_authority: solana_address::Address) -> &mut Self {
+        self.event_authority = Some(event_authority);
+        self
+    }
+    /// `[optional account, default to 'GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc']`
+    #[inline(always)]
+    pub fn self_program(&mut self, self_program: solana_address::Address) -> &mut Self {
+        self.self_program = Some(self_program);
+        self
+    }
+    #[inline(always)]
     pub fn distribute_args(&mut self, distribute_args: DistributeArgs) -> &mut Self {
         self.distribute_args = Some(distribute_args);
         self
@@ -234,6 +261,10 @@ impl DistributeBuilder {
                 .expect("treasury_token_account is not set"),
             mint: self.mint.expect("mint is not set"),
             token_program: self.token_program.expect("token_program is not set"),
+            event_authority: self.event_authority.expect("event_authority is not set"),
+            self_program: self.self_program.unwrap_or(solana_address::address!(
+                "GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc"
+            )),
         };
         let args = DistributeInstructionArgs {
             distribute_args: self
@@ -263,6 +294,10 @@ pub struct DistributeCpiAccounts<'a, 'b> {
     pub mint: &'b solana_account_info::AccountInfo<'a>,
 
     pub token_program: &'b solana_account_info::AccountInfo<'a>,
+
+    pub event_authority: &'b solana_account_info::AccountInfo<'a>,
+
+    pub self_program: &'b solana_account_info::AccountInfo<'a>,
 }
 
 /// `distribute` CPI instruction.
@@ -285,6 +320,10 @@ pub struct DistributeCpi<'a, 'b> {
     pub mint: &'b solana_account_info::AccountInfo<'a>,
 
     pub token_program: &'b solana_account_info::AccountInfo<'a>,
+
+    pub event_authority: &'b solana_account_info::AccountInfo<'a>,
+
+    pub self_program: &'b solana_account_info::AccountInfo<'a>,
     /// The arguments for the instruction.
     pub __args: DistributeInstructionArgs,
 }
@@ -305,6 +344,8 @@ impl<'a, 'b> DistributeCpi<'a, 'b> {
             treasury_token_account: accounts.treasury_token_account,
             mint: accounts.mint,
             token_program: accounts.token_program,
+            event_authority: accounts.event_authority,
+            self_program: accounts.self_program,
             __args: args,
         }
     }
@@ -331,7 +372,7 @@ impl<'a, 'b> DistributeCpi<'a, 'b> {
         signers_seeds: &[&[&[u8]]],
         remaining_accounts: &[(&'b solana_account_info::AccountInfo<'a>, bool, bool)],
     ) -> solana_program_error::ProgramResult {
-        let mut accounts = Vec::with_capacity(8 + remaining_accounts.len());
+        let mut accounts = Vec::with_capacity(10 + remaining_accounts.len());
         accounts.push(solana_instruction::AccountMeta::new(
             *self.channel.key,
             false,
@@ -361,6 +402,14 @@ impl<'a, 'b> DistributeCpi<'a, 'b> {
             *self.token_program.key,
             false,
         ));
+        accounts.push(solana_instruction::AccountMeta::new_readonly(
+            *self.event_authority.key,
+            false,
+        ));
+        accounts.push(solana_instruction::AccountMeta::new_readonly(
+            *self.self_program.key,
+            false,
+        ));
         remaining_accounts.iter().for_each(|remaining_account| {
             accounts.push(solana_instruction::AccountMeta {
                 pubkey: *remaining_account.0.key,
@@ -377,7 +426,7 @@ impl<'a, 'b> DistributeCpi<'a, 'b> {
             accounts,
             data,
         };
-        let mut account_infos = Vec::with_capacity(9 + remaining_accounts.len());
+        let mut account_infos = Vec::with_capacity(11 + remaining_accounts.len());
         account_infos.push(self.__program.clone());
         account_infos.push(self.channel.clone());
         account_infos.push(self.payer.clone());
@@ -387,6 +436,8 @@ impl<'a, 'b> DistributeCpi<'a, 'b> {
         account_infos.push(self.treasury_token_account.clone());
         account_infos.push(self.mint.clone());
         account_infos.push(self.token_program.clone());
+        account_infos.push(self.event_authority.clone());
+        account_infos.push(self.self_program.clone());
         remaining_accounts
             .iter()
             .for_each(|remaining_account| account_infos.push(remaining_account.0.clone()));
@@ -411,6 +462,8 @@ impl<'a, 'b> DistributeCpi<'a, 'b> {
 ///   5. `[writable]` treasury_token_account
 ///   6. `[]` mint
 ///   7. `[]` token_program
+///   8. `[]` event_authority
+///   9. `[]` self_program
 #[derive(Clone, Debug)]
 pub struct DistributeCpiBuilder<'a, 'b> {
     instruction: Box<DistributeCpiBuilderInstruction<'a, 'b>>,
@@ -428,6 +481,8 @@ impl<'a, 'b> DistributeCpiBuilder<'a, 'b> {
             treasury_token_account: None,
             mint: None,
             token_program: None,
+            event_authority: None,
+            self_program: None,
             distribute_args: None,
             __remaining_accounts: Vec::new(),
         });
@@ -486,6 +541,22 @@ impl<'a, 'b> DistributeCpiBuilder<'a, 'b> {
         token_program: &'b solana_account_info::AccountInfo<'a>,
     ) -> &mut Self {
         self.instruction.token_program = Some(token_program);
+        self
+    }
+    #[inline(always)]
+    pub fn event_authority(
+        &mut self,
+        event_authority: &'b solana_account_info::AccountInfo<'a>,
+    ) -> &mut Self {
+        self.instruction.event_authority = Some(event_authority);
+        self
+    }
+    #[inline(always)]
+    pub fn self_program(
+        &mut self,
+        self_program: &'b solana_account_info::AccountInfo<'a>,
+    ) -> &mut Self {
+        self.instruction.self_program = Some(self_program);
         self
     }
     #[inline(always)]
@@ -567,6 +638,16 @@ impl<'a, 'b> DistributeCpiBuilder<'a, 'b> {
                 .instruction
                 .token_program
                 .expect("token_program is not set"),
+
+            event_authority: self
+                .instruction
+                .event_authority
+                .expect("event_authority is not set"),
+
+            self_program: self
+                .instruction
+                .self_program
+                .expect("self_program is not set"),
             __args: args,
         };
         instruction.invoke_signed_with_remaining_accounts(
@@ -587,6 +668,8 @@ struct DistributeCpiBuilderInstruction<'a, 'b> {
     treasury_token_account: Option<&'b solana_account_info::AccountInfo<'a>>,
     mint: Option<&'b solana_account_info::AccountInfo<'a>>,
     token_program: Option<&'b solana_account_info::AccountInfo<'a>>,
+    event_authority: Option<&'b solana_account_info::AccountInfo<'a>>,
+    self_program: Option<&'b solana_account_info::AccountInfo<'a>>,
     distribute_args: Option<DistributeArgs>,
     /// Additional instruction accounts `(AccountInfo, is_writable, is_signer)`.
     __remaining_accounts: Vec<(&'b solana_account_info::AccountInfo<'a>, bool, bool)>,

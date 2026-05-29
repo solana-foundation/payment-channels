@@ -9,8 +9,9 @@ use crate::helpers::{
 
 pub(crate) enum AccountValidationError {
     AddressMismatch,
+    AccountNotInitialized,
     MalformedTokenAccountData,
-    TokenExtensionError,
+    TokenExtensionError(TokenExtensionError),
 }
 
 pub(crate) trait AccountValidator {
@@ -89,7 +90,13 @@ impl AccountValidator for AccountView {
             }
         };
 
-        if &mint_addr != token_ctx.mint.address() || &owner_addr != owner || !initialized {
+        // The canonical ATA address already matched above, so a non-initialized
+        // account here is the recipient's own closed/frozen/uninitialized ATA
+        // (forfeitable to treasury), not a wrong account passed by the cranker.
+        if !initialized {
+            return Err(AccountValidationError::AccountNotInitialized);
+        }
+        if &mint_addr != token_ctx.mint.address() || &owner_addr != owner {
             return Err(AccountValidationError::AddressMismatch);
         }
 
@@ -100,7 +107,8 @@ impl AccountValidator for AccountView {
             if data.len() > base_layout::TOKEN_ACCOUNT_LEN {
                 // No padding between token-account base and AccountType offset;
                 // walk the whitelisted TLV trailer.
-                scan_tlv_extensions::<TokenAccountExtensionPolicy>(&data[tlv::START..])?;
+                scan_tlv_extensions::<TokenAccountExtensionPolicy>(&data[tlv::START..])
+                    .map_err(AccountValidationError::from)?;
             }
         }
 
@@ -109,7 +117,7 @@ impl AccountValidator for AccountView {
 }
 
 impl From<TokenExtensionError> for AccountValidationError {
-    fn from(_value: TokenExtensionError) -> Self {
-        AccountValidationError::TokenExtensionError
+    fn from(value: TokenExtensionError) -> Self {
+        AccountValidationError::TokenExtensionError(value)
     }
 }
