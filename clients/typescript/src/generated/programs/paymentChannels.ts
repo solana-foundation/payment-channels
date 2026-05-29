@@ -79,7 +79,7 @@ import {
 import { findEventAuthorityPda } from "../pdas";
 
 export const PAYMENT_CHANNELS_PROGRAM_ADDRESS =
-  "GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc" as Address<"GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc">;
+  "CQAyft83tN1w2bRofB5PZ79eVDU2xZUVo43LU1qL4zRg" as Address<"CQAyft83tN1w2bRofB5PZ79eVDU2xZUVo43LU1qL4zRg">;
 
 export enum PaymentChannelsAccount {
   Channel,
@@ -136,7 +136,7 @@ export function identifyPaymentChannelsInstruction(
 }
 
 export type ParsedPaymentChannelsInstruction<
-  TProgram extends string = "GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc",
+  TProgram extends string = "CQAyft83tN1w2bRofB5PZ79eVDU2xZUVo43LU1qL4zRg",
 > =
   | ({
       instructionType: PaymentChannelsInstruction.Open;

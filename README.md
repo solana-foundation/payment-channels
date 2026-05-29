@@ -17,8 +17,8 @@ The program escrows SPL Token or Token-2022 deposits. A payer signs off-chain Ed
 
 ## Status
 
-- The program keypair is committed at `keys/payment_channels-keypair.json` so local builds and tests use the same program id.
-- Program id: `GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc`.
+- No production program keypair is committed or uploaded by CI. Keep operator keypairs outside version control and pass the program-id keypair explicitly when deploying, e.g. `solana program deploy target/deploy/payment_channels.so --program-id <program-keypair>`.
+- Local/test program id: `CQAyft83tN1w2bRofB5PZ79eVDU2xZUVo43LU1qL4zRg`. This ID is for generated fixtures and tests only; mainnet integrations must use the explicitly deployed production program address.
 - `TREASURY_OWNER` is a placeholder and must be replaced before mainnet use.
 
 ## Repo Layout
