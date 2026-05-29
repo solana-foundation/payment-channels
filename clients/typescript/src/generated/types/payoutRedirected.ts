@@ -12,8 +12,6 @@ import {
   getAddressEncoder,
   getStructDecoder,
   getStructEncoder,
-  getU64Decoder,
-  getU64Encoder,
   type Address,
   type FixedSizeCodec,
   type FixedSizeDecoder,
@@ -29,6 +27,7 @@ import {
   type RedirectReason,
   type RedirectReasonArgs,
 } from ".";
+import { getU64Decoder, getU64Encoder } from "../../safe-codecs.js";
 
 export type PayoutRedirected = {
   channel: Address;
@@ -41,7 +40,7 @@ export type PayoutRedirected = {
 export type PayoutRedirectedArgs = {
   channel: Address;
   owner: Address;
-  amount: number | bigint;
+  amount: bigint;
   beneficiary: PayoutBeneficiaryArgs;
   reason: RedirectReasonArgs;
 };
