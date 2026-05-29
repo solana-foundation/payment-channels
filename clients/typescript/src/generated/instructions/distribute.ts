@@ -32,6 +32,7 @@ import {
   getAccountMetaFactory,
   type ResolvedInstructionAccount,
 } from "@solana/program-client-core";
+import { findEventAuthorityPda } from "../pdas";
 import { PAYMENT_CHANNELS_PROGRAM_ADDRESS } from "../programs";
 import {
   getDistributeArgsDecoder,
@@ -56,6 +57,9 @@ export type DistributeInstruction<
   TAccountTreasuryTokenAccount extends string | AccountMeta<string> = string,
   TAccountMint extends string | AccountMeta<string> = string,
   TAccountTokenProgram extends string | AccountMeta<string> = string,
+  TAccountEventAuthority extends string | AccountMeta<string> = string,
+  TAccountSelfProgram extends string | AccountMeta<string> =
+    "GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc",
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
 > = Instruction<TProgram> &
   InstructionWithData<ReadonlyUint8Array> &
@@ -85,6 +89,12 @@ export type DistributeInstruction<
       TAccountTokenProgram extends string
         ? ReadonlyAccount<TAccountTokenProgram>
         : TAccountTokenProgram,
+      TAccountEventAuthority extends string
+        ? ReadonlyAccount<TAccountEventAuthority>
+        : TAccountEventAuthority,
+      TAccountSelfProgram extends string
+        ? ReadonlyAccount<TAccountSelfProgram>
+        : TAccountSelfProgram,
       ...TRemainingAccounts,
     ]
   >;
@@ -125,7 +135,7 @@ export function getDistributeInstructionDataCodec(): Codec<
   );
 }
 
-export type DistributeInput<
+export type DistributeAsyncInput<
   TAccountChannel extends string = string,
   TAccountPayer extends string = string,
   TAccountChannelTokenAccount extends string = string,
@@ -134,6 +144,8 @@ export type DistributeInput<
   TAccountTreasuryTokenAccount extends string = string,
   TAccountMint extends string = string,
   TAccountTokenProgram extends string = string,
+  TAccountEventAuthority extends string = string,
+  TAccountSelfProgram extends string = string,
 > = {
   channel: Address<TAccountChannel>;
   payer: Address<TAccountPayer>;
@@ -143,11 +155,13 @@ export type DistributeInput<
   treasuryTokenAccount: Address<TAccountTreasuryTokenAccount>;
   mint: Address<TAccountMint>;
   tokenProgram: Address<TAccountTokenProgram>;
+  eventAuthority?: Address<TAccountEventAuthority>;
+  selfProgram?: Address<TAccountSelfProgram>;
   distributeArgs: DistributeInstructionDataArgs["distributeArgs"];
   recipientTokenAccounts: Array<Address>;
 };
 
-export function getDistributeInstruction<
+export async function getDistributeInstructionAsync<
   TAccountChannel extends string,
   TAccountPayer extends string,
   TAccountChannelTokenAccount extends string,
@@ -156,9 +170,11 @@ export function getDistributeInstruction<
   TAccountTreasuryTokenAccount extends string,
   TAccountMint extends string,
   TAccountTokenProgram extends string,
+  TAccountEventAuthority extends string,
+  TAccountSelfProgram extends string,
   TProgramAddress extends Address = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
 >(
-  input: DistributeInput<
+  input: DistributeAsyncInput<
     TAccountChannel,
     TAccountPayer,
     TAccountChannelTokenAccount,
@@ -166,19 +182,25 @@ export function getDistributeInstruction<
     TAccountPayeeTokenAccount,
     TAccountTreasuryTokenAccount,
     TAccountMint,
-    TAccountTokenProgram
+    TAccountTokenProgram,
+    TAccountEventAuthority,
+    TAccountSelfProgram
   >,
   config?: { programAddress?: TProgramAddress },
-): DistributeInstruction<
-  TProgramAddress,
-  TAccountChannel,
-  TAccountPayer,
-  TAccountChannelTokenAccount,
-  TAccountPayerTokenAccount,
-  TAccountPayeeTokenAccount,
-  TAccountTreasuryTokenAccount,
-  TAccountMint,
-  TAccountTokenProgram
+): Promise<
+  DistributeInstruction<
+    TProgramAddress,
+    TAccountChannel,
+    TAccountPayer,
+    TAccountChannelTokenAccount,
+    TAccountPayerTokenAccount,
+    TAccountPayeeTokenAccount,
+    TAccountTreasuryTokenAccount,
+    TAccountMint,
+    TAccountTokenProgram,
+    TAccountEventAuthority,
+    TAccountSelfProgram
+  >
 > {
   // Program address.
   const programAddress =
@@ -206,6 +228,8 @@ export function getDistributeInstruction<
     },
     mint: { value: input.mint ?? null, isWritable: false },
     tokenProgram: { value: input.tokenProgram ?? null, isWritable: false },
+    eventAuthority: { value: input.eventAuthority ?? null, isWritable: false },
+    selfProgram: { value: input.selfProgram ?? null, isWritable: false },
   };
   const accounts = originalAccounts as Record<
     keyof typeof originalAccounts,
@@ -214,6 +238,15 @@ export function getDistributeInstruction<
 
   // Original args.
   const args = { ...input };
+
+  // Resolve default values.
+  if (!accounts.eventAuthority.value) {
+    accounts.eventAuthority.value = await findEventAuthorityPda();
+  }
+  if (!accounts.selfProgram.value) {
+    accounts.selfProgram.value =
+      "GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc" as Address<"GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc">;
+  }
 
   // Remaining accounts.
   const remainingAccounts: AccountMeta[] = args.recipientTokenAccounts.map(
@@ -231,6 +264,8 @@ export function getDistributeInstruction<
       getAccountMeta("treasuryTokenAccount", accounts.treasuryTokenAccount),
       getAccountMeta("mint", accounts.mint),
       getAccountMeta("tokenProgram", accounts.tokenProgram),
+      getAccountMeta("eventAuthority", accounts.eventAuthority),
+      getAccountMeta("selfProgram", accounts.selfProgram),
       ...remainingAccounts,
     ],
     data: getDistributeInstructionDataEncoder().encode(
@@ -246,7 +281,156 @@ export function getDistributeInstruction<
     TAccountPayeeTokenAccount,
     TAccountTreasuryTokenAccount,
     TAccountMint,
-    TAccountTokenProgram
+    TAccountTokenProgram,
+    TAccountEventAuthority,
+    TAccountSelfProgram
+  >);
+}
+
+export type DistributeInput<
+  TAccountChannel extends string = string,
+  TAccountPayer extends string = string,
+  TAccountChannelTokenAccount extends string = string,
+  TAccountPayerTokenAccount extends string = string,
+  TAccountPayeeTokenAccount extends string = string,
+  TAccountTreasuryTokenAccount extends string = string,
+  TAccountMint extends string = string,
+  TAccountTokenProgram extends string = string,
+  TAccountEventAuthority extends string = string,
+  TAccountSelfProgram extends string = string,
+> = {
+  channel: Address<TAccountChannel>;
+  payer: Address<TAccountPayer>;
+  channelTokenAccount: Address<TAccountChannelTokenAccount>;
+  payerTokenAccount: Address<TAccountPayerTokenAccount>;
+  payeeTokenAccount: Address<TAccountPayeeTokenAccount>;
+  treasuryTokenAccount: Address<TAccountTreasuryTokenAccount>;
+  mint: Address<TAccountMint>;
+  tokenProgram: Address<TAccountTokenProgram>;
+  eventAuthority: Address<TAccountEventAuthority>;
+  selfProgram?: Address<TAccountSelfProgram>;
+  distributeArgs: DistributeInstructionDataArgs["distributeArgs"];
+  recipientTokenAccounts: Array<Address>;
+};
+
+export function getDistributeInstruction<
+  TAccountChannel extends string,
+  TAccountPayer extends string,
+  TAccountChannelTokenAccount extends string,
+  TAccountPayerTokenAccount extends string,
+  TAccountPayeeTokenAccount extends string,
+  TAccountTreasuryTokenAccount extends string,
+  TAccountMint extends string,
+  TAccountTokenProgram extends string,
+  TAccountEventAuthority extends string,
+  TAccountSelfProgram extends string,
+  TProgramAddress extends Address = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
+>(
+  input: DistributeInput<
+    TAccountChannel,
+    TAccountPayer,
+    TAccountChannelTokenAccount,
+    TAccountPayerTokenAccount,
+    TAccountPayeeTokenAccount,
+    TAccountTreasuryTokenAccount,
+    TAccountMint,
+    TAccountTokenProgram,
+    TAccountEventAuthority,
+    TAccountSelfProgram
+  >,
+  config?: { programAddress?: TProgramAddress },
+): DistributeInstruction<
+  TProgramAddress,
+  TAccountChannel,
+  TAccountPayer,
+  TAccountChannelTokenAccount,
+  TAccountPayerTokenAccount,
+  TAccountPayeeTokenAccount,
+  TAccountTreasuryTokenAccount,
+  TAccountMint,
+  TAccountTokenProgram,
+  TAccountEventAuthority,
+  TAccountSelfProgram
+> {
+  // Program address.
+  const programAddress =
+    config?.programAddress ?? PAYMENT_CHANNELS_PROGRAM_ADDRESS;
+
+  // Original accounts.
+  const originalAccounts = {
+    channel: { value: input.channel ?? null, isWritable: true },
+    payer: { value: input.payer ?? null, isWritable: true },
+    channelTokenAccount: {
+      value: input.channelTokenAccount ?? null,
+      isWritable: true,
+    },
+    payerTokenAccount: {
+      value: input.payerTokenAccount ?? null,
+      isWritable: true,
+    },
+    payeeTokenAccount: {
+      value: input.payeeTokenAccount ?? null,
+      isWritable: true,
+    },
+    treasuryTokenAccount: {
+      value: input.treasuryTokenAccount ?? null,
+      isWritable: true,
+    },
+    mint: { value: input.mint ?? null, isWritable: false },
+    tokenProgram: { value: input.tokenProgram ?? null, isWritable: false },
+    eventAuthority: { value: input.eventAuthority ?? null, isWritable: false },
+    selfProgram: { value: input.selfProgram ?? null, isWritable: false },
+  };
+  const accounts = originalAccounts as Record<
+    keyof typeof originalAccounts,
+    ResolvedInstructionAccount
+  >;
+
+  // Original args.
+  const args = { ...input };
+
+  // Resolve default values.
+  if (!accounts.selfProgram.value) {
+    accounts.selfProgram.value =
+      "GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc" as Address<"GuoKrzaBiZnW5DvJ3yZVE7xHqbcBvaX9SH6P6Cn9gNvc">;
+  }
+
+  // Remaining accounts.
+  const remainingAccounts: AccountMeta[] = args.recipientTokenAccounts.map(
+    (address) => ({ address, role: AccountRole.WRITABLE }),
+  );
+
+  const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
+  return Object.freeze({
+    accounts: [
+      getAccountMeta("channel", accounts.channel),
+      getAccountMeta("payer", accounts.payer),
+      getAccountMeta("channelTokenAccount", accounts.channelTokenAccount),
+      getAccountMeta("payerTokenAccount", accounts.payerTokenAccount),
+      getAccountMeta("payeeTokenAccount", accounts.payeeTokenAccount),
+      getAccountMeta("treasuryTokenAccount", accounts.treasuryTokenAccount),
+      getAccountMeta("mint", accounts.mint),
+      getAccountMeta("tokenProgram", accounts.tokenProgram),
+      getAccountMeta("eventAuthority", accounts.eventAuthority),
+      getAccountMeta("selfProgram", accounts.selfProgram),
+      ...remainingAccounts,
+    ],
+    data: getDistributeInstructionDataEncoder().encode(
+      args as DistributeInstructionDataArgs,
+    ),
+    programAddress,
+  } as DistributeInstruction<
+    TProgramAddress,
+    TAccountChannel,
+    TAccountPayer,
+    TAccountChannelTokenAccount,
+    TAccountPayerTokenAccount,
+    TAccountPayeeTokenAccount,
+    TAccountTreasuryTokenAccount,
+    TAccountMint,
+    TAccountTokenProgram,
+    TAccountEventAuthority,
+    TAccountSelfProgram
   >);
 }
 
@@ -264,6 +448,8 @@ export type ParsedDistributeInstruction<
     treasuryTokenAccount: TAccountMetas[5];
     mint: TAccountMetas[6];
     tokenProgram: TAccountMetas[7];
+    eventAuthority: TAccountMetas[8];
+    selfProgram: TAccountMetas[9];
   };
   data: DistributeInstructionData;
 };
@@ -276,12 +462,12 @@ export function parseDistributeInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedDistributeInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 8) {
+  if (instruction.accounts.length < 10) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 8,
+        expectedAccountMetas: 10,
       },
     );
   }
@@ -302,6 +488,8 @@ export function parseDistributeInstruction<
       treasuryTokenAccount: getNextAccount(),
       mint: getNextAccount(),
       tokenProgram: getNextAccount(),
+      eventAuthority: getNextAccount(),
+      selfProgram: getNextAccount(),
     },
     data: getDistributeInstructionDataDecoder().decode(instruction.data),
   };

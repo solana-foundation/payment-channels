@@ -9,6 +9,7 @@ use crate::helpers::{
 
 pub(crate) enum AccountValidationError {
     AddressMismatch,
+    AccountNotInitialized,
     MalformedTokenAccountData,
     TokenExtensionError(TokenExtensionError),
 }
@@ -89,7 +90,13 @@ impl AccountValidator for AccountView {
             }
         };
 
-        if &mint_addr != token_ctx.mint.address() || &owner_addr != owner || !initialized {
+        // The canonical ATA address already matched above, so a non-initialized
+        // account here is the recipient's own closed/frozen/uninitialized ATA
+        // (forfeitable to treasury), not a wrong account passed by the cranker.
+        if !initialized {
+            return Err(AccountValidationError::AccountNotInitialized);
+        }
+        if &mint_addr != token_ctx.mint.address() || &owner_addr != owner {
             return Err(AccountValidationError::AddressMismatch);
         }
 

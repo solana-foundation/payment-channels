@@ -195,7 +195,9 @@ pub enum PaymentChannelsInstruction<'a> {
         codama(account(name = "payee_token_account", writable)),
         codama(account(name = "treasury_token_account", writable)),
         codama(account(name = "mint")),
-        codama(account(name = "token_program"))
+        codama(account(name = "token_program")),
+        codama(account(name = "event_authority", default_value = pda("eventAuthority"))),
+        codama(account(name = "self_program"))
     )]
     Distribute(
         #[cfg_attr(feature = "idl", codama(name = "distribute_args"))]

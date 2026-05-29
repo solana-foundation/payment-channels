@@ -49,7 +49,7 @@ impl<'a> DistributeArgs<'a> {
     }
 }
 
-/// Fixed 8-slot head + dynamic recipient tail. Recipient ATAs sit in
+/// Fixed 10-slot head + dynamic recipient tail. Recipient ATAs sit in
 /// `recipient_token_accounts` in the same order as the active entries in
 /// `DistributeArgs::recipients`; clients append them as remaining accounts.
 pub struct DistributeAccounts<'a> {
@@ -81,6 +81,12 @@ pub struct DistributeAccounts<'a> {
     pub mint: MintAccountView<'a>,
     /// SPL Token or Token-2022 program used by the escrow and payout ATAs.
     pub token_program: TokenProgramAccountView<'a>,
+    /// Signer PDA for the self-CPI that emits
+    /// [`crate::events::PayoutRedirected`] when a poisoned beneficiary share is
+    /// forfeited to treasury.
+    pub event_authority: &'a AccountView,
+    /// This program's ID; CPI target for the redirect-event emission.
+    pub self_program: &'a AccountView,
     /// Dynamic recipient ATA tail, ordered exactly like the active entries in
     /// the revealed distribution plan.
     pub recipient_token_accounts: RecipientTokenAccountsView<'a>,
@@ -99,6 +105,8 @@ impl<'a> TryFrom<&'a mut [AccountView]> for DistributeAccounts<'a> {
             treasury_token_account,
             mint,
             token_program,
+            event_authority,
+            self_program,
             recipient_rest @ ..,
         ] = accounts
         else {
@@ -113,6 +121,8 @@ impl<'a> TryFrom<&'a mut [AccountView]> for DistributeAccounts<'a> {
             treasury_token_account: treasury_token_account.into(),
             mint: mint.into(),
             token_program: token_program.into(),
+            event_authority,
+            self_program,
             recipient_token_accounts: recipient_rest.into(),
         })
     }
@@ -131,7 +141,7 @@ impl<'a> TryFrom<&'a mut [AccountView]> for DistributeAccounts<'a> {
 /// [`ClosedChannel`](crate::ClosedChannel) — refunding the rent delta to the
 /// payer while keeping the address program-owned forever.
 pub fn process(
-    _program_id: &Address,
+    program_id: &Address,
     accounts: &mut [AccountView],
     args: &DistributeArgs<'_>,
 ) -> ProgramResult {
@@ -221,6 +231,9 @@ pub fn process(
 
     // Collect payouts first; CPIs run in one shot at `flush` below.
     let mut transfer = Transfer::new(&channel_ctx, &signers);
+    // Copied out so the redirect-event emission can reference it without
+    // re-borrowing `channel_ctx` (held by `transfer`) below.
+    let channel_address = *channel_ctx.channel.address();
 
     for (entry, recipient_account) in args
         .recipients
@@ -229,29 +242,33 @@ pub fn process(
         .zip(accs.recipient_token_accounts.iter())
     {
         let amount = settlement.delta_for_bps(entry.bps() as u32)?;
-        transfer.push(
-            channel_ctx.token_ctx.payout_destination(
-                PayoutBeneficiary::Recipient,
-                recipient_account,
-                &entry.recipient,
-                amount,
-                &treasury_token_account,
-            )?,
+        let destination = channel_ctx.token_ctx.payout_destination(
+            PayoutBeneficiary::Recipient,
+            recipient_account,
+            &entry.recipient,
             amount,
+            &treasury_token_account,
+            program_id,
+            accs.event_authority,
+            accs.self_program,
+            &channel_address,
         )?;
+        transfer.push(destination, amount)?;
     }
 
     let payee_share = settlement.delta_for_bps(args.recipients.payee_bps())?;
-    transfer.push(
-        channel_ctx.token_ctx.payout_destination(
-            PayoutBeneficiary::Payee,
-            &accs.payee_token_account,
-            &Address::new_from_array(payee_bytes),
-            payee_share,
-            &treasury_token_account,
-        )?,
+    let payee_destination = channel_ctx.token_ctx.payout_destination(
+        PayoutBeneficiary::Payee,
+        &accs.payee_token_account,
+        &Address::new_from_array(payee_bytes),
         payee_share,
+        &treasury_token_account,
+        program_id,
+        accs.event_authority,
+        accs.self_program,
+        &channel_address,
     )?;
+    transfer.push(payee_destination, payee_share)?;
 
     if is_finalized {
         // Payer refund branch is one-shot and lazily validated. A payer who
@@ -260,16 +277,18 @@ pub fn process(
         // redirected to treasury and the channel can still close.
         if payer_withdrawn_at == 0 && deposit > settled {
             let payer_refund = deposit - settled;
-            transfer.push(
-                channel_ctx.token_ctx.payout_destination(
-                    PayoutBeneficiary::Payer,
-                    &accs.payer_token_account,
-                    &Address::new_from_array(payer_bytes),
-                    payer_refund,
-                    &treasury_token_account,
-                )?,
+            let payer_destination = channel_ctx.token_ctx.payout_destination(
+                PayoutBeneficiary::Payer,
+                &accs.payer_token_account,
+                &Address::new_from_array(payer_bytes),
                 payer_refund,
+                &treasury_token_account,
+                program_id,
+                accs.event_authority,
+                accs.self_program,
+                &channel_address,
             )?;
+            transfer.push(payer_destination, payer_refund)?;
         }
 
         let escrow_at_entry = channel_ctx

@@ -11,7 +11,9 @@ use payment_channels::PaymentChannelsError;
 use payment_channels::instructions::distribute::DISCRIMINATOR;
 use payment_channels::instructions::open::DISCRIMINATOR as OPEN_DISCRIMINATOR;
 use payment_channels_client::instructions::{Settle, SettleInstructionArgs, WithdrawPayer};
-use payment_channels_client::types::{DistributionEntry, SettleArgs, VoucherArgs};
+use payment_channels_client::types::{
+    DistributionEntry, PayoutBeneficiary, PayoutRedirected, RedirectReason, SettleArgs, VoucherArgs,
+};
 use solana_instruction::error::InstructionError;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
@@ -19,18 +21,20 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
+use spl_token_2022_interface::state::AccountState;
 
 use super::{
     MAX_DISTRIBUTION_RECIPIENTS, STATUS_CLOSING, STATUS_FINALIZED, STATUS_OPEN, Split, TOKEN_2022,
     build_distribute_ix, build_recipients,
 };
+use crate::common::events::events;
 use crate::common::token_2022::{
     EXT_GROUP_MEMBER_POINTER, EXT_GROUP_POINTER, EXT_IMMUTABLE_OWNER, EXT_MEMO_TRANSFER,
     EXT_METADATA_POINTER, EXT_MINT_CLOSE_AUTHORITY, EXT_TOKEN_GROUP, EXT_TOKEN_GROUP_MEMBER,
     EXT_TOKEN_METADATA, EXT_TRANSFER_FEE_CONFIG, EXT_TRANSFER_HOOK, POINTER_EXTENSION_LEN,
     TOKEN_2022_ACCOUNT_TYPE_ACCOUNT, TOKEN_2022_ACCOUNT_TYPE_OFFSET, TOKEN_2022_BASE_ACCOUNT_LEN,
     TOKEN_2022_TLV_START, TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN,
-    add_account_extension, add_mint_extension,
+    add_account_extension, add_mint_extension, close_token_account, set_token_account_state,
 };
 use solana_compute_budget::compute_budget_limits::MAX_COMPUTE_UNIT_LIMIT;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
@@ -1209,9 +1213,11 @@ fn poisoned_recipient_redirects_share_to_treasury_in_open() {
     let settled = 100_000;
     let payout_watermark = 0;
     let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
+    let poisoned_owner = s.splits[0].owner;
     add_account_extension(&mut s.svm, &s.recipient_atas[0], EXT_MEMO_TRANSFER, 1);
 
-    s.send(s.distribute_ix())
+    let meta = s
+        .send(s.distribute_ix())
         .expect("poisoned recipient forfeits, distribute still succeeds");
 
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
@@ -1220,6 +1226,130 @@ fn poisoned_recipient_redirects_share_to_treasury_in_open() {
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 30_000);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
     assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
+
+    // The forfeit is observable as a single typed redirect event.
+    assert_eq!(
+        events::<PayoutRedirected>(&meta),
+        vec![PayoutRedirected {
+            channel: s.channel,
+            owner: poisoned_owner,
+            amount: 30_000,
+            beneficiary: PayoutBeneficiary::Recipient,
+            reason: RedirectReason::UnsupportedExtension,
+        }],
+    );
+}
+
+#[test]
+fn closed_recipient_ata_redirects_share_to_treasury_in_open() {
+    let splits = vec![
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 3000,
+        },
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 4000,
+        },
+    ];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let mut s = Scenario::build(splits, deposit, settled, 0, STATUS_OPEN);
+    let poisoned_owner = s.splits[0].owner;
+    close_token_account(&mut s.svm, &s.recipient_atas[0]);
+
+    let meta = s
+        .send(s.distribute_ix())
+        .expect("closed recipient ATA forfeits its share; distribute still succeeds");
+
+    // (recipient_atas[0] data is gone, so only the survivors are asserted.)
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 40_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 30_000);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 30_000);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
+
+    assert_eq!(
+        events::<PayoutRedirected>(&meta),
+        vec![PayoutRedirected {
+            channel: s.channel,
+            owner: poisoned_owner,
+            amount: 30_000,
+            beneficiary: PayoutBeneficiary::Recipient,
+            reason: RedirectReason::ClosedOrMalformed,
+        }],
+    );
+}
+
+#[test]
+fn frozen_recipient_ata_redirects_share_to_treasury_in_open() {
+    let splits = vec![
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 3000,
+        },
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 4000,
+        },
+    ];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let mut s = Scenario::build(splits, deposit, settled, 0, STATUS_OPEN);
+    let poisoned_owner = s.splits[0].owner;
+    set_token_account_state(&mut s.svm, &s.recipient_atas[0], AccountState::Frozen);
+
+    let meta = s
+        .send(s.distribute_ix())
+        .expect("frozen recipient ATA forfeits its share; distribute still succeeds");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 40_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 30_000);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 30_000);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
+
+    assert_eq!(
+        events::<PayoutRedirected>(&meta),
+        vec![PayoutRedirected {
+            channel: s.channel,
+            owner: poisoned_owner,
+            amount: 30_000,
+            beneficiary: PayoutBeneficiary::Recipient,
+            reason: RedirectReason::NotInitialized,
+        }],
+    );
+}
+
+#[test]
+fn frozen_payer_ata_redirects_refund_to_treasury_in_finalized() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5000,
+    }];
+    let deposit = 200_000;
+    let settled = 150_000;
+    let mut s = Scenario::build(splits, deposit, settled, 0, STATUS_FINALIZED);
+    set_token_account_state(&mut s.svm, &s.payer_ata, AccountState::Frozen);
+
+    let meta = s
+        .send(s.distribute_ix())
+        .expect("frozen payer ATA forfeits refund; tombstone completes");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), deposit - settled);
+    assert_tombstone(&s.svm, &s.channel);
+
+    assert_eq!(
+        events::<PayoutRedirected>(&meta),
+        vec![PayoutRedirected {
+            channel: s.channel,
+            owner: s.payer,
+            amount: deposit - settled,
+            beneficiary: PayoutBeneficiary::Payer,
+            reason: RedirectReason::NotInitialized,
+        }],
+    );
 }
 
 #[test]
