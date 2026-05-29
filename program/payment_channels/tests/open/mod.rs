@@ -55,7 +55,7 @@ impl OpenRun {
             payer_is_signer: true,
             payee: Pubkey::new_unique(),
             mint: Pubkey::new_unique(),
-            authorized_signer: Pubkey::new_unique(),
+            authorized_signer: Keypair::new().pubkey(),
             channel: Pubkey::new_unique(),
             channel_ata: Pubkey::new_unique(),
             recipients: None,

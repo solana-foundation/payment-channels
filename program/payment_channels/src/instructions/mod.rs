@@ -116,8 +116,9 @@ pub enum PaymentChannelsInstruction<'a> {
     Open(#[cfg_attr(feature = "idl", codama(name = "open_args"))] open::OpenArgs<'a>) = 1,
 
     /// Permissionless crank: advances the on-chain
-    /// [`settled`](crate::Channel::settled) watermark against a payer-signed
-    /// voucher. `OPEN → OPEN`.
+    /// [`settled`](crate::Channel::settled) watermark against a voucher
+    /// signed by [`Channel::authorized_signer`](crate::Channel::authorized_signer).
+    /// `OPEN → OPEN`.
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "channel", writable)),
@@ -172,11 +173,14 @@ pub enum PaymentChannelsInstruction<'a> {
     Finalize = 6,
 
     /// Permissionless crank. Verifies the committed preimage and pays
-    /// [`settled`](crate::Channel::settled) `−`
-    /// [`paid_out`](crate::Channel::paid_out) across recipients (per-bps) +
-    /// payee's implicit remainder share. From `OPEN`, flooring residual stays
-    /// in escrow. From `FINALIZED`, residual is swept to treasury, the payer
-    /// receives the unspent
+    /// cumulative floor deltas between
+    /// [`payout_watermark`](crate::Channel::payout_watermark) and
+    /// [`settled`](crate::Channel::settled) across recipients (per-bps) +
+    /// payee's implicit remainder share. In `OPEN`, residual dust remains
+    /// claimable by future cumulative deltas while
+    /// [`payout_watermark`](crate::Channel::payout_watermark) advances to
+    /// [`settled`](crate::Channel::settled). From `FINALIZED`, final floor
+    /// residual is swept to treasury, the payer receives the unspent
     /// [`deposit`](crate::Channel::deposit) `−`
     /// [`settled`](crate::Channel::settled) headroom (if not already
     /// withdrawn) and tombstones the escrow ATA + the Channel PDA.
@@ -227,9 +231,8 @@ pub enum PaymentChannelsInstruction<'a> {
 impl<'a> PaymentChannelsInstruction<'a> {
     /// Stable, lowercase-snake-case label for this variant. Used by the
     /// integration test CU tracker so report labels are derived from the
-    /// instruction enum (the same source of truth as on-chain dispatch)
-    /// rather than a hand-rolled mapping in test code. The exhaustive
-    /// `match` here means adding a variant without extending this method
+    /// instruction enum rather than a hand-rolled mapping in test code. The
+    /// exhaustive `match` here means adding a variant without extending this method
     /// fails to compile.
     pub fn name(&self) -> &'static str {
         match self {

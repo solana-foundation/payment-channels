@@ -3,17 +3,12 @@ use codama::CodamaType;
 use core::mem::size_of;
 use pinocchio::{Address, error::ProgramError};
 
+use crate::constants::BPS_DENOMINATOR;
 use crate::errors::PaymentChannelsError;
 use crate::state::{Transmutable, load};
 
 /// Maximum number of distribution recipients per channel.
 pub const MAX_DISTRIBUTION_RECIPIENTS: usize = 32;
-
-/// Basis-point denominator. `Σ shareBps` may equal this value (recipients
-/// fully drain the pool, payee carve-out is zero) or fall below it (the
-/// remainder `BPS_DENOMINATOR − Σ` becomes the payee's implicit share at
-/// `distribute`).
-const BPS_DENOMINATOR: u32 = 10_000;
 
 /// One entry in the distribution plan committed at `open`.
 #[repr(C)]
@@ -165,15 +160,6 @@ impl<'a> DistributionPreimage<'a> {
     pub fn preimage_hash(&self) -> [u8; 32] {
         super::hash::blake3(self.preimage)
     }
-}
-
-/// `floor(pool * bps / 10_000)` in u128 to avoid overflow.
-#[inline]
-pub fn floor_bps_share(pool: u64, bps: u32) -> Result<u64, ProgramError> {
-    let prod = (pool as u128)
-        .checked_mul(bps as u128)
-        .ok_or(PaymentChannelsError::DistributionAmountOverflow)?;
-    Ok((prod / (BPS_DENOMINATOR as u128)) as u64)
 }
 
 #[cfg(test)]
@@ -344,12 +330,6 @@ mod tests {
                 assert_ne!(r1.preimage_hash(), r2.preimage_hash());
             });
         });
-    }
-
-    #[test]
-    fn floor_bps_share_rounds_down() {
-        assert_eq!(floor_bps_share(10, 3333).unwrap(), 3);
-        assert_eq!(floor_bps_share(10, 3334).unwrap(), 3);
     }
 
     #[test]

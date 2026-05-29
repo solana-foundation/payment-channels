@@ -160,10 +160,9 @@ mod tests {
         }
     }
 
-    /// Construct a [`ed25519_ix::Parsed`] that mirrors what `parse`
-    /// returns for a canonical precompile ix "signed" by [`AUTH`]. Lets
-    /// `verify_parsed`-only tests skip both the parse pipeline and
-    /// the sysvar plumbing that `verify_voucher` would run.
+    /// Construct a [`ed25519_ix::Parsed`] for a canonical precompile ix signed
+    /// by [`AUTH`]. Lets `verify_parsed`-only tests skip both the parse pipeline
+    /// and the sysvar plumbing that `verify_voucher` would run.
     fn valid_parsed(message: &[u8]) -> ed25519_ix::Parsed<'_> {
         ed25519_ix::Parsed {
             pubkey: AUTH.as_array(),

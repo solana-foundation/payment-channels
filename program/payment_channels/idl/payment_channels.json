@@ -62,20 +62,10 @@
             },
             {
               "kind": "structFieldTypeNode",
-              "name": "settled",
+              "name": "settlement",
               "type": {
-                "endian": "le",
-                "format": "u64",
-                "kind": "numberTypeNode"
-              }
-            },
-            {
-              "kind": "structFieldTypeNode",
-              "name": "paidOut",
-              "type": {
-                "endian": "le",
-                "format": "u64",
-                "kind": "numberTypeNode"
+                "kind": "definedTypeLinkNode",
+                "name": "settlementWatermarks"
               }
             },
             {
@@ -425,6 +415,33 @@
       },
       {
         "kind": "definedTypeNode",
+        "name": "settlementWatermarks",
+        "type": {
+          "fields": [
+            {
+              "kind": "structFieldTypeNode",
+              "name": "settled",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "payoutWatermark",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            }
+          ],
+          "kind": "structTypeNode"
+        }
+      },
+      {
+        "kind": "definedTypeNode",
         "name": "accountDiscriminator",
         "type": {
           "kind": "enumTypeNode",
@@ -696,6 +713,12 @@
         "name": "payerPayeeMustDiffer"
       },
       {
+        "code": 2002,
+        "kind": "errorNode",
+        "message": "authorized_signer must be a valid Ed25519 public key",
+        "name": "invalidAuthorizedSigner"
+      },
+      {
         "code": 2100,
         "kind": "errorNode",
         "message": "Deposit must be non-zero",
@@ -796,6 +819,12 @@
         "kind": "errorNode",
         "message": "Payer lamports overflow on rent refund",
         "name": "distributePayerBalanceOverflow"
+      },
+      {
+        "code": 2413,
+        "kind": "errorNode",
+        "message": "Transfer queue capacity exceeded",
+        "name": "distributeTransferQueueOverflow"
       }
     ],
     "events": [],

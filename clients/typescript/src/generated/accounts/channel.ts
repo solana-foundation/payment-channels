@@ -40,6 +40,12 @@ import {
   getU8Decoder,
   getU8Encoder,
 } from "../../safe-codecs.js";
+import {
+  getSettlementWatermarksDecoder,
+  getSettlementWatermarksEncoder,
+  type SettlementWatermarks,
+  type SettlementWatermarksArgs,
+} from "../types";
 
 export type Channel = {
   discriminator: number;
@@ -48,8 +54,7 @@ export type Channel = {
   status: number;
   salt: bigint;
   deposit: bigint;
-  settled: bigint;
-  paidOut: bigint;
+  settlement: SettlementWatermarks;
   closureStartedAt: bigint;
   payerWithdrawnAt: bigint;
   gracePeriod: number;
@@ -67,8 +72,7 @@ export type ChannelArgs = {
   status: number;
   salt: bigint;
   deposit: bigint;
-  settled: bigint;
-  paidOut: bigint;
+  settlement: SettlementWatermarksArgs;
   closureStartedAt: bigint;
   payerWithdrawnAt: bigint;
   gracePeriod: number;
@@ -88,8 +92,7 @@ export function getChannelEncoder(): FixedSizeEncoder<ChannelArgs> {
     ["status", getU8Encoder()],
     ["salt", getU64Encoder()],
     ["deposit", getU64Encoder()],
-    ["settled", getU64Encoder()],
-    ["paidOut", getU64Encoder()],
+    ["settlement", getSettlementWatermarksEncoder()],
     ["closureStartedAt", getI64Encoder()],
     ["payerWithdrawnAt", getI64Encoder()],
     ["gracePeriod", getU32Encoder()],
@@ -110,8 +113,7 @@ export function getChannelDecoder(): FixedSizeDecoder<Channel> {
     ["status", getU8Decoder()],
     ["salt", getU64Decoder()],
     ["deposit", getU64Decoder()],
-    ["settled", getU64Decoder()],
-    ["paidOut", getU64Decoder()],
+    ["settlement", getSettlementWatermarksDecoder()],
     ["closureStartedAt", getI64Decoder()],
     ["payerWithdrawnAt", getI64Decoder()],
     ["gracePeriod", getU32Decoder()],

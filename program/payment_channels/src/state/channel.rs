@@ -7,6 +7,7 @@ use pinocchio::{
     error::ProgramError,
 };
 
+use crate::constants::BPS_DENOMINATOR;
 use crate::errors::PaymentChannelsError;
 use crate::state::common::{AccountDiscriminator, CURRENT_CHANNEL_VERSION};
 use crate::state::transmutable::{Transmutable, load, load_mut};
@@ -36,6 +37,15 @@ pub enum ChannelStatus {
     /// `settleAndFinalize` mid-grace) or permissionlessly (`finalize`
     /// post-grace).
     Closing = 2,
+}
+
+impl ChannelStatus {
+    /// Whether the channel is in [`Finalized`](Self::Finalized), gating
+    /// refund/sweep/tombstone branches in `distribute`.
+    #[inline]
+    pub const fn is_finalized(&self) -> bool {
+        matches!(self, Self::Finalized)
+    }
 }
 
 impl TryFrom<u8> for ChannelStatus {
@@ -81,16 +91,8 @@ pub struct Channel {
     /// [`ChannelStatus::Closing`].
     #[cfg_attr(feature = "idl", codama(type = number(u64)))]
     deposit: [u8; 8],
-    /// Cumulative authorized watermark. Advanced monotonically by signed
-    /// vouchers in `settle` / `settleAndFinalize`; capped by
-    /// [`Self::deposit`].
-    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
-    settled: [u8; 8],
-    /// Cumulative tokens already paid out to merchant splits across
-    /// `distribute` calls. Invariant: `paid_out` ≤ [`Self::settled`].
-    /// Lets mid-session `distribute` run without double-paying.
-    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
-    paid_out: [u8; 8],
+    /// Cumulative settlement and payout accounting watermarks.
+    settlement: SettlementWatermarks,
     /// Set to `now` by `requestClose` (starts grace) and reset to 0 on
     /// `CLOSING → FINALIZED` via either `settleAndFinalize` (mid-grace)
     /// or `finalize` (post-grace). Always 0 in `OPEN` and `FINALIZED`;
@@ -143,21 +145,30 @@ impl Channel {
     }
 
     #[inline(always)]
-    pub fn settled(&self) -> u64 {
-        u64::from_le_bytes(self.settled)
+    pub fn settlement(&self) -> SettlementWatermarks {
+        self.settlement
     }
     #[inline(always)]
-    pub fn set_settled(&mut self, v: u64) {
-        self.settled = v.to_le_bytes();
+    pub fn settlement_mut(&mut self) -> &mut SettlementWatermarks {
+        &mut self.settlement
     }
 
     #[inline(always)]
-    pub fn paid_out(&self) -> u64 {
-        u64::from_le_bytes(self.paid_out)
+    pub fn settled(&self) -> u64 {
+        self.settlement.settled()
     }
     #[inline(always)]
-    pub fn set_paid_out(&mut self, v: u64) {
-        self.paid_out = v.to_le_bytes();
+    pub fn set_settled(&mut self, v: u64) {
+        self.settlement.set_settled(v);
+    }
+
+    #[inline(always)]
+    pub fn payout_watermark(&self) -> u64 {
+        self.settlement.payout_watermark()
+    }
+    #[inline(always)]
+    pub fn set_payout_watermark(&mut self, v: u64) {
+        self.settlement.set_payout_watermark(v);
     }
 
     #[inline(always)]
@@ -252,8 +263,7 @@ impl Channel {
         ch.status = ChannelStatus::Open as u8;
         ch.salt = salt.to_le_bytes();
         ch.deposit = deposit.to_le_bytes();
-        ch.settled = 0u64.to_le_bytes();
-        ch.paid_out = 0u64.to_le_bytes();
+        ch.settlement = SettlementWatermarks::new(0, 0);
         ch.closure_started_at = 0i64.to_le_bytes();
         ch.payer_withdrawn_at = 0i64.to_le_bytes();
         ch.grace_period = grace_period.to_le_bytes();
@@ -296,6 +306,126 @@ const _: () = {
     assert!(Channel::LEN == 216);
 };
 
+/// Cumulative settlement watermarks stored inside [`Channel`].
+///
+/// `settled` is the payer-authorized cumulative amount. `payout_watermark` is
+/// the settled watermark already accounted through merchant-side payout
+/// distribution. Residual dust from floor math may remain in escrow until
+/// later distributions or final close, but it is not excluded from future
+/// cumulative entitlement deltas.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "idl", derive(CodamaType))]
+pub struct SettlementWatermarks {
+    /// Cumulative payer-authorized amount accepted from vouchers. This is the
+    /// upper bound for merchant-side distribution accounting.
+    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    settled: [u8; 8],
+    /// Cumulative settled watermark already accounted by `distribute`.
+    /// Invariant: `payout_watermark <= settled`.
+    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    payout_watermark: [u8; 8],
+}
+
+impl SettlementWatermarks {
+    /// Constructs a settlement watermark pair.
+    ///
+    /// This intentionally does not validate `payout_watermark <= settled` so
+    /// tests and defensive account-load paths can represent invalid on-chain
+    /// bytes and verify that fallible helpers reject them.
+    #[inline(always)]
+    pub fn new(settled: u64, payout_watermark: u64) -> Self {
+        Self {
+            settled: settled.to_le_bytes(),
+            payout_watermark: payout_watermark.to_le_bytes(),
+        }
+    }
+
+    /// Returns the cumulative payer-authorized settled amount.
+    #[inline(always)]
+    pub fn settled(&self) -> u64 {
+        u64::from_le_bytes(self.settled)
+    }
+
+    /// Sets the cumulative payer-authorized settled amount.
+    #[inline(always)]
+    pub fn set_settled(&mut self, v: u64) {
+        self.settled = v.to_le_bytes();
+    }
+
+    /// Returns the cumulative settled watermark already accounted by
+    /// merchant-side payout distribution.
+    #[inline(always)]
+    pub fn payout_watermark(&self) -> u64 {
+        u64::from_le_bytes(self.payout_watermark)
+    }
+
+    /// Sets the cumulative settled watermark already accounted by
+    /// merchant-side payout distribution.
+    #[inline(always)]
+    pub fn set_payout_watermark(&mut self, v: u64) {
+        self.payout_watermark = v.to_le_bytes();
+    }
+
+    /// Returns `settled - payout_watermark`, the newly settled watermark range
+    /// that has not yet been accounted by `distribute`.
+    ///
+    /// Returns [`PaymentChannelsError::DistributePoolOverflow`] if
+    /// `payout_watermark > settled`.
+    #[inline(always)]
+    pub fn unaccounted(&self) -> Result<u64, ProgramError> {
+        self.settled()
+            .checked_sub(self.payout_watermark())
+            .ok_or(PaymentChannelsError::DistributePoolOverflow.into())
+    }
+
+    /// Returns whether `payout_watermark == settled`.
+    ///
+    /// Returns [`PaymentChannelsError::DistributePoolOverflow`] if
+    /// `payout_watermark > settled`.
+    #[inline(always)]
+    pub fn is_fully_accounted(&self) -> Result<bool, ProgramError> {
+        Ok(self.unaccounted()? == 0)
+    }
+
+    /// Returns one share's cumulative floor delta between `payout_watermark`
+    /// and `settled`.
+    ///
+    /// Returns [`PaymentChannelsError::DistributePoolOverflow`] if the
+    /// watermark pair is not monotonic.
+    pub fn delta_for_bps(&self, bps: u32) -> Result<u64, ProgramError> {
+        let before = Self::floor_bps_share(self.payout_watermark(), bps)?;
+        let after = Self::floor_bps_share(self.settled(), bps)?;
+        after
+            .checked_sub(before)
+            .ok_or(PaymentChannelsError::DistributePoolOverflow.into())
+    }
+
+    /// Returns `floor(amount * bps / 10_000)` using u128 intermediate math.
+    fn floor_bps_share(amount: u64, bps: u32) -> Result<u64, ProgramError> {
+        let prod = (amount as u128)
+            .checked_mul(bps as u128)
+            .ok_or(PaymentChannelsError::DistributionAmountOverflow)?;
+        Ok((prod / (BPS_DENOMINATOR as u128)) as u64)
+    }
+
+    /// Marks the current `settled` watermark as accounted after a successful
+    /// `OPEN` distribution pass.
+    #[inline(always)]
+    pub fn mark_as_settled(&mut self) {
+        self.payout_watermark = self.settled;
+    }
+}
+
+unsafe impl Transmutable for SettlementWatermarks {
+    const LEN: usize = size_of::<Self>();
+}
+
+const _: () = {
+    assert!(SettlementWatermarks::LEN == 16);
+    assert!(core::mem::align_of::<SettlementWatermarks>() == 1);
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,6 +440,13 @@ mod tests {
     #[test]
     fn size_is_216_bytes() {
         assert_eq!(core::mem::size_of::<Channel>(), 216);
+    }
+
+    #[test]
+    fn settlement_delta_rounds_bps_shares_down() {
+        let settlement = SettlementWatermarks::new(10, 0);
+        assert_eq!(settlement.delta_for_bps(3333).unwrap(), 3);
+        assert_eq!(settlement.delta_for_bps(3334).unwrap(), 3);
     }
 
     #[test]

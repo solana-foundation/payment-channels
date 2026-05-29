@@ -22,7 +22,7 @@ pub const DISCRIMINATOR: u8 = 2;
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct SettleArgs {
-    /// Payer-signed authorization. See [`VoucherArgs`].
+    /// Authorization signed by `Channel.authorized_signer`. See [`VoucherArgs`].
     pub voucher: VoucherArgs,
 }
 
@@ -59,9 +59,9 @@ impl<'a> TryFrom<&'a mut [AccountView]> for SettleAccounts<'a> {
     }
 }
 
-/// Permissionless crank: authority is the payer-signed voucher, not the
-/// signer. Advances [`Channel::settled`](crate::Channel::settled) in `OPEN`
-/// only — `settled` `<`
+/// Permissionless crank: authority is the authorized-signer voucher, not the
+/// transaction signer. Advances [`Channel::settled`](crate::Channel::settled)
+/// in `OPEN` only — `settled` `<`
 /// [`voucher.cumulative_amount`](VoucherArgs::cumulative_amount) `≤`
 /// [`deposit`](crate::Channel::deposit) and voucher must be fresh.
 pub fn process(
