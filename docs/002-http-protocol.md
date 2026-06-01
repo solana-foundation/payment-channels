@@ -105,6 +105,15 @@ To avoid paying Solana network fees for invalid transactions and to ensure proto
 }
 ```
 
+### Address Collisions
+
+Two addresses created during `open` are publicly derivable from the open payload and can be prefunded by a third party before the server's `open` transaction lands, causing `open` to revert:
+
+- **Channel PDA** — derived as `find_program_address([b"channel", payer, payee, mint, authorizedSigner, salt.to_le_bytes()], channelProgram)`.
+- **Escrow ATA** — derived as `ATA(channelPda, mint, tokenProgram)`.
+
+The server MUST retry `open` with a freshly random `salt` on either failure. Both addresses depend on `salt`, so a new salt produces a fresh channel PDA and escrow ATA. Servers SHOULD bound retries (e.g., 5 attempts) and surface the error to the client if every retry collides.
+
 ## Happy Path
 
 ```mermaid
