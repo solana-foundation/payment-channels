@@ -8,8 +8,9 @@
 #![allow(dead_code)]
 
 use litesvm::LiteSVM;
+use solana_program_pack::Pack;
 use solana_pubkey::Pubkey;
-use spl_token_2022_interface::state::AccountState;
+use spl_token_2022_interface::state::{Account as TokenAccount, AccountState};
 
 pub const TOKEN_2022_BASE_MINT_LEN: usize = 82;
 pub const TOKEN_2022_BASE_ACCOUNT_LEN: usize = 165;
@@ -20,10 +21,6 @@ pub const TOKEN_2022_ACCOUNT_TYPE_ACCOUNT: u8 = 2;
 /// Offset of the `Account.state` byte in the 165-byte SPL/Token-2022 base
 /// layout: mint (32) + owner (32) + amount (8) + delegate `COption` (4 + 32).
 pub const TOKEN_ACCOUNT_STATE_OFFSET: usize = 108;
-/// Offset and length of the 32-byte `Account.owner` field, which follows the
-/// 32-byte mint at the start of the SPL/Token-2022 base layout.
-pub const TOKEN_ACCOUNT_OWNER_OFFSET: usize = 32;
-pub const TOKEN_ACCOUNT_OWNER_LEN: usize = 32;
 
 pub const EXT_TRANSFER_FEE_CONFIG: u16 = 1;
 pub const EXT_MINT_CLOSE_AUTHORITY: u16 = 3;
@@ -115,8 +112,11 @@ pub fn set_token_account_owner(svm: &mut LiteSVM, token_account: &Pubkey, new_ow
     let mut acct = svm
         .get_account(token_account)
         .expect("token account exists");
-    acct.data[TOKEN_ACCOUNT_OWNER_OFFSET..TOKEN_ACCOUNT_OWNER_OFFSET + TOKEN_ACCOUNT_OWNER_LEN]
-        .copy_from_slice(new_owner.as_ref());
+    // The `owner` lives in the 165-byte base layout
+    let mut token = TokenAccount::unpack_from_slice(&acct.data[..TokenAccount::LEN])
+        .expect("valid token account");
+    token.owner = *new_owner;
+    token.pack_into_slice(&mut acct.data[..TokenAccount::LEN]);
     svm.set_account(*token_account, acct)
         .expect("overwrite token account");
 }
