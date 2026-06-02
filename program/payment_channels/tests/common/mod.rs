@@ -45,14 +45,10 @@ pub fn event_authority() -> Pubkey {
     .0
 }
 
-/// `constants::TREASURY_OWNER` mirror — alternating `0xBE 0xEF` × 16.
+/// `constants::TREASURY_OWNER` as a `Pubkey` — reads the program's single source of
+/// truth, so tests track whatever the active build selects (default: localnet).
 pub fn treasury_owner() -> Pubkey {
-    let mut b = [0u8; 32];
-    for i in 0..16 {
-        b[i * 2] = 0xBE;
-        b[i * 2 + 1] = 0xEF;
-    }
-    Pubkey::new_from_array(b)
+    Pubkey::new_from_array(*payment_channels::constants::TREASURY_OWNER.as_array())
 }
 
 pub fn token_balance(svm: &LiteSVM, account: &Pubkey) -> u64 {
