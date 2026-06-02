@@ -97,10 +97,13 @@ impl AccountValidator for AccountView {
         if !initialized {
             return Err(AccountValidationError::AccountNotInitialized);
         }
-        // The canonical ATA address already matched above, so an owner or mint
-        // field that no longer matches is the recipient's own self-inflicted
-        // state (e.g. a `SetAuthority(AccountOwner)` reassignment), forfeitable
-        // to treasury, not a wrong account passed by the cranker.
+        // The canonical ATA address already matched above, so a mismatching
+        // `owner` is the recipient's own self-inflicted reassignment (a
+        // `SetAuthority(AccountOwner)` call), forfeitable to treasury rather
+        // than a wrong account passed by the cranker. The `mint` comparison is
+        // purely defensive: a token account's mint is fixed at initialization
+        // and can never be reassigned, so that half of the condition is
+        // unreachable on an account that parsed above.
         if &mint_addr != token_ctx.mint.address() || &owner_addr != owner {
             return Err(AccountValidationError::OwnerMismatch);
         }
