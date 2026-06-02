@@ -9,6 +9,7 @@ use crate::helpers::{
 
 pub(crate) enum AccountValidationError {
     AddressMismatch,
+    OwnerMismatch,
     AccountNotInitialized,
     MalformedTokenAccountData,
     TokenExtensionError(TokenExtensionError),
@@ -96,8 +97,12 @@ impl AccountValidator for AccountView {
         if !initialized {
             return Err(AccountValidationError::AccountNotInitialized);
         }
+        // The canonical ATA address already matched above, so an owner or mint
+        // field that no longer matches is the recipient's own self-inflicted
+        // state (e.g. a `SetAuthority(AccountOwner)` reassignment), forfeitable
+        // to treasury, not a wrong account passed by the cranker.
         if &mint_addr != token_ctx.mint.address() || &owner_addr != owner {
-            return Err(AccountValidationError::AddressMismatch);
+            return Err(AccountValidationError::OwnerMismatch);
         }
 
         if token_ctx.kind == TokenProgramKind::Token2022 {

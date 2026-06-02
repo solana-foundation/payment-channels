@@ -305,6 +305,10 @@
             {
               "kind": "enumEmptyVariantTypeNode",
               "name": "notInitialized"
+            },
+            {
+              "kind": "enumEmptyVariantTypeNode",
+              "name": "reassignedAuthority"
             }
           ]
         }

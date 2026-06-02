@@ -20,6 +20,10 @@ pub const TOKEN_2022_ACCOUNT_TYPE_ACCOUNT: u8 = 2;
 /// Offset of the `Account.state` byte in the 165-byte SPL/Token-2022 base
 /// layout: mint (32) + owner (32) + amount (8) + delegate `COption` (4 + 32).
 pub const TOKEN_ACCOUNT_STATE_OFFSET: usize = 108;
+/// Offset and length of the 32-byte `Account.owner` field, which follows the
+/// 32-byte mint at the start of the SPL/Token-2022 base layout.
+pub const TOKEN_ACCOUNT_OWNER_OFFSET: usize = 32;
+pub const TOKEN_ACCOUNT_OWNER_LEN: usize = 32;
 
 pub const EXT_TRANSFER_FEE_CONFIG: u16 = 1;
 pub const EXT_MINT_CLOSE_AUTHORITY: u16 = 3;
@@ -99,6 +103,20 @@ pub fn set_token_account_state(svm: &mut LiteSVM, token_account: &Pubkey, state:
         AccountState::Initialized => 1,
         AccountState::Frozen => 2,
     };
+    svm.set_account(*token_account, acct)
+        .expect("overwrite token account");
+}
+
+/// Overwrites a token account's `owner` field, simulating a beneficiary that
+/// reassigned their canonical ATA via `SetAuthority(AccountOwner)` to an
+/// unreachable key (`AccountValidationError::OwnerMismatch`). The ATA address
+/// stays occupied, so it cannot be permissionlessly recreated.
+pub fn set_token_account_owner(svm: &mut LiteSVM, token_account: &Pubkey, new_owner: &Pubkey) {
+    let mut acct = svm
+        .get_account(token_account)
+        .expect("token account exists");
+    acct.data[TOKEN_ACCOUNT_OWNER_OFFSET..TOKEN_ACCOUNT_OWNER_OFFSET + TOKEN_ACCOUNT_OWNER_LEN]
+        .copy_from_slice(new_owner.as_ref());
     svm.set_account(*token_account, acct)
         .expect("overwrite token account");
 }
