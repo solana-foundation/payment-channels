@@ -8,8 +8,9 @@
 #![allow(dead_code)]
 
 use litesvm::LiteSVM;
+use solana_program_pack::Pack;
 use solana_pubkey::Pubkey;
-use spl_token_2022_interface::state::AccountState;
+use spl_token_2022_interface::state::{Account as TokenAccount, AccountState};
 
 pub const TOKEN_2022_BASE_MINT_LEN: usize = 82;
 pub const TOKEN_2022_BASE_ACCOUNT_LEN: usize = 165;
@@ -99,6 +100,23 @@ pub fn set_token_account_state(svm: &mut LiteSVM, token_account: &Pubkey, state:
         AccountState::Initialized => 1,
         AccountState::Frozen => 2,
     };
+    svm.set_account(*token_account, acct)
+        .expect("overwrite token account");
+}
+
+/// Overwrites a token account's `owner` field, simulating a beneficiary that
+/// reassigned their canonical ATA via `SetAuthority(AccountOwner)` to an
+/// unreachable key (`AccountValidationError::OwnerMismatch`). The ATA address
+/// stays occupied, so it cannot be permissionlessly recreated.
+pub fn set_token_account_owner(svm: &mut LiteSVM, token_account: &Pubkey, new_owner: &Pubkey) {
+    let mut acct = svm
+        .get_account(token_account)
+        .expect("token account exists");
+    // The `owner` lives in the 165-byte base layout
+    let mut token = TokenAccount::unpack_from_slice(&acct.data[..TokenAccount::LEN])
+        .expect("valid token account");
+    token.owner = *new_owner;
+    token.pack_into_slice(&mut acct.data[..TokenAccount::LEN]);
     svm.set_account(*token_account, acct)
         .expect("overwrite token account");
 }

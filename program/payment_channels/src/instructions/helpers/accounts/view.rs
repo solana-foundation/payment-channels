@@ -122,6 +122,7 @@ impl<'a> TreasuryTokenAccountView<'a, Unchecked> {
             .validate_as_ata_checked(&TREASURY_OWNER, token_ctx)
             .map_err(|err| match err {
                 AccountValidationError::AddressMismatch
+                | AccountValidationError::OwnerMismatch
                 | AccountValidationError::AccountNotInitialized => {
                     PaymentChannelsError::TreasuryAccountMismatch
                 }
@@ -214,7 +215,7 @@ pub enum PayoutBeneficiary {
 }
 
 /// Why a nonzero payout was forfeited to the treasury. Borsh serializes the
-/// variant index (0/1/2) as one byte — declaration order is part of the
+/// variant index (0/1/2/3) as one byte — declaration order is part of the
 /// [`crate::events::PayoutRedirected`] wire format.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
@@ -226,20 +227,25 @@ pub enum RedirectReason {
     ClosedOrMalformed,
     /// Canonical ATA is not in the `Initialized` state (frozen/uninitialized).
     NotInitialized,
+    /// Canonical ATA's `owner`/`mint` field no longer matches the beneficiary
+    /// (e.g. a `SetAuthority(AccountOwner)` reassignment).
+    ReassignedAuthority,
 }
 
 impl PayoutBeneficiary {
     /// Total map from a validation failure to the beneficiary-specific error
     /// surfaced to the cranker. `payout_destination` redirects the forfeitable
-    /// failures (closed/frozen/uninitialized ATA, unsupported extension) to
-    /// treasury before they would reach here, so on the payout path only
-    /// `AddressMismatch` and a malformed TLV extension trailer are fatal; the
-    /// mapping stays total so every variant has a defined error regardless.
+    /// failures (closed/frozen/uninitialized ATA, unsupported extension,
+    /// reassigned owner) to treasury before they would reach here, so on the
+    /// payout path only `AddressMismatch` and a malformed TLV extension trailer
+    /// are fatal; the mapping stays total so every variant has a defined error
+    /// regardless.
     fn map_account_error(self, err: AccountValidationError) -> PaymentChannelsError {
         match (self, err) {
-            (Self::Recipient, AccountValidationError::AddressMismatch) => {
-                PaymentChannelsError::RecipientAccountMismatch
-            }
+            (
+                Self::Recipient,
+                AccountValidationError::AddressMismatch | AccountValidationError::OwnerMismatch,
+            ) => PaymentChannelsError::RecipientAccountMismatch,
             (
                 Self::Recipient,
                 AccountValidationError::MalformedTokenAccountData
@@ -248,9 +254,10 @@ impl PayoutBeneficiary {
             (Self::Recipient, AccountValidationError::TokenExtensionError(_)) => {
                 PaymentChannelsError::InvalidRecipientTokenExtensions
             }
-            (Self::Payee, AccountValidationError::AddressMismatch) => {
-                PaymentChannelsError::PayeeAccountMismatch
-            }
+            (
+                Self::Payee,
+                AccountValidationError::AddressMismatch | AccountValidationError::OwnerMismatch,
+            ) => PaymentChannelsError::PayeeAccountMismatch,
             (
                 Self::Payee,
                 AccountValidationError::MalformedTokenAccountData
@@ -259,9 +266,10 @@ impl PayoutBeneficiary {
             (Self::Payee, AccountValidationError::TokenExtensionError(_)) => {
                 PaymentChannelsError::InvalidPayeeTokenExtensions
             }
-            (Self::Payer, AccountValidationError::AddressMismatch) => {
-                PaymentChannelsError::PayerAccountMismatch
-            }
+            (
+                Self::Payer,
+                AccountValidationError::AddressMismatch | AccountValidationError::OwnerMismatch,
+            ) => PaymentChannelsError::PayerAccountMismatch,
             (
                 Self::Payer,
                 AccountValidationError::MalformedTokenAccountData
@@ -347,8 +355,9 @@ impl<'a> TokenContext<'a> {
     /// Resolves where `beneficiary`'s share should land. A poisoned-but-self-
     /// inflicted destination forfeits the nonzero share to `treasury` instead of
     /// bricking the crank — an unsupported extension, a closed/unreadable
-    /// canonical ATA, or a frozen/uninitialized ATA — and emits a
-    /// [`PayoutRedirected`] self-CPI so the diversion is observable off-chain.
+    /// canonical ATA, a frozen/uninitialized ATA, or a reassigned `owner`/`mint`
+    /// field (`SetAuthority(AccountOwner)`) — and emits a [`PayoutRedirected`]
+    /// self-CPI so the diversion is observable off-chain.
     ///
     /// The canonical ATA address is verified inside `validate_as_ata_checked`
     /// before these states are reached, so they cannot mask a wrong account
@@ -386,6 +395,7 @@ impl<'a> TokenContext<'a> {
                 RedirectReason::ClosedOrMalformed
             }
             Err(AccountValidationError::AccountNotInitialized) => RedirectReason::NotInitialized,
+            Err(AccountValidationError::OwnerMismatch) => RedirectReason::ReassignedAuthority,
             Err(err) => return Err(beneficiary.map_account_error(err).into()),
         };
 
@@ -418,6 +428,7 @@ impl<'a> ChannelContext<'a> {
             .validate_as_ata_checked(channel.address(), &token_ctx)
             .map_err(|err| match err {
                 AccountValidationError::AddressMismatch
+                | AccountValidationError::OwnerMismatch
                 | AccountValidationError::AccountNotInitialized => {
                     PaymentChannelsError::ChannelAccountMismatch
                 }
@@ -503,6 +514,7 @@ impl<'a> PayerContext<'a> {
             .validate_as_ata_checked(payer.address(), token_ctx)
             .map_err(|err| match err {
                 AccountValidationError::AddressMismatch
+                | AccountValidationError::OwnerMismatch
                 | AccountValidationError::AccountNotInitialized => {
                     PaymentChannelsError::PayerAccountMismatch
                 }

@@ -19,6 +19,7 @@ export enum RedirectReason {
   UnsupportedExtension,
   ClosedOrMalformed,
   NotInitialized,
+  ReassignedAuthority,
 }
 
 export type RedirectReasonArgs = RedirectReason;

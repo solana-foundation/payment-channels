@@ -34,7 +34,8 @@ use crate::common::token_2022::{
     EXT_TOKEN_METADATA, EXT_TRANSFER_FEE_CONFIG, EXT_TRANSFER_HOOK, POINTER_EXTENSION_LEN,
     TOKEN_2022_ACCOUNT_TYPE_ACCOUNT, TOKEN_2022_ACCOUNT_TYPE_OFFSET, TOKEN_2022_BASE_ACCOUNT_LEN,
     TOKEN_2022_TLV_START, TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN,
-    add_account_extension, add_mint_extension, close_token_account, set_token_account_state,
+    add_account_extension, add_mint_extension, close_token_account, set_token_account_owner,
+    set_token_account_state,
 };
 use solana_compute_budget::compute_budget_limits::MAX_COMPUTE_UNIT_LIMIT;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
@@ -1316,6 +1317,86 @@ fn frozen_recipient_ata_redirects_share_to_treasury_in_open() {
             amount: 30_000,
             beneficiary: PayoutBeneficiary::Recipient,
             reason: RedirectReason::NotInitialized,
+        }],
+    );
+}
+
+// A recipient that reassigns its canonical ATA owner via
+// `SetAuthority(AccountOwner)` must not be able to brick `distribute`. The
+// canonical address still matches, but the parsed owner field no longer equals
+// the recipient, so the share forfeits to treasury (`ReassignedAuthority`)
+// instead of failing fatally — the watermark advances and other legs are paid.
+#[test]
+fn reassigned_recipient_ata_owner_redirects_share_to_treasury_in_open() {
+    let splits = vec![
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 3000,
+        },
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 4000,
+        },
+    ];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let mut s = Scenario::build(splits, deposit, settled, 0, STATUS_OPEN);
+    let poisoned_owner = s.splits[0].owner;
+    set_token_account_owner(&mut s.svm, &s.recipient_atas[0], &Pubkey::new_unique());
+
+    let meta = s
+        .send(s.distribute_ix())
+        .expect("reassigned recipient ATA owner forfeits its share; distribute still succeeds");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 40_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 30_000);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 30_000);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
+
+    assert_eq!(
+        events::<PayoutRedirected>(&meta),
+        vec![PayoutRedirected {
+            channel: s.channel,
+            owner: poisoned_owner,
+            amount: 30_000,
+            beneficiary: PayoutBeneficiary::Recipient,
+            reason: RedirectReason::ReassignedAuthority,
+        }],
+    );
+}
+
+// A poisoned recipient must not block the finalized tombstone. The
+// reassigned-owner share forfeits to treasury and the channel closes, draining
+// the escrow and tombstoning the PDA.
+#[test]
+fn reassigned_recipient_ata_owner_redirects_and_tombstones_in_finalized() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5000,
+    }];
+    let deposit = 200_000;
+    let settled = 150_000;
+    let mut s = Scenario::build(splits, deposit, settled, 0, STATUS_FINALIZED);
+    let poisoned_owner = s.splits[0].owner;
+    set_token_account_owner(&mut s.svm, &s.recipient_atas[0], &Pubkey::new_unique());
+
+    let meta = s
+        .send(s.distribute_ix())
+        .expect("reassigned recipient ATA owner forfeits its share; tombstone completes");
+
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 75_000);
+    assert_tombstone(&s.svm, &s.channel);
+
+    assert_eq!(
+        events::<PayoutRedirected>(&meta),
+        vec![PayoutRedirected {
+            channel: s.channel,
+            owner: poisoned_owner,
+            amount: 75_000,
+            beneficiary: PayoutBeneficiary::Recipient,
+            reason: RedirectReason::ReassignedAuthority,
         }],
     );
 }

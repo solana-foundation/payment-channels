@@ -25,4 +25,5 @@ pub enum RedirectReason {
     UnsupportedExtension,
     ClosedOrMalformed,
     NotInitialized,
+    ReassignedAuthority,
 }
