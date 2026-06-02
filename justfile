@@ -40,6 +40,18 @@ build-program:
     cd {{program_dir}} && cargo build-sbf
     @echo "✓ program built"
 
+# Cluster builds select the per-cluster TREASURY_OWNER (see src/constants.rs) and
+# enable the build-time guard: they fail to compile until that cluster's real owner
+# replaces the 0xBEEF placeholder. `--no-default-features` drops the localnet default
+# so only the target cluster feature is active.
+build-devnet:
+    cd {{program_dir}} && cargo build-sbf --no-default-features --features devnet
+    @echo "✓ devnet program built"
+
+build-mainnet:
+    cd {{program_dir}} && cargo build-sbf --no-default-features --features mainnet
+    @echo "✓ mainnet program built"
+
 # Raw IDL is emitted by build.rs, gated on the `idl` feature so plain
 # `cargo build` / `cargo build-sbf` don't touch it. Rust Codama macros define
 # the wire types; the remaining visitor only adds distribute's dynamic account
