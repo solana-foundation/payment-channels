@@ -6,7 +6,7 @@
     "clients/*"
   ],
   "scripts": {
-    "generate": "codama run js rust && node scripts/narrow-codama-types.mjs",
+    "generate": "codama run js rust && node scripts/narrow-codama-types.mjs && node scripts/enforce-fixed-account-shapes.mjs",
     "format": "biome format --write .",
     "format:check": "biome format ."
   },

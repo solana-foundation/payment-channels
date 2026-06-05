@@ -30,7 +30,7 @@ impl SettleAndFinalize {
     }
     #[allow(clippy::arithmetic_side_effects)]
     #[allow(clippy::vec_init_then_push)]
-    pub fn instruction_with_remaining_accounts(
+    fn instruction_with_remaining_accounts(
         &self,
         args: SettleAndFinalizeInstructionArgs,
         remaining_accounts: &[solana_instruction::AccountMeta],
@@ -138,21 +138,6 @@ impl SettleAndFinalizeBuilder {
         self.settle_and_finalize_args = Some(settle_and_finalize_args);
         self
     }
-    /// Add an additional account to the instruction.
-    #[inline(always)]
-    pub fn add_remaining_account(&mut self, account: solana_instruction::AccountMeta) -> &mut Self {
-        self.__remaining_accounts.push(account);
-        self
-    }
-    /// Add additional accounts to the instruction.
-    #[inline(always)]
-    pub fn add_remaining_accounts(
-        &mut self,
-        accounts: &[solana_instruction::AccountMeta],
-    ) -> &mut Self {
-        self.__remaining_accounts.extend_from_slice(accounts);
-        self
-    }
     #[allow(clippy::clone_on_copy)]
     pub fn instruction(&self) -> solana_instruction::Instruction {
         let accounts = SettleAndFinalize {
@@ -215,20 +200,13 @@ impl<'a, 'b> SettleAndFinalizeCpi<'a, 'b> {
         self.invoke_signed_with_remaining_accounts(&[], &[])
     }
     #[inline(always)]
-    pub fn invoke_with_remaining_accounts(
-        &self,
-        remaining_accounts: &[(&'b solana_account_info::AccountInfo<'a>, bool, bool)],
-    ) -> solana_program_error::ProgramResult {
-        self.invoke_signed_with_remaining_accounts(&[], remaining_accounts)
-    }
-    #[inline(always)]
     pub fn invoke_signed(&self, signers_seeds: &[&[&[u8]]]) -> solana_program_error::ProgramResult {
         self.invoke_signed_with_remaining_accounts(signers_seeds, &[])
     }
     #[allow(clippy::arithmetic_side_effects)]
     #[allow(clippy::clone_on_copy)]
     #[allow(clippy::vec_init_then_push)]
-    pub fn invoke_signed_with_remaining_accounts(
+    fn invoke_signed_with_remaining_accounts(
         &self,
         signers_seeds: &[&[&[u8]]],
         remaining_accounts: &[(&'b solana_account_info::AccountInfo<'a>, bool, bool)],
@@ -329,33 +307,6 @@ impl<'a, 'b> SettleAndFinalizeCpiBuilder<'a, 'b> {
         settle_and_finalize_args: SettleAndFinalizeArgs,
     ) -> &mut Self {
         self.instruction.settle_and_finalize_args = Some(settle_and_finalize_args);
-        self
-    }
-    /// Add an additional account to the instruction.
-    #[inline(always)]
-    pub fn add_remaining_account(
-        &mut self,
-        account: &'b solana_account_info::AccountInfo<'a>,
-        is_writable: bool,
-        is_signer: bool,
-    ) -> &mut Self {
-        self.instruction
-            .__remaining_accounts
-            .push((account, is_writable, is_signer));
-        self
-    }
-    /// Add additional accounts to the instruction.
-    ///
-    /// Each account is represented by a tuple of the `AccountInfo`, a `bool` indicating whether the account is writable or not,
-    /// and a `bool` indicating whether the account is a signer or not.
-    #[inline(always)]
-    pub fn add_remaining_accounts(
-        &mut self,
-        accounts: &[(&'b solana_account_info::AccountInfo<'a>, bool, bool)],
-    ) -> &mut Self {
-        self.instruction
-            .__remaining_accounts
-            .extend_from_slice(accounts);
         self
     }
     #[inline(always)]
