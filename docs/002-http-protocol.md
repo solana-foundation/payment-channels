@@ -64,7 +64,7 @@ To avoid paying Solana network fees for invalid transactions and to ensure proto
   "description": "<human-readable — OPTIONAL>",
   "externalId": "<server correlation id — OPTIONAL>",
   "methodDetails": {
-    "network": "<'mainnet-beta' | 'devnet' | 'localnet' — REQUIRED, no default>",
+    "network": "<'mainnet-beta' | 'devnet' | 'testnet' | 'localnet' — REQUIRED, no default>",
     "channelProgram": "<pubkey base58 — REQUIRED; must be the explicitly deployed program for the selected network>",
     "channelId": "<pubkey base58 — OPTIONAL, resume existing channel>",
     "decimals": <integer 0-9 — REQUIRED when currency is an SPL mint>,
