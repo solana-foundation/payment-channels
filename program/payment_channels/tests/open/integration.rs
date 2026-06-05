@@ -448,3 +448,20 @@ fn unsupported_token_2022_payer_account_extensions_reject_before_channel_creatio
         assert_eq!(token_balance(&svm, &payer_token_account), DEPOSIT);
     }
 }
+
+/// The exact-slice destructure rejects extra accounts (surfaced as the
+/// builtin NotEnoughAccountKeys, despite the too-many direction).
+#[test]
+fn extra_account_rejects() {
+    assert_eq!(
+        OpenRun {
+            extra_accounts: vec![solana_instruction::AccountMeta::new_readonly(
+                Pubkey::new_unique(),
+                false
+            )],
+            ..OpenRun::new(1, 100, 60, 0)
+        }
+        .run(),
+        ProgramResult::Failure(ProgramError::NotEnoughAccountKeys),
+    );
+}
