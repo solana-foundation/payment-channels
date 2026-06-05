@@ -12,13 +12,14 @@
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 use payment_channels::event_engine::{EVENT_AUTHORITY_SEED, EVENT_IX_TAG_LE};
-use payment_channels::events::Opened;
+use payment_channels_client::types::Opened;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_pubkey::{Pubkey, pubkey};
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
+use crate::common::events::{TestEvent, events};
 use crate::common::{PROGRAM_ID, ProgramLoader};
 
 const SPL_TOKEN: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -140,20 +141,14 @@ fn open_emits_opened_event_with_anchor_compatible_wire_format() {
     assert_eq!(data.len(), 48, "wire length = 8 tag + 8 disc + 32 channel");
     assert_eq!(&data[..8], &EVENT_IX_TAG_LE);
 
-    // `borsh::from_slice` on the remainder (skipping the 8-byte anchor tag)
-    // should decode as the Anchor-client discriminated union: 8 disc bytes
-    // then borsh body. For a single known event type, we just split and
-    // decode the body directly.
+    // The remainder is the Anchor-client discriminated union: 8 disc bytes
+    // then the borsh body.
     let disc = &data[8..16];
-    let body = &data[16..];
-    let expected_disc =
-        <Opened as payment_channels::event_engine::EventDiscriminator>::DISCRIMINATOR;
-    assert_eq!(disc, &expected_disc, "event discriminator mismatch");
+    assert_eq!(disc, &Opened::DISCRIMINATOR, "event discriminator mismatch");
 
-    // Manual parse of the 32-byte Borsh payload. We intentionally skip
-    // adding `BorshDeserialize` to the `Opened` struct in the runtime
-    // crate — programs emit events, they don't read them. Off-chain
-    // indexers are the consumers and will add their own deserialization.
-    let channel_bytes: [u8; 32] = body.try_into().expect("32-byte borsh body");
-    assert_eq!(channel_bytes, channel.to_bytes());
+    // Round-trip the body through the IDL-generated client struct so the
+    // committed event layout stays pinned to the emitted bytes. The runtime
+    // crate's `Opened` stays serialize-only: programs emit events, they
+    // don't read them. Off-chain consumers decode via the generated types.
+    assert_eq!(events::<Opened>(&meta), vec![Opened { channel }]);
 }
