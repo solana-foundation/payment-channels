@@ -50,6 +50,8 @@ just build-devnet
 just build-mainnet
 ```
 
+The committed IDL declares the program's emitted events (`Opened`, `PayoutRedirected`), and the generated clients enforce the on-chain fixed account shapes, and only `distribute` accepts remaining accounts.
+
 ## More Docs
 
 - [State machine](docs/001-payment-channel-state-machine.md)

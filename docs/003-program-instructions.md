@@ -22,6 +22,8 @@ Quick reference for every instruction exposed by the payment-channels program: d
 
 The **Signer** column lists transaction-level signers where applicable; `Ed25519 voucher` means precompile-verified authorization rather than an account signer. PDA signer seeds used for internal CPIs are called out in the purpose or account descriptions.
 
+> **Account shape strictness.** Every instruction takes an exact account list: handlers destructure fixed-size slices and reject transactions with missing *or extra* accounts. The single exception is `distribute`, which accepts a dynamic tail of recipient token accounts after its 10 fixed accounts. The generated clients enforce the same shapes: the TypeScript parsers reject extra accounts, the Rust builders drop their remaining-accounts helpers, and only `distribute` keeps the dynamic tail (`scripts/enforce-fixed-account-shapes.mjs` tightens the codama output at generation time).
+
 ## `open` (1)
 
 Payer-signed initializer. Creates the active channel PDA, creates its escrow ATA, transfers `deposit` from the payer token account, stores the exact Blake3 hash of the distribution preimage, and emits `Opened`. The `authorized_signer` account must be a valid Ed25519 public key, but it does not need to sign `open`. The `payee` account is not curve-checked and may be a program-derived address (PDA) beneficiary.
@@ -147,7 +149,7 @@ Permissionless post-grace crank.
 
 Permissionless crank. Verifies the committed splits preimage (Blake3) against `Channel.distribution_hash`, then pays cumulative floor deltas between `payout_watermark` and `settled` to the merchant side: each recipient gets `floor(settled * bps[i] / 10000) - floor(payout_watermark * bps[i] / 10000)` and the **payee** gets the implicit remainder delta using `10000 - sum(bps)`. From `OPEN`, zero-delta shares are skipped, residual dust remains in escrow for later cumulative deltas, and `payout_watermark` advances to `settled` as the accounted watermark. From `FINALIZED`, the final cumulative merchant payout runs before the payer receives the unspent `deposit - settled` headroom (gated by `payer_withdrawn_at == 0`); final irreducible residual dust is swept to treasury, and the escrow ATA + Channel PDA are tombstoned. Unsupported Token-2022 account extensions on nonzero beneficiary destinations redirect that share to treasury; malformed token-account data/TLV and wrong accounts hard-fail.
 
-**Client transaction format:** at `count == 32`, callers MUST use **version 0 transactions with an address lookup table** indexing recipient ATAs. The instruction uses 8 fixed accounts plus up to 32 recipient ATAs (40 total); legacy transactions cannot fit the static account-key budget (~32 keys including fee payer and program id).
+**Client transaction format:** at `count == 32`, callers MUST use **version 0 transactions with an address lookup table** indexing recipient ATAs. The instruction uses 10 fixed accounts plus up to 32 recipient ATAs (42 total); legacy transactions cannot fit the static account-key budget (~32 keys including fee payer and program id).
 
 **CPI profile:** SPL Token batches non-zero payouts via inner `Batch` CPIs (up to 8 transfers per invoke when ≥2 transfers are queued). Token-2022 uses one `TransferChecked` CPI per non-zero payout.
 
@@ -171,7 +173,9 @@ Permissionless crank. Verifies the committed splits preimage (Blake3) against `C
 | 5 | `treasury_token_account` | — | yes | `ATA(TREASURY_OWNER, mint, token_program)`. Receives final irreducible residual dust when `distribute` runs from `FINALIZED`. |
 | 6 | `mint` | — | — | Token mint bound at `open`. |
 | 7 | `token_program` | — | — | SPL Token or Token-2022, must equal the program that owns the mint and ATAs. |
-| 8…N | `recipient_token_accounts[i]` | — | yes | `ATA(recipients[i].recipient, mint, token_program)` in the same order as the active preimage entries. |
+| 8 | `event_authority` | — | — | Event authority PDA used for Anchor-compatible self-CPI events. |
+| 9 | `self_program` | — | — | This program's ID, used as the self-CPI target for event emission. |
+| 10…N | `recipient_token_accounts[i]` | — | yes | `ATA(recipients[i].recipient, mint, token_program)` in the same order as the active preimage entries. |
 
 ## `withdrawPayer` (8)
 
@@ -190,7 +194,7 @@ Payer-signed one-shot refund in `FINALIZED`. Does not tombstone the PDA.
 
 ## `emitEvent` (228)
 
-Internal self-CPI target for Anchor-compatible events. Event instruction data is `EVENT_IX_TAG_LE` (8 bytes) `|| event_discriminator` (8 bytes) `|| borsh_payload`; because `EVENT_IX_TAG_LE[0] == 228`, byte-0 dispatch routes to this handler. Only the event authority PDA may sign.
+Internal self-CPI target for Anchor-compatible events. Event instruction data is `EVENT_IX_TAG_LE` (8 bytes) `|| event_discriminator` (8 bytes) `|| borsh_payload`; because `EVENT_IX_TAG_LE[0] == 228`, byte-0 dispatch routes to this handler. Only the event authority PDA may sign. Both emitted events (`Opened`, `PayoutRedirected`) are declared in the committed Codama IDL (`program.events`) together with their 8-byte Anchor discriminators, so IDL-driven indexers can decode them without custom tooling.
 
 **Accounts**
 
