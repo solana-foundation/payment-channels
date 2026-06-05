@@ -5,6 +5,7 @@ export default {
   scripts: {
     idl: [
       './codama-visitors.mjs#addGeneratedClientAccountMetadata',
+      './codama-visitors.mjs#normalizeEvents',
       {
         from: './codama-visitors.mjs#writeCodamaIdl',
         args: [IDL_PATH],
