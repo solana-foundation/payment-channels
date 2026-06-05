@@ -30,7 +30,7 @@ use super::record;
 use crate::common::{
     INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, SPL_TOKEN, TOKEN_2022, compute_budget_ix,
     event_authority, mutate_channel, set_clock,
-    voucher::{build_ed25519_ix, voucher_payload},
+    voucher::{TEST_CHAIN_ID, build_ed25519_ix, voucher_payload},
 };
 
 const COMPUTE_UNIT_LIMIT: u32 = 1_400_000;
@@ -286,6 +286,7 @@ fn run_settle_and_finalize(from_closing: bool, with_voucher: bool, label: &str) 
         channel_id: f.channel,
         cumulative_amount: DEFAULT_SETTLED,
         expires_at: 0,
+        chain_id: TEST_CHAIN_ID,
     };
     let ed_ix = with_voucher.then(|| {
         let payload = voucher_payload(&voucher);

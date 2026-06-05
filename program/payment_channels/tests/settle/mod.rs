@@ -7,7 +7,7 @@ use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
-use crate::common::{PROGRAM_ID, ProgramLoader};
+use crate::common::{PROGRAM_ID, ProgramLoader, voucher::TEST_CHAIN_ID};
 
 /// Execution descriptor for a single `settle` Mollusk run.
 ///
@@ -24,6 +24,10 @@ pub(super) struct SettleRun {
     pub voucher_channel_id: Pubkey,
     pub voucher_cumulative_amount: u64,
     pub voucher_expires_at: i64,
+    /// Voucher `chain_id` field (32 bytes). Defaults to this cluster's
+    /// `CHAIN_ID`; only the byte length matters for the pre-`verify_voucher`
+    /// guards this harness exercises.
+    pub voucher_chain_id: Pubkey,
 }
 
 impl SettleRun {
@@ -33,6 +37,7 @@ impl SettleRun {
             voucher_channel_id: Pubkey::default(),
             voucher_cumulative_amount: 0,
             voucher_expires_at: 0,
+            voucher_chain_id: TEST_CHAIN_ID,
         }
     }
 
@@ -45,11 +50,12 @@ impl SettleRun {
         let channel_pubkey = Pubkey::new_unique();
 
         // Wire layout: [discriminator(1)] [channel_id(32)] [cumulative(8)]
-        //              [expires_at(8)] = 49 bytes total.
+        //              [expires_at(8)] [chain_id(32)] = 81 bytes total.
         let mut ix_data = vec![DISCRIMINATOR];
         ix_data.extend_from_slice(self.voucher_channel_id.as_ref());
         ix_data.extend_from_slice(&self.voucher_cumulative_amount.to_le_bytes());
         ix_data.extend_from_slice(&self.voucher_expires_at.to_le_bytes());
+        ix_data.extend_from_slice(self.voucher_chain_id.as_ref());
 
         let ix = Instruction::new_with_bytes(
             PROGRAM_ID,

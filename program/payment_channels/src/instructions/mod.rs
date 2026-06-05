@@ -16,7 +16,7 @@ use pinocchio::{Address, error::ProgramError};
 use crate::state::Transmutable;
 
 /// On-chain wire encoding of the voucher. Field order matches
-/// Borsh(`{ channel_id, cumulative_amount, expires_at }`), so the
+/// Borsh(`{ channel_id, cumulative_amount, expires_at, chain_id }`), so the
 /// struct's raw bytes ARE the ed25519-signed payload — no repack.
 /// Ed25519-only; signature verification is offloaded to a caller-bundled
 /// Ed25519 native-program ix whose message bytes are read back via the
@@ -37,14 +37,25 @@ pub struct VoucherArgs {
     /// `expires_at == 0 || now < expires_at`.
     #[cfg_attr(feature = "idl", codama(type = number(i64)))]
     expires_at: [u8; 8],
+    /// Chain binding; must equal this cluster's
+    /// [`CHAIN_ID`](crate::CHAIN_ID) (its genesis hash). Stops a voucher
+    /// signed for one cluster from being replayed against an
+    /// identically-addressed channel on another.
+    pub chain_id: Address,
 }
 
 impl VoucherArgs {
-    pub fn new(channel_id: Address, cumulative_amount: u64, expires_at: i64) -> Self {
+    pub fn new(
+        channel_id: Address,
+        cumulative_amount: u64,
+        expires_at: i64,
+        chain_id: Address,
+    ) -> Self {
         Self {
             channel_id,
             cumulative_amount: cumulative_amount.to_le_bytes(),
             expires_at: expires_at.to_le_bytes(),
+            chain_id,
         }
     }
 
@@ -59,8 +70,8 @@ impl VoucherArgs {
 }
 
 /// Byte length of the signed voucher payload — `channel_id (32) ||
-/// cumulative_amount (8 LE) || expires_at (8 LE)`, which is exactly the
-/// in-memory layout of [`VoucherArgs`]. Also the canonical
+/// cumulative_amount (8 LE) || expires_at (8 LE) || chain_id (32)`, which is
+/// exactly the in-memory layout of [`VoucherArgs`]. Also the canonical
 /// `message_data_size` every Ed25519 precompile ix must declare; pinned
 /// against a layout where an attacker has the precompile verify a
 /// truncated or extended message.
