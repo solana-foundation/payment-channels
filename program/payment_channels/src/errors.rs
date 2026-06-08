@@ -86,6 +86,8 @@ pub enum PaymentChannelsError {
     VoucherMessageMismatch = 236,
     #[error("Voucher signer does not match channel authorized_signer")]
     VoucherSignerMismatch = 237,
+    #[error("Voucher chain_id does not match this cluster's CHAIN_ID")]
+    VoucherChainMismatch = 238,
 
     // distribution validation
     #[error("num_recipients outside [0, 32]")]
