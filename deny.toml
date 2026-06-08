@@ -37,6 +37,10 @@ ignore = [
     # curve25519-dalek 3.2.0 Scalar{29,52}::sub timing variability — same
     # source (litesvm[precompiles] → agave-precompiles); dev-dep only.
     "RUSTSEC-2024-0344",
+    # proc-macro-error2 unmaintained — transitive via tabled (dev-dep,
+    # benchmark report tables) → tabled_derive; proc-macro only, not linked
+    # into the on-chain program.
+    "RUSTSEC-2026-0173",
 ]
 
 [licenses]
