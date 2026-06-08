@@ -18,7 +18,8 @@ use super::{
 };
 use payment_channels::PaymentChannelsError;
 
-use crate::common::{ProgramLoader, TOKEN_2022, expect_custom_err, read_channel};
+use crate::common::{ProgramLoader, SPL_TOKEN, TOKEN_2022, expect_custom_err, read_channel};
+use litesvm_token::CreateAssociatedTokenAccount;
 
 const SALT: u64 = 42;
 const DEPOSIT: u64 = 5_000_000;
@@ -248,5 +249,49 @@ fn open_with_no_splits_succeeds_token_2022() {
     read_channel(&svm, &channel, |ch| {
         assert_eq!(ch.status, ChannelStatus::Open as u8);
         assert_eq!(ch.distribution_hash, expected, "distribution_hash");
+    });
+}
+
+#[test]
+fn open_succeeds_with_precreated_escrow_ata() {
+    let mut svm = LiteSVM::load_program();
+
+    let payee = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
+    let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
+    let (channel, channel_token_account) =
+        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
+
+    // Griefing setup: a third party front-runs `open` by pre-creating the
+    // canonical escrow ATA. Under non-idempotent Create this reverted `open`
+    // with `IllegalOwner`; under CreateIdempotent it must succeed.
+    let pre = CreateAssociatedTokenAccount::new(&mut svm, &payer, &mint)
+        .owner(&channel)
+        .token_program_id(&SPL_TOKEN)
+        .send()
+        .expect("pre-create escrow ATA");
+    assert_eq!(pre, channel_token_account);
+
+    let ix = open_ix(
+        &payer.pubkey(),
+        &payee,
+        &mint,
+        &authorized_signer,
+        &channel,
+        &payer_token_account,
+        &channel_token_account,
+        SALT,
+        DEPOSIT,
+        GRACE_PERIOD,
+        1,
+    );
+    let msg = Message::new(&[ix], Some(&payer.pubkey()));
+    let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
+    svm.send_transaction(tx)
+        .expect("open should tolerate a pre-created escrow ATA");
+
+    read_channel(&svm, &channel, |ch| {
+        assert_eq!(ch.status, ChannelStatus::Open as u8);
+        assert_eq!(ch.deposit(), DEPOSIT);
     });
 }

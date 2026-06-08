@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use codama::CodamaType;
 use core::mem::size_of;
 use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer, error::ProgramError};
-use pinocchio_associated_token_account::instructions::Create as CreateAta;
+use pinocchio_associated_token_account::instructions::CreateIdempotent;
 use pinocchio_system::instructions::CreateAccount;
 use pinocchio_token_2022::instructions::TransferChecked;
 
@@ -287,8 +287,10 @@ pub fn process(
     )?
     .invoke_signed(&[channel_signer])?;
 
-    // Create the escrow ATA owned by the channel PDA.
-    CreateAta {
+    // Create the escrow ATA owned by the channel PDA. Idempotent: tolerates
+    // a pre-existing canonical ATA so a griefer cannot block open by
+    // front-running ATA creation (audit 3.2.2).
+    CreateIdempotent {
         funding_account: &payer_ctx.payer,
         account: &channel_ctx.channel_token_account,
         wallet: &channel_ctx.channel,
