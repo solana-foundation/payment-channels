@@ -3,9 +3,11 @@ use alloc::vec::Vec;
 #[cfg(feature = "idl")]
 use codama::CodamaType;
 use core::mem::size_of;
-use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer, error::ProgramError};
+use pinocchio::{
+    AccountView, Address, ProgramResult, cpi::Signer, error::ProgramError, sysvars::rent::Rent,
+};
 use pinocchio_associated_token_account::instructions::CreateIdempotent;
-use pinocchio_system::instructions::CreateAccount;
+use pinocchio_system::instructions::{Allocate, Assign, Transfer as SystemTransfer};
 use pinocchio_token_2022::instructions::TransferChecked;
 
 use crate::errors::PaymentChannelsError;
@@ -264,8 +266,6 @@ pub fn process(
     let payer_ctx =
         PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)?;
 
-    // Allocate the channel PDA. The runtime verifies the seeds match
-    // accs.channel.address(); mismatched account → CPI failure.
     let salt_bytes = args.salt().to_le_bytes();
     let bump_byte = [bump];
     let seeds = channel_signer_seeds(
@@ -276,16 +276,30 @@ pub fn process(
         &salt_bytes,
         &bump_byte,
     );
-    let channel_signer = Signer::from(&seeds);
+    let signers = [Signer::from(&seeds)];
 
-    CreateAccount::with_minimum_balance(
-        &payer_ctx.payer,
-        &channel_ctx.channel,
-        Channel::LEN as u64,
-        &crate::ID,
-        Some(accs.rent),
-    )?
-    .invoke_signed(&[channel_signer])?;
+    // Prefund-tolerant PDA creation: top up the rent shortfall, then signed
+    // Allocate + Assign. Surplus lamports refund to payer at tombstone.
+    let min_rent = Rent::from_account_view(accs.rent)?.try_minimum_balance(Channel::LEN)?;
+    let shortfall = min_rent.saturating_sub(channel_ctx.channel.lamports());
+    if shortfall > 0 {
+        SystemTransfer {
+            from: &payer_ctx.payer,
+            to: &channel_ctx.channel,
+            lamports: shortfall,
+        }
+        .invoke()?;
+    }
+    Allocate {
+        account: &channel_ctx.channel,
+        space: Channel::LEN as u64,
+    }
+    .invoke_signed(&signers)?;
+    Assign {
+        account: &channel_ctx.channel,
+        owner: &crate::ID,
+    }
+    .invoke_signed(&signers)?;
 
     // Create the escrow ATA owned by the channel PDA. Idempotent: tolerates
     // a pre-existing canonical ATA so a griefer cannot block open by

@@ -253,6 +253,47 @@ fn open_with_no_splits_succeeds_token_2022() {
 }
 
 #[test]
+fn open_succeeds_with_prefunded_channel_pda_lamports() {
+    let mut svm = LiteSVM::load_program();
+
+    let payee = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
+    let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
+    let (channel, channel_token_account) =
+        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
+
+    // 1_000_000 lamports clears the 0-byte rent-exempt floor (~890_880) so
+    // LiteSVM accepts the airdrop, but is below the rent minimum for
+    // Channel::LEN so `open` still has a shortfall to top up.
+    let prefund: u64 = 1_000_000;
+    svm.airdrop(&channel, prefund).expect("airdrop PDA prefund");
+
+    let ix = open_ix(
+        &payer.pubkey(),
+        &payee,
+        &mint,
+        &authorized_signer,
+        &channel,
+        &payer_token_account,
+        &channel_token_account,
+        SALT,
+        DEPOSIT,
+        GRACE_PERIOD,
+        1,
+    );
+    let msg = Message::new(&[ix], Some(&payer.pubkey()));
+    let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
+    svm.send_transaction(tx)
+        .expect("open should tolerate PDA prefund");
+
+    read_channel(&svm, &channel, |ch| {
+        assert_eq!(ch.status, ChannelStatus::Open as u8);
+        assert_eq!(ch.deposit(), DEPOSIT);
+    });
+    assert!(svm.get_account(&channel).unwrap().lamports >= prefund);
+}
+
+#[test]
 fn open_succeeds_with_precreated_escrow_ata() {
     let mut svm = LiteSVM::load_program();
 
