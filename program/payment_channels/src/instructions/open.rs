@@ -281,12 +281,12 @@ pub fn process(
     // Prefund-tolerant PDA creation: top up the rent shortfall, then signed
     // Allocate + Assign. Surplus lamports refund to payer at tombstone.
     let min_rent = Rent::from_account_view(accs.rent)?.try_minimum_balance(Channel::LEN)?;
-    let shortfall = min_rent.saturating_sub(channel_ctx.channel.lamports());
-    if shortfall > 0 {
+    let pending_balance = min_rent.saturating_sub(channel_ctx.channel.lamports());
+    if pending_balance > 0 {
         SystemTransfer {
             from: &payer_ctx.payer,
             to: &channel_ctx.channel,
-            lamports: shortfall,
+            lamports: pending_balance,
         }
         .invoke()?;
     }
