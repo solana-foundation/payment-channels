@@ -1,9 +1,8 @@
 /// Basis-point denominator used for distribution shares.
 pub const BPS_DENOMINATOR: u32 = 10_000;
 
-/// The `0xBE 0xEF` × 16 placeholder treasury owner. Fine for localnet/default
-/// builds; a `devnet`/`testnet`/`mainnet-beta` build rejects it (gate below),
-/// forcing a real owner.
+/// The `0xBE 0xEF` × 16 placeholder owner. Fine for localnet/default builds; a
+/// `devnet`/`testnet`/`mainnet-beta` build rejects it (gate below), forcing a real owner.
 const TREASURY_OWNER_SENTINEL: [u8; 32] = [
     0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF,
     0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF,

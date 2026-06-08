@@ -13,10 +13,8 @@ use solana_pubkey::Pubkey;
 
 use super::ed25519_program_id;
 
-/// This cluster's [`CHAIN_ID`](payment_channels::CHAIN_ID) as the client
-/// `Address`/`Pubkey` type. Every voucher fixture must carry it, or the on-chain
-/// chain-binding check rejects the voucher. The program under test is built with
-/// the default `localnet` feature, so this is the localnet placeholder.
+/// The program's [`CHAIN_ID`](payment_channels::CHAIN_ID) — the localnet
+/// placeholder our tests build against.
 pub const TEST_CHAIN_ID: Pubkey = Pubkey::new_from_array(*payment_channels::CHAIN_ID.as_array());
 
 /// Borsh-serialize a voucher into the byte string the Ed25519 precompile

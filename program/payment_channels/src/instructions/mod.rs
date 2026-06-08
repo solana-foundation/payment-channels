@@ -45,17 +45,12 @@ pub struct VoucherArgs {
 }
 
 impl VoucherArgs {
-    pub fn new(
-        channel_id: Address,
-        cumulative_amount: u64,
-        expires_at: i64,
-        chain_id: Address,
-    ) -> Self {
+    pub fn new(channel_id: Address, cumulative_amount: u64, expires_at: i64) -> Self {
         Self {
             channel_id,
             cumulative_amount: cumulative_amount.to_le_bytes(),
             expires_at: expires_at.to_le_bytes(),
-            chain_id,
+            chain_id: crate::CHAIN_ID,
         }
     }
 

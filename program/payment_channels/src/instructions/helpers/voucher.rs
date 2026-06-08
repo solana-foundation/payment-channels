@@ -116,14 +116,6 @@ mod tests {
         ch
     }
 
-    /// [`VoucherArgs::new`] carrying this cluster's [`crate::CHAIN_ID`] — every
-    /// fixture voucher must bind the local chain or it trips the chain check.
-    /// The dedicated `wrong_chain_id` test calls `VoucherArgs::new` directly
-    /// with a foreign chain id.
-    fn mk_voucher(channel_id: Address, cumulative_amount: u64, expires_at: i64) -> VoucherArgs {
-        VoucherArgs::new(channel_id, cumulative_amount, expires_at, crate::CHAIN_ID)
-    }
-
     /// Encode an Ed25519 precompile ix in the canonical single-signature
     /// layout: `[num_sigs=1, pad=0, offsets×1, pubkey, signature, message]`.
     /// All three `*_instruction_index` fields are set to `u16::MAX` so
@@ -195,7 +187,7 @@ mod tests {
     fn voucher_args_bytes_match_signed_payload_layout() {
         const CUMULATIVE: u64 = u64::from_le_bytes([119, 102, 85, 68, 51, 34, 17, 0]);
         const EXPIRES_AT: i64 = i64::from_le_bytes([248, 249, 250, 251, 252, 253, 254, 127]);
-        let args = mk_voucher(CHANNEL_ID, CUMULATIVE, EXPIRES_AT);
+        let args = VoucherArgs::new(CHANNEL_ID, CUMULATIVE, EXPIRES_AT);
         let bytes = args.as_bytes();
         assert_eq!(bytes.len(), VOUCHER_PAYLOAD_SIZE);
         assert_eq!(&bytes[..32], CHANNEL_ID.as_array());
@@ -209,7 +201,7 @@ mod tests {
     #[test]
     fn ok_strict_monotonic_no_expiry() {
         let ch = make_channel(100, 1_000, AUTH);
-        let v = mk_voucher(CHANNEL_ID, 200, 0);
+        let v = VoucherArgs::new(CHANNEL_ID, 200, 0);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         let out = verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 1_000_000).unwrap();
@@ -219,7 +211,7 @@ mod tests {
     #[test]
     fn ok_expiry_in_future() {
         let ch = make_channel(100, 500, AUTH);
-        let v = mk_voucher(CHANNEL_ID, 500, 2_000);
+        let v = VoucherArgs::new(CHANNEL_ID, 500, 2_000);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         let out = verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 1_999).unwrap();
@@ -231,7 +223,7 @@ mod tests {
     #[test]
     fn wrong_channel_id() {
         let ch = make_channel(0, 500, AUTH);
-        let v = mk_voucher(Address::new_from_array([9u8; 32]), 100, 0);
+        let v = VoucherArgs::new(Address::new_from_array([9u8; 32]), 100, 0);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
@@ -247,7 +239,12 @@ mod tests {
         // genesis hash) — a cross-cluster replay attempt.
         let foreign_chain = Address::new_from_array([0x42u8; 32]);
         assert_ne!(foreign_chain, crate::CHAIN_ID);
-        let v = VoucherArgs::new(CHANNEL_ID, 100, 0, foreign_chain);
+        let v = VoucherArgs {
+            channel_id: CHANNEL_ID,
+            cumulative_amount: 100u64.to_le_bytes(),
+            expires_at: 0i64.to_le_bytes(),
+            chain_id: foreign_chain,
+        };
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
@@ -259,7 +256,7 @@ mod tests {
     #[test]
     fn now_equals_expires_at() {
         let ch = make_channel(0, 500, AUTH);
-        let v = mk_voucher(CHANNEL_ID, 100, 500);
+        let v = VoucherArgs::new(CHANNEL_ID, 100, 500);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
@@ -271,7 +268,7 @@ mod tests {
     #[test]
     fn now_past_expires_at() {
         let ch = make_channel(0, 500, AUTH);
-        let v = mk_voucher(CHANNEL_ID, 100, 500);
+        let v = VoucherArgs::new(CHANNEL_ID, 100, 500);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
@@ -283,7 +280,7 @@ mod tests {
     #[test]
     fn negative_expires_at_fails_closed() {
         let ch = make_channel(0, 500, AUTH);
-        let v = mk_voucher(CHANNEL_ID, 100, -1);
+        let v = VoucherArgs::new(CHANNEL_ID, 100, -1);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
@@ -295,7 +292,7 @@ mod tests {
     #[test]
     fn cumulative_equals_settled() {
         let ch = make_channel(250, 500, AUTH);
-        let v = mk_voucher(CHANNEL_ID, 250, 0);
+        let v = VoucherArgs::new(CHANNEL_ID, 250, 0);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
@@ -307,7 +304,7 @@ mod tests {
     #[test]
     fn cumulative_below_settled() {
         let ch = make_channel(250, 500, AUTH);
-        let v = mk_voucher(CHANNEL_ID, 100, 0);
+        let v = VoucherArgs::new(CHANNEL_ID, 100, 0);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
@@ -319,7 +316,7 @@ mod tests {
     #[test]
     fn cumulative_zero_on_fresh_channel() {
         let ch = make_channel(0, 500, AUTH);
-        let v = mk_voucher(CHANNEL_ID, 0, 0);
+        let v = VoucherArgs::new(CHANNEL_ID, 0, 0);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
@@ -331,7 +328,7 @@ mod tests {
     #[test]
     fn cumulative_above_deposit() {
         let ch = make_channel(0, 500, AUTH);
-        let v = mk_voucher(CHANNEL_ID, 501, 0);
+        let v = VoucherArgs::new(CHANNEL_ID, 501, 0);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
@@ -532,7 +529,7 @@ mod tests {
     #[test]
     fn message_off_by_one_byte() {
         let ch = make_channel(0, 500, AUTH);
-        let v = mk_voucher(CHANNEL_ID, 100, 0);
+        let v = VoucherArgs::new(CHANNEL_ID, 100, 0);
         let mut msg: Vec<u8> = v.as_bytes().to_vec();
         msg[0] ^= 1;
         let parsed = valid_parsed(&msg);
@@ -545,7 +542,7 @@ mod tests {
     #[test]
     fn precompile_pubkey_not_authorized_signer() {
         let ch = make_channel(0, 500, AUTH);
-        let v = mk_voucher(CHANNEL_ID, 100, 0);
+        let v = VoucherArgs::new(CHANNEL_ID, 100, 0);
         let msg = v.as_bytes();
         let parsed = ed25519_ix::Parsed {
             pubkey: OTHER_PUBKEY.as_array(),
