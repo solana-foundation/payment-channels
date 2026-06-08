@@ -1402,6 +1402,80 @@ fn reassigned_recipient_ata_owner_redirects_and_tombstones_in_finalized() {
     );
 }
 
+// A payee that reassigns its canonical ATA owner via
+// `SetAuthority(AccountOwner)` must not be able to brick `distribute`. The
+// canonical address still matches, but the parsed owner field no longer equals
+// the payee, so the remainder forfeits to treasury (`ReassignedAuthority`)
+// instead of failing fatally — the watermark advances and the recipient is paid.
+#[test]
+fn reassigned_payee_ata_owner_redirects_remainder_to_treasury_in_open() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 6000,
+    }];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let payout_watermark = 0;
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_OPEN);
+    set_token_account_owner(&mut s.svm, &s.payee_ata, &Pubkey::new_unique());
+
+    let meta = s
+        .send(s.distribute_ix())
+        .expect("reassigned payee ATA owner forfeits remainder; distribute still succeeds");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 60_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), 40_000);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
+
+    assert_eq!(
+        events::<PayoutRedirected>(&meta),
+        vec![PayoutRedirected {
+            channel: s.channel,
+            owner: s.payee,
+            amount: 40_000,
+            beneficiary: PayoutBeneficiary::Payee,
+            reason: RedirectReason::ReassignedAuthority,
+        }],
+    );
+}
+
+// A payer that reassigns its canonical refund ATA owner via
+// `SetAuthority(AccountOwner)` must not be able to brick the finalized close.
+// The refund forfeits to treasury (`ReassignedAuthority`) and the channel
+// tombstones; the recipient and payee legs are paid normally.
+#[test]
+fn reassigned_payer_ata_owner_redirects_refund_to_treasury_in_finalized() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5000,
+    }];
+    let deposit = 200_000;
+    let settled = 150_000;
+    let mut s = Scenario::build(splits, deposit, settled, 0, STATUS_FINALIZED);
+    set_token_account_owner(&mut s.svm, &s.payer_ata, &Pubkey::new_unique());
+
+    let meta = s
+        .send(s.distribute_ix())
+        .expect("reassigned payer ATA owner forfeits refund; tombstone completes");
+
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.treasury_ata), deposit - settled);
+    assert_tombstone(&s.svm, &s.channel);
+
+    assert_eq!(
+        events::<PayoutRedirected>(&meta),
+        vec![PayoutRedirected {
+            channel: s.channel,
+            owner: s.payer,
+            amount: deposit - settled,
+            beneficiary: PayoutBeneficiary::Payer,
+            reason: RedirectReason::ReassignedAuthority,
+        }],
+    );
+}
+
 #[test]
 fn frozen_payer_ata_redirects_refund_to_treasury_in_finalized() {
     let splits = vec![Split {
