@@ -303,7 +303,7 @@ pub fn process(
 
     // Create the escrow ATA owned by the channel PDA. Idempotent: tolerates
     // a pre-existing canonical ATA so a griefer cannot block open by
-    // front-running ATA creation (audit 3.2.2).
+    // front-running ATA creation.
     CreateIdempotent {
         funding_account: &payer_ctx.payer,
         account: &channel_ctx.channel_token_account,
