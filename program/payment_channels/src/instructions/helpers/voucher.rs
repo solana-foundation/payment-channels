@@ -55,6 +55,10 @@ fn verify_parsed(
         return Err(PaymentChannelsError::VoucherChannelMismatch.into());
     }
 
+    if voucher.chain_id != crate::CHAIN_ID {
+        return Err(PaymentChannelsError::VoucherChainMismatch.into());
+    }
+
     let expires_at: i64 = voucher.expires_at();
     if expires_at != 0 && now_unix >= expires_at {
         return Err(PaymentChannelsError::VoucherExpired.into());
@@ -174,8 +178,8 @@ mod tests {
 
     // --- payload contract -------------------------------------------------
 
-    /// Pins the `channel_id || cumulative_amount || expires_at` byte
-    /// layout that the off-chain signer and the Ed25519 precompile
+    /// Pins the `channel_id || cumulative_amount || expires_at || chain_id`
+    /// byte layout that the off-chain signer and the Ed25519 precompile
     /// depend on. `as_bytes` is a zero-cost reinterpretation of the
     /// struct, so this doubles as a guard against anyone reordering
     /// [`VoucherArgs`] without updating the signer contract.
@@ -189,6 +193,7 @@ mod tests {
         assert_eq!(&bytes[..32], CHANNEL_ID.as_array());
         assert_eq!(&bytes[32..40], &CUMULATIVE.to_le_bytes());
         assert_eq!(&bytes[40..48], &EXPIRES_AT.to_le_bytes());
+        assert_eq!(&bytes[48..80], crate::CHAIN_ID.as_array());
     }
 
     // --- happy paths ------------------------------------------------------
@@ -224,6 +229,27 @@ mod tests {
         expect_err(
             verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
             PaymentChannelsError::VoucherChannelMismatch,
+        );
+    }
+
+    #[test]
+    fn wrong_chain_id() {
+        let ch = make_channel(0, 500, AUTH);
+        // Correct channel binding, but a foreign chain id (another cluster's
+        // genesis hash) — a cross-cluster replay attempt.
+        let foreign_chain = Address::new_from_array([0x42u8; 32]);
+        assert_ne!(foreign_chain, crate::CHAIN_ID);
+        let v = VoucherArgs {
+            channel_id: CHANNEL_ID,
+            cumulative_amount: 100u64.to_le_bytes(),
+            expires_at: 0i64.to_le_bytes(),
+            chain_id: foreign_chain,
+        };
+        let msg = v.as_bytes();
+        let parsed = valid_parsed(msg);
+        expect_err(
+            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
+            PaymentChannelsError::VoucherChainMismatch,
         );
     }
 

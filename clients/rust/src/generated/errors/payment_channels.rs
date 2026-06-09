@@ -109,6 +109,9 @@ pub enum PaymentChannelsError {
     /// 237 - Voucher signer does not match channel authorized_signer
     #[error("Voucher signer does not match channel authorized_signer")]
     VoucherSignerMismatch = 0xED,
+    /// 238 - Voucher chain_id does not match this cluster's CHAIN_ID
+    #[error("Voucher chain_id does not match this cluster's CHAIN_ID")]
+    VoucherChainMismatch = 0xEE,
     /// 260 - num_recipients outside [0, 32]
     #[error("num_recipients outside [0, 32]")]
     InvalidRecipientCount = 0x104,
