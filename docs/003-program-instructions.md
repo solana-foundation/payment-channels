@@ -170,7 +170,7 @@ Permissionless crank. Verifies the committed splits preimage (Blake3) against `C
 | 2 | `channel_token_account` | — | yes | Escrow ATA owned by `channel`. Source for all transfers; closed on tombstone. |
 | 3 | `payer_token_account` | — | yes | `ATA(payer, mint, token_program)`. Used **only** by the FINALIZED refund branch. |
 | 4 | `payee_token_account` | — | yes | `ATA(payee, mint, token_program)`. Receives the cumulative floor delta for the implicit `10000 - sum(bps)` remainder share. The transfer is skipped when the delta is zero; the account is still validated. |
-| 5 | `treasury_token_account` | — | yes | `ATA(TREASURY_OWNER, mint, token_program)`. Receives final irreducible residual dust when `distribute` runs from `FINALIZED`. |
+| 5 | `treasury_token_account` | — | yes | `ATA(TREASURY_OWNER, mint, token_program)`. Receives final irreducible residual dust when `distribute` runs from `FINALIZED`. The operator must hold the corresponding private key for `TREASURY_OWNER`, otherwise accumulated residuals are unspendable. |
 | 6 | `mint` | — | — | Token mint bound at `open`. |
 | 7 | `token_program` | — | — | SPL Token or Token-2022, must equal the program that owns the mint and ATAs. |
 | 8…N | `recipient_token_accounts[i]` | — | yes | `ATA(recipients[i].recipient, mint, token_program)` in the same order as the active preimage entries. |
