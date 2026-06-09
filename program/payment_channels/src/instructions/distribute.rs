@@ -140,6 +140,16 @@ impl<'a> TryFrom<&'a mut [AccountView]> for DistributeAccounts<'a> {
 /// Channel PDA in place via discriminator realloc to
 /// [`ClosedChannel`](crate::ClosedChannel) — refunding the rent delta to the
 /// payer while keeping the address program-owned forever.
+///
+/// Operator note: in `OPEN`, if a recipient's or the payee's canonical ATA is
+/// unusable (missing/uninitialized, frozen, closed/malformed, carrying an
+/// unsupported Token-2022 extension, or with a reassigned authority), that
+/// nonzero share is redirected to the treasury and `payout_watermark` still
+/// advances — the beneficiary permanently forfeits it (a [`PayoutRedirected`]
+/// event is emitted for off-chain observability). Ensure recipient/payee ATAs
+/// exist and are healthy before cranking `distribute`.
+///
+/// [`PayoutRedirected`]: crate::events::PayoutRedirected
 pub fn process(
     program_id: &Address,
     accounts: &mut [AccountView],
