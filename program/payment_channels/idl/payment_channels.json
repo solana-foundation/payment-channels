@@ -483,6 +483,13 @@
                 "format": "i64",
                 "kind": "numberTypeNode"
               }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "chainId",
+              "type": {
+                "kind": "publicKeyTypeNode"
+              }
             }
           ],
           "kind": "structTypeNode"
@@ -767,6 +774,12 @@
         "kind": "errorNode",
         "message": "Voucher signer does not match channel authorized_signer",
         "name": "voucherSignerMismatch"
+      },
+      {
+        "code": 238,
+        "kind": "errorNode",
+        "message": "Voucher chain_id does not match this cluster's CHAIN_ID",
+        "name": "voucherChainMismatch"
       },
       {
         "code": 260,

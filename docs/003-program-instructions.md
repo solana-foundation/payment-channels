@@ -73,7 +73,7 @@ Permissionless crank. Authority is the Ed25519 voucher signed by `Channel.author
 
 | Name | Type | Description |
 |---|---|---|
-| `voucher` | `VoucherArgs` | Signed payload: `channel_id || cumulative_amount || expires_at`. |
+| `voucher` | `VoucherArgs` | Signed payload: `channel_id || cumulative_amount || expires_at || chain_id`. |
 
 **Accounts**
 
@@ -256,6 +256,7 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | 235 | `VoucherOverDeposit` | `voucher.cumulative_amount > Channel.deposit`. |
 | 236 | `VoucherMessageMismatch` | Ed25519-signed message bytes do not equal the voucher payload. |
 | 237 | `VoucherSignerMismatch` | Ed25519 pubkey does not equal `Channel.authorized_signer`. |
+| 238 | `VoucherChainMismatch` | `voucher.chain_id` does not equal this cluster's `CHAIN_ID` (genesis hash). |
 
 ### Distribution validation
 
@@ -323,6 +324,7 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | `channel_id` | `Address` | Channel PDA the voucher applies to. |
 | `cumulative_amount` | `u64` | Strictly increasing cumulative watermark. Must be `<= deposit`. |
 | `expires_at` | `i64` | Unix timestamp expiry; `0` means no expiry. |
+| `chain_id` | `Address` | Cluster chain id (genesis hash); must equal the on-chain `CHAIN_ID`. Binds the voucher to one cluster. |
 
 ### `DistributionEntry`
 

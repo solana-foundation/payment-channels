@@ -44,7 +44,7 @@ use crate::common::{
     ATA_PROGRAM, INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM,
     SYSVAR_RENT, event_authority, expect_custom_err, expect_instruction_err, mutate_channel,
     read_channel, set_clock, token_balance, treasury_owner,
-    voucher::{build_ed25519_ix, voucher_payload},
+    voucher::{TEST_CHAIN_ID, build_ed25519_ix, voucher_payload},
 };
 
 const GRACE_PERIOD: u32 = 3600;
@@ -311,6 +311,7 @@ fn settle_to(
         channel_id: *channel,
         cumulative_amount,
         expires_at,
+        chain_id: TEST_CHAIN_ID,
     };
     let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = authorized_signer.sign_message(&payload).into();
@@ -2268,6 +2269,7 @@ fn settle_on_tombstoned_channel_rejects() {
         channel_id: s.channel,
         cumulative_amount: 1,
         expires_at: 0,
+        chain_id: TEST_CHAIN_ID,
     };
     let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = s.authorized_signer.sign_message(&payload).into();

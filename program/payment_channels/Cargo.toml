@@ -10,11 +10,13 @@ crate-type = ["lib", "cdylib"]
 [features]
 default = ["localnet"]
 # Treasury owner selection per cluster (see src/constants.rs). `localnet` keeps the
-# 0xBEEF placeholder with the release gate off; `devnet`/`mainnet` turn the gate on
-# and require their real owner committed in constants.rs before the build compiles.
-localnet = []
-devnet   = []
-mainnet  = []
+# 0xBEEF placeholder with the release gate off; `devnet`/`testnet`/`mainnet-beta` turn
+# the gate on and require their real owner committed in constants.rs before the build
+# compiles.
+localnet     = []
+devnet       = []
+testnet      = []
+mainnet-beta = []
 # Enables codama derives + raw build.rs IDL emission. Host-only; must NOT
 # be enabled for `cargo build-sbf` (see `compile_error!` guard in
 # src/lib.rs). Use `just generate-idl` to apply Codama visitors and write
