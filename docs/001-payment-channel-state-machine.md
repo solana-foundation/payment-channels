@@ -73,6 +73,10 @@ pub struct SettlementWatermarks {
 
 Multi-byte fields are stored as align-1 `[u8; N]` byte arrays in the actual struct, with `from_le_bytes` / `to_le_bytes` accessors; the typed view above is the logical layout.
 
+### Accounting authority
+
+`Channel` state — `deposit`, `settlement.settled`, `settlement.payout_watermark`, `payer_withdrawn_at` — is authoritative for pending settlement amounts. The escrow ATA balance and the channel PDA's lamports can exceed those values: third parties can transfer tokens to the escrow ATA address (either before `open` via a precreated ATA or directly afterward), and lamports can be transferred to the PDA address before `open`. The program accepts these states (`open` is prefund-tolerant) but does not record them in `Channel`. Surplus tokens are swept to treasury at `finalize` via `distribute`'s `escrow_at_entry − scheduled_outflow` residual; surplus PDA lamports refund to the payer at tombstone via the rent rebalance. Off-chain consumers MUST derive pending value from channel state, never from raw account balances.
+
 ### PDA derivation
 
 ```text
