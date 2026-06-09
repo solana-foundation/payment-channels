@@ -3,7 +3,9 @@
 //! Runs the full CPI chain (CreateAccount + CreateAta + token Transfer) via
 //! LiteSVM and verifies every field written into the channel account.
 
-use payment_channels::state::{AccountDiscriminator, CURRENT_CHANNEL_VERSION, ChannelStatus};
+use payment_channels::state::{
+    AccountDiscriminator, CURRENT_CHANNEL_VERSION, Channel, ChannelStatus,
+};
 use solana_keypair::Keypair;
 use solana_message::Message;
 use solana_pubkey::Pubkey;
@@ -268,6 +270,8 @@ fn open_succeeds_with_prefunded_channel_pda_lamports() {
     let prefund: u64 = 1_000_000;
     svm.airdrop(&channel, prefund).expect("airdrop PDA prefund");
 
+    let payer_before = svm.get_account(&payer.pubkey()).unwrap().lamports;
+
     let ix = open_ix(
         &payer.pubkey(),
         &payee,
@@ -290,7 +294,19 @@ fn open_succeeds_with_prefunded_channel_pda_lamports() {
         assert_eq!(ch.status, ChannelStatus::Open as u8);
         assert_eq!(ch.deposit(), DEPOSIT);
     });
-    assert!(svm.get_account(&channel).unwrap().lamports >= prefund);
+    // `open` tops up only the rent shortfall: final balance = prefund + (min_rent - prefund).
+    let min_rent = svm.minimum_balance_for_rent_exemption(Channel::LEN);
+    let shortfall = min_rent - prefund;
+    assert_eq!(
+        svm.get_account(&channel).unwrap().lamports,
+        prefund + shortfall
+    );
+    // The payer's SOL outflow is exactly the PDA shortfall + escrow ATA rent + tx fee;
+    // the deposit moves as SPL tokens, not lamports.
+    let payer_after = svm.get_account(&payer.pubkey()).unwrap().lamports;
+    let ata_rent = svm.get_account(&channel_token_account).unwrap().lamports;
+    const TX_FEE: u64 = 5_000; // single signer × 5000 lamports/sig
+    assert_eq!(payer_before - payer_after, shortfall + ata_rent + TX_FEE);
 }
 
 #[test]
