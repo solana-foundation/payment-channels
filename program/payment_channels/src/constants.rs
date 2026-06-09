@@ -71,7 +71,9 @@ mod cluster {
 
 /// Owner of the treasury ATAs that receive rounding residuals when a channel is
 /// finalized by `distribute`. The treasury ATA is derived as
-/// `ATA(TREASURY_OWNER, mint, token_program)` and validated on-chain.
+/// `ATA(TREASURY_OWNER, mint, token_program)` and validated on-chain. The
+/// operator must hold the corresponding private key, otherwise accumulated
+/// residuals are unspendable.
 pub const TREASURY_OWNER: pinocchio::Address =
     pinocchio::Address::new_from_array(cluster::TREASURY_OWNER);
 
