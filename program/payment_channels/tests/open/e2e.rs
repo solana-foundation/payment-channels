@@ -6,10 +6,10 @@
 use payment_channels::state::{
     AccountDiscriminator, CURRENT_CHANNEL_VERSION, Channel, ChannelStatus,
 };
+use solana_instruction::error::InstructionError;
 use solana_keypair::Keypair;
 use solana_message::Message;
 use solana_pubkey::Pubkey;
-use solana_instruction::error::InstructionError;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
