@@ -175,7 +175,7 @@ Permissionless crank. Verifies the committed splits preimage (Blake3) against `C
 | 5 | `treasury_token_account` | — | yes | `ATA(TREASURY_OWNER, mint, token_program)`. Receives final irreducible residual dust when `distribute` runs from `FINALIZED`. The operator must hold the corresponding private key for `TREASURY_OWNER`, otherwise accumulated residuals are unspendable. |
 | 6 | `mint` | — | — | Token mint bound at `open`. |
 | 7 | `token_program` | — | — | SPL Token or Token-2022, must equal the program that owns the mint and ATAs. |
-| 8 | `event_authority` | — | — | Event authority PDA used for Anchor-compatible self-CPI events; signs the self-CPI that emits `PayoutRedirected` when a poisoned beneficiary share is redirected to treasury.
+| 8 | `event_authority` | — | — | Event authority PDA used for Anchor-compatible self-CPI events; signs the self-CPI that emits `PayoutRedirected` when a poisoned beneficiary share is redirected to treasury. |
 | 9 | `self_program` | — | — | This program's ID, used as the self-CPI target for event emission. |
 | 10…N | `recipient_token_accounts[i]` | — | yes | `ATA(recipients[i].recipient, mint, token_program)` in the same order as the active preimage entries. |
 
