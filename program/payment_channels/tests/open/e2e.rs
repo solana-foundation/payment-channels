@@ -3,7 +3,10 @@
 //! Runs the full CPI chain (CreateAccount + CreateAta + token Transfer) via
 //! LiteSVM and verifies every field written into the channel account.
 
-use payment_channels::state::{AccountDiscriminator, CURRENT_CHANNEL_VERSION, ChannelStatus};
+use payment_channels::state::{
+    AccountDiscriminator, CURRENT_CHANNEL_VERSION, Channel, ChannelStatus,
+};
+use solana_instruction::error::InstructionError;
 use solana_keypair::Keypair;
 use solana_message::Message;
 use solana_pubkey::Pubkey;
@@ -18,7 +21,10 @@ use super::{
 };
 use payment_channels::PaymentChannelsError;
 
-use crate::common::{ProgramLoader, TOKEN_2022, expect_custom_err, read_channel};
+use crate::common::{
+    ProgramLoader, SPL_TOKEN, TOKEN_2022, expect_custom_err, expect_instruction_err, read_channel,
+};
+use litesvm_token::CreateAssociatedTokenAccount;
 
 const SALT: u64 = 42;
 const DEPOSIT: u64 = 5_000_000;
@@ -248,5 +254,169 @@ fn open_with_no_splits_succeeds_token_2022() {
     read_channel(&svm, &channel, |ch| {
         assert_eq!(ch.status, ChannelStatus::Open as u8);
         assert_eq!(ch.distribution_hash, expected, "distribution_hash");
+    });
+}
+
+#[test]
+fn open_succeeds_with_prefunded_channel_pda_lamports() {
+    let mut svm = LiteSVM::load_program();
+
+    let payee = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
+    let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
+    let (channel, channel_token_account) =
+        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
+
+    // 1_000_000 lamports clears the 0-byte rent-exempt floor (~890_880) so
+    // LiteSVM accepts the airdrop, but is below the rent minimum for
+    // Channel::LEN so `open` still has a shortfall to top up.
+    let prefund: u64 = 1_000_000;
+    svm.airdrop(&channel, prefund).expect("airdrop PDA prefund");
+
+    let payer_before = svm.get_account(&payer.pubkey()).unwrap().lamports;
+
+    let ix = open_ix(
+        &payer.pubkey(),
+        &payee,
+        &mint,
+        &authorized_signer,
+        &channel,
+        &payer_token_account,
+        &channel_token_account,
+        SALT,
+        DEPOSIT,
+        GRACE_PERIOD,
+        1,
+    );
+    let msg = Message::new(&[ix], Some(&payer.pubkey()));
+    let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
+    svm.send_transaction(tx)
+        .expect("open should tolerate PDA prefund");
+
+    read_channel(&svm, &channel, |ch| {
+        assert_eq!(ch.status, ChannelStatus::Open as u8);
+        assert_eq!(ch.deposit(), DEPOSIT);
+    });
+    // `open` tops up only the rent shortfall: final balance = prefund + (min_rent - prefund).
+    let min_rent = svm.minimum_balance_for_rent_exemption(Channel::LEN);
+    let shortfall = min_rent - prefund;
+    assert_eq!(
+        svm.get_account(&channel).unwrap().lamports,
+        prefund + shortfall
+    );
+    // The payer's SOL outflow is exactly the PDA shortfall + escrow ATA rent + tx fee;
+    // the deposit moves as SPL tokens, not lamports.
+    let payer_after = svm.get_account(&payer.pubkey()).unwrap().lamports;
+    let ata_rent = svm.get_account(&channel_token_account).unwrap().lamports;
+    const TX_FEE: u64 = 5_000; // single signer × 5000 lamports/sig
+    assert_eq!(payer_before - payer_after, shortfall + ata_rent + TX_FEE);
+}
+
+#[test]
+fn open_succeeds_with_precreated_escrow_ata() {
+    let mut svm = LiteSVM::load_program();
+
+    let payee = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
+    let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
+    let (channel, channel_token_account) =
+        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
+
+    // Griefing setup: a third party front-runs `open` by pre-creating the
+    // canonical escrow ATA. Under non-idempotent Create this reverted `open`
+    // with `IllegalOwner`; under CreateIdempotent it must succeed.
+    let pre = CreateAssociatedTokenAccount::new(&mut svm, &payer, &mint)
+        .owner(&channel)
+        .token_program_id(&SPL_TOKEN)
+        .send()
+        .expect("pre-create escrow ATA");
+    assert_eq!(pre, channel_token_account);
+
+    let ix = open_ix(
+        &payer.pubkey(),
+        &payee,
+        &mint,
+        &authorized_signer,
+        &channel,
+        &payer_token_account,
+        &channel_token_account,
+        SALT,
+        DEPOSIT,
+        GRACE_PERIOD,
+        1,
+    );
+    let msg = Message::new(&[ix], Some(&payer.pubkey()));
+    let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
+    svm.send_transaction(tx)
+        .expect("open should tolerate a pre-created escrow ATA");
+
+    read_channel(&svm, &channel, |ch| {
+        assert_eq!(ch.status, ChannelStatus::Open as u8);
+        assert_eq!(ch.deposit(), DEPOSIT);
+    });
+}
+
+#[test]
+fn reopen_at_same_seeds_while_open_rejects() {
+    // A second `open` on the same (payer, payee, mint, authorizedSigner, salt)
+    // tuple while the channel is still OPEN must revert. Unlike the prefund
+    // cases above — where the PDA is system-owned and data-empty, so `open` is
+    // tolerant — the live channel PDA already holds an initialized `Channel`
+    // and is program-owned, so the signed `Allocate` (which requires a
+    // system-owned, data-empty target) fails with
+    // `SystemError::AccountAlreadyInUse` (= `InstructionError::Custom(0)`).
+    let mut svm = LiteSVM::load_program();
+
+    let payee = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
+    let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
+    let (channel, channel_token_account) =
+        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
+
+    // First open establishes the OPEN channel.
+    let first = open_ix(
+        &payer.pubkey(),
+        &payee,
+        &mint,
+        &authorized_signer,
+        &channel,
+        &payer_token_account,
+        &channel_token_account,
+        SALT,
+        DEPOSIT,
+        GRACE_PERIOD,
+        1,
+    );
+    let msg = Message::new(&[first], Some(&payer.pubkey()));
+    let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
+    svm.send_transaction(tx).expect("first open should succeed");
+    read_channel(&svm, &channel, |ch| {
+        assert_eq!(ch.status, ChannelStatus::Open as u8);
+    });
+
+    // Second open at the identical seeds. The deposit differs only to give the
+    // tx a distinct signature; the ix reverts at `Allocate` before the deposit
+    // transfer ever runs, so its value is irrelevant to the failure.
+    let second = open_ix(
+        &payer.pubkey(),
+        &payee,
+        &mint,
+        &authorized_signer,
+        &channel,
+        &payer_token_account,
+        &channel_token_account,
+        SALT,
+        1,
+        GRACE_PERIOD,
+        1,
+    );
+    let msg = Message::new(&[second], Some(&payer.pubkey()));
+    let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
+    expect_instruction_err(svm.send_transaction(tx), InstructionError::Custom(0));
+
+    // The revert left the live channel untouched: still OPEN, original deposit.
+    read_channel(&svm, &channel, |ch| {
+        assert_eq!(ch.status, ChannelStatus::Open as u8);
+        assert_eq!(ch.deposit(), DEPOSIT);
     });
 }

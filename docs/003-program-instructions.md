@@ -28,6 +28,8 @@ The **Signer** column lists transaction-level signers where applicable; `Ed25519
 
 Payer-signed initializer. Creates the active channel PDA, creates its escrow ATA, transfers `deposit` from the payer token account, stores the exact Blake3 hash of the distribution preimage, and emits `Opened`. The `authorized_signer` account must be a valid Ed25519 public key, but it does not need to sign `open`. The `payee` account is not curve-checked and may be a program-derived address (PDA) beneficiary.
 
+Both creates are **prefund-tolerant**: lamports already sitting on the channel PDA (the PDA is allocated with `Allocate` + `Assign` after topping up only the rent shortfall) and a pre-existing canonical escrow ATA (idempotent CPI) are accepted. Surplus PDA lamports refund to the payer at tombstone; tokens already on the escrow ATA are swept to treasury at `finalize` via the existing residual logic. See [Accounting authority](./001-payment-channel-state-machine.md#accounting-authority).
+
 > **Mint trust model.** `open` does not reject mints with a live freeze authority (or mint authority). A merchant accepting a channel denominated in mint `M` is implicitly accepting that `M`'s freeze authority can freeze the channel's escrow ATA and wedge `topUp`, `distribute`, and `withdrawPayer` until thawed. This is intentional so that mainstream stablecoins (USDC, USDT, PYUSD, …) remain usable; merchants are expected to vet the mint off-chain. See [ADR-001 → Mint trust model](./001-payment-channel-state-machine.md#mint-trust-model).
 
 **Args**
@@ -73,7 +75,7 @@ Permissionless crank. Authority is the Ed25519 voucher signed by `Channel.author
 
 | Name | Type | Description |
 |---|---|---|
-| `voucher` | `VoucherArgs` | Signed payload: `channel_id || cumulative_amount || expires_at`. |
+| `voucher` | `VoucherArgs` | Signed payload: `channel_id || cumulative_amount || expires_at || chain_id`. |
 
 **Accounts**
 
@@ -147,7 +149,7 @@ Permissionless post-grace crank.
 
 ## `distribute` (7)
 
-Permissionless crank. Verifies the committed splits preimage (Blake3) against `Channel.distribution_hash`, then pays cumulative floor deltas between `payout_watermark` and `settled` to the merchant side: each recipient gets `floor(settled * bps[i] / 10000) - floor(payout_watermark * bps[i] / 10000)` and the **payee** gets the implicit remainder delta using `10000 - sum(bps)`. From `OPEN`, zero-delta shares are skipped, residual dust remains in escrow for later cumulative deltas, and `payout_watermark` advances to `settled` as the accounted watermark. From `FINALIZED`, the final cumulative merchant payout runs before the payer receives the unspent `deposit - settled` headroom (gated by `payer_withdrawn_at == 0`); final irreducible residual dust is swept to treasury, and the escrow ATA + Channel PDA are tombstoned. Unsupported Token-2022 account extensions on nonzero beneficiary destinations redirect that share to treasury; malformed token-account data/TLV and wrong accounts hard-fail.
+Permissionless crank. Verifies the committed splits preimage (Blake3) against `Channel.distribution_hash`, then pays cumulative floor deltas between `payout_watermark` and `settled` to the merchant side: each recipient gets `floor(settled * bps[i] / 10000) - floor(payout_watermark * bps[i] / 10000)` and the **payee** gets the implicit remainder delta using `10000 - sum(bps)`. From `OPEN`, zero-delta shares are skipped, residual dust remains in escrow for later cumulative deltas, and `payout_watermark` advances to `settled` as the accounted watermark. From `FINALIZED`, the final cumulative merchant payout runs before the payer receives the unspent `deposit - settled` headroom (gated by `payer_withdrawn_at == 0`); final irreducible residual dust is swept to treasury, and the escrow ATA + Channel PDA are tombstoned. On a nonzero share, if the beneficiary's canonical ATA is unusable — missing/uninitialized, frozen, closed/malformed, carrying an unsupported Token-2022 extension, or with a reassigned authority — that share is redirected to the treasury, a `PayoutRedirected` event is emitted, and `payout_watermark` **still advances**, so the beneficiary **permanently forfeits** it (repairing the ATA later does not reclaim it, since future cumulative deltas only cover newly settled amounts). Operators should ensure recipient/payee ATAs exist and are healthy before cranking. Malformed token-account data/TLV and wrong (non-canonical) accounts hard-fail.
 
 **Client transaction format:** at `count == 32`, callers MUST use **version 0 transactions with an address lookup table** indexing recipient ATAs. The instruction uses 10 fixed accounts plus up to 32 recipient ATAs (42 total); legacy transactions cannot fit the static account-key budget (~32 keys including fee payer and program id).
 
@@ -170,10 +172,10 @@ Permissionless crank. Verifies the committed splits preimage (Blake3) against `C
 | 2 | `channel_token_account` | — | yes | Escrow ATA owned by `channel`. Source for all transfers; closed on tombstone. |
 | 3 | `payer_token_account` | — | yes | `ATA(payer, mint, token_program)`. Used **only** by the FINALIZED refund branch. |
 | 4 | `payee_token_account` | — | yes | `ATA(payee, mint, token_program)`. Receives the cumulative floor delta for the implicit `10000 - sum(bps)` remainder share. The transfer is skipped when the delta is zero; the account is still validated. |
-| 5 | `treasury_token_account` | — | yes | `ATA(TREASURY_OWNER, mint, token_program)`. Receives final irreducible residual dust when `distribute` runs from `FINALIZED`. |
+| 5 | `treasury_token_account` | — | yes | `ATA(TREASURY_OWNER, mint, token_program)`. Receives final irreducible residual dust when `distribute` runs from `FINALIZED`. The operator must hold the corresponding private key for `TREASURY_OWNER`, otherwise accumulated residuals are unspendable. |
 | 6 | `mint` | — | — | Token mint bound at `open`. |
 | 7 | `token_program` | — | — | SPL Token or Token-2022, must equal the program that owns the mint and ATAs. |
-| 8 | `event_authority` | — | — | Event authority PDA used for Anchor-compatible self-CPI events. |
+| 8 | `event_authority` | — | — | Event authority PDA used for Anchor-compatible self-CPI events; signs the self-CPI that emits `PayoutRedirected` when a poisoned beneficiary share is redirected to treasury.
 | 9 | `self_program` | — | — | This program's ID, used as the self-CPI target for event emission. |
 | 10…N | `recipient_token_accounts[i]` | — | yes | `ATA(recipients[i].recipient, mint, token_program)` in the same order as the active preimage entries. |
 
@@ -258,6 +260,7 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | 235 | `VoucherOverDeposit` | `voucher.cumulative_amount > Channel.deposit`. |
 | 236 | `VoucherMessageMismatch` | Ed25519-signed message bytes do not equal the voucher payload. |
 | 237 | `VoucherSignerMismatch` | Ed25519 pubkey does not equal `Channel.authorized_signer`. |
+| 238 | `VoucherChainMismatch` | `voucher.chain_id` does not equal this cluster's `CHAIN_ID` (genesis hash). |
 
 ### Distribution validation
 
@@ -325,6 +328,7 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | `channel_id` | `Address` | Channel PDA the voucher applies to. |
 | `cumulative_amount` | `u64` | Strictly increasing cumulative watermark. Must be `<= deposit`. |
 | `expires_at` | `i64` | Unix timestamp expiry; `0` means no expiry. |
+| `chain_id` | `Address` | Cluster chain id (genesis hash); must equal the on-chain `CHAIN_ID`. Binds the voucher to one cluster. |
 
 ### `DistributionEntry`
 
