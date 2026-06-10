@@ -364,7 +364,7 @@ impl<'a> TokenContext<'a> {
     /// passed by the cranker; a genuine address mismatch and a malformed TLV
     /// extension trailer stay fatal.
     ///
-    /// WARNING: the redirect is invisible to the channel FSM. In `OPEN`,
+    /// WARNING: the redirect is invisible to the channel state machine. In `OPEN`,
     /// `payout_watermark` advances to `settled` (via `mark_as_settled`) after
     /// `Transfer::flush`, so a share forfeited here is permanently lost to the
     /// beneficiary — repairing the ATA on a later run does not reclaim it, since

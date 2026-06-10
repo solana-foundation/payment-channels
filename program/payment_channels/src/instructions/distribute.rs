@@ -146,8 +146,14 @@ impl<'a> TryFrom<&'a mut [AccountView]> for DistributeAccounts<'a> {
 /// unsupported Token-2022 extension, or with a reassigned authority), that
 /// nonzero share is redirected to the treasury and `payout_watermark` still
 /// advances — the beneficiary permanently forfeits it (a [`PayoutRedirected`]
-/// event is emitted for off-chain observability). Ensure recipient/payee ATAs
-/// exist and are healthy before cranking `distribute`.
+/// event is emitted for off-chain observability). The same redirect applies to
+/// the payer's refund ATA on `FINALIZED`: when a refund is due
+/// ([`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `== 0` and
+/// `deposit > settled`) and that ATA is unusable, the unspent headroom is
+/// forfeited to the treasury — and because finalization tombstones the channel
+/// in the same instruction, there is no later crank to reclaim it. Ensure the
+/// recipient, payee, and payer ATAs exist and are healthy (or withdraw the
+/// payer headroom beforehand) before cranking `distribute`.
 ///
 /// [`PayoutRedirected`]: crate::events::PayoutRedirected
 pub fn process(
