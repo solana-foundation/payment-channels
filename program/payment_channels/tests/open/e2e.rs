@@ -6,6 +6,7 @@
 use payment_channels::state::{
     AccountDiscriminator, CURRENT_CHANNEL_VERSION, Channel, ChannelStatus,
 };
+use solana_instruction::error::InstructionError;
 use solana_keypair::Keypair;
 use solana_message::Message;
 use solana_pubkey::Pubkey;
@@ -20,7 +21,9 @@ use super::{
 };
 use payment_channels::PaymentChannelsError;
 
-use crate::common::{ProgramLoader, SPL_TOKEN, TOKEN_2022, expect_custom_err, read_channel};
+use crate::common::{
+    ProgramLoader, SPL_TOKEN, TOKEN_2022, expect_custom_err, expect_instruction_err, read_channel,
+};
 use litesvm_token::CreateAssociatedTokenAccount;
 
 const SALT: u64 = 42;
@@ -347,6 +350,71 @@ fn open_succeeds_with_precreated_escrow_ata() {
     svm.send_transaction(tx)
         .expect("open should tolerate a pre-created escrow ATA");
 
+    read_channel(&svm, &channel, |ch| {
+        assert_eq!(ch.status, ChannelStatus::Open as u8);
+        assert_eq!(ch.deposit(), DEPOSIT);
+    });
+}
+
+#[test]
+fn reopen_at_same_seeds_while_open_rejects() {
+    // A second `open` on the same (payer, payee, mint, authorizedSigner, salt)
+    // tuple while the channel is still OPEN must revert. Unlike the prefund
+    // cases above — where the PDA is system-owned and data-empty, so `open` is
+    // tolerant — the live channel PDA already holds an initialized `Channel`
+    // and is program-owned, so the signed `Allocate` (which requires a
+    // system-owned, data-empty target) fails with
+    // `SystemError::AccountAlreadyInUse` (= `InstructionError::Custom(0)`).
+    let mut svm = LiteSVM::load_program();
+
+    let payee = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
+    let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
+    let (channel, channel_token_account) =
+        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
+
+    // First open establishes the OPEN channel.
+    let first = open_ix(
+        &payer.pubkey(),
+        &payee,
+        &mint,
+        &authorized_signer,
+        &channel,
+        &payer_token_account,
+        &channel_token_account,
+        SALT,
+        DEPOSIT,
+        GRACE_PERIOD,
+        1,
+    );
+    let msg = Message::new(&[first], Some(&payer.pubkey()));
+    let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
+    svm.send_transaction(tx).expect("first open should succeed");
+    read_channel(&svm, &channel, |ch| {
+        assert_eq!(ch.status, ChannelStatus::Open as u8);
+    });
+
+    // Second open at the identical seeds. The deposit differs only to give the
+    // tx a distinct signature; the ix reverts at `Allocate` before the deposit
+    // transfer ever runs, so its value is irrelevant to the failure.
+    let second = open_ix(
+        &payer.pubkey(),
+        &payee,
+        &mint,
+        &authorized_signer,
+        &channel,
+        &payer_token_account,
+        &channel_token_account,
+        SALT,
+        1,
+        GRACE_PERIOD,
+        1,
+    );
+    let msg = Message::new(&[second], Some(&payer.pubkey()));
+    let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
+    expect_instruction_err(svm.send_transaction(tx), InstructionError::Custom(0));
+
+    // The revert left the live channel untouched: still OPEN, original deposit.
     read_channel(&svm, &channel, |ch| {
         assert_eq!(ch.status, ChannelStatus::Open as u8);
         assert_eq!(ch.deposit(), DEPOSIT);
