@@ -420,42 +420,42 @@ mod tests {
     }
 
     #[test]
-    fn message_data_size_above_canonical_48() {
-        // Canonical 160-byte ix, but overwrite the declared
+    fn message_data_size_above_canonical_80() {
+        // Canonical 192-byte ix, but overwrite the declared
         // `message_data_size` field at offsets[10..12] (= data[12..14])
-        // to 49. Length guard passes; the dedicated size-check fires.
+        // to 81. Length guard passes; the dedicated size-check fires.
         let mut data = build_ix_data(
             AUTH.as_array(),
             &[0u8; VOUCHER_PAYLOAD_SIZE],
             &AUTH_SIGNATURE,
         );
-        data[12..14].copy_from_slice(&49u16.to_le_bytes());
+        data[12..14].copy_from_slice(&81u16.to_le_bytes());
         assert_eq!(parse_err(&data), ed25519_ix::Ed25519ParseError::MessageSize);
     }
 
     #[test]
-    fn message_data_size_below_canonical_48() {
+    fn message_data_size_below_canonical_80() {
         let mut data = build_ix_data(
             AUTH.as_array(),
             &[0u8; VOUCHER_PAYLOAD_SIZE],
             &AUTH_SIGNATURE,
         );
-        data[12..14].copy_from_slice(&47u16.to_le_bytes());
+        data[12..14].copy_from_slice(&79u16.to_le_bytes());
         assert_eq!(parse_err(&data), ed25519_ix::Ed25519ParseError::MessageSize);
     }
 
     #[test]
     fn ix_data_shorter_than_canonical() {
-        // 159 bytes — one shy of the canonical 160-byte layout. Must
+        // 191 bytes — one shy of the canonical 192-byte layout. Must
         // fail fast before any offsets are read, so short ixs return a
         // clean error instead of panicking on out-of-bounds indexing.
-        let short = [0u8; 159];
+        let short = [0u8; 191];
         assert_eq!(parse_err(&short), ed25519_ix::Ed25519ParseError::Length);
     }
 
     #[test]
     fn ix_data_longer_than_canonical() {
-        // 161 bytes — trailing byte past the pinned layout.
+        // 193 bytes — one trailing byte past the pinned 192-byte layout.
         let mut data = build_ix_data(
             AUTH.as_array(),
             &[0u8; VOUCHER_PAYLOAD_SIZE],
