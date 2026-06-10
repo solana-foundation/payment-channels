@@ -37,6 +37,14 @@ if (!tailNames.includes('distribute')) {
 
 const camelToSnake = (s) => s.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 
+// Tail instructions must come out of this script byte-identical. The rewrite
+// blocks below exist in the tail files too, so a future loop-scope bug would
+// strip them silently, and structural exclusion alone would not catch it.
+const tailSnapshots = tailNames.flatMap((name) => {
+  const paths = [join(TS_DIR, `${name}.ts`), join(RUST_DIR, `${camelToSnake(name)}.rs`)];
+  return paths.map((path) => [path, readFileSync(path, 'utf8')]);
+});
+
 // --- TypeScript: parser guard `< N` -> `!== N` ------------------------------
 
 for (const ix of fixedShape) {
@@ -164,6 +172,12 @@ for (const ix of fixedShape) {
     );
   }
   writeFileSync(path, source);
+}
+
+for (const [path, before] of tailSnapshots) {
+  if (readFileSync(path, 'utf8') !== before) {
+    throw new Error(`enforce-fixed-account-shapes: tail instruction file was modified: ${path}`);
+  }
 }
 
 console.log(
