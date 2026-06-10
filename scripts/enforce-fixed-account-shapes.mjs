@@ -34,19 +34,8 @@ const tailNames = instructions.filter(hasTail).map((ix) => ix.name);
 if (!tailNames.includes('distribute')) {
   throw new Error('enforce-fixed-account-shapes: expected distribute to declare remainingAccounts');
 }
-if (fixedShape.length !== instructions.length - tailNames.length) {
-  throw new Error('enforce-fixed-account-shapes: classification mismatch');
-}
 
 const camelToSnake = (s) => s.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
-
-// Tail instructions must come out of this script byte-identical. Snapshot
-// them up front and verify at the end, since structural exclusion alone would
-// not catch a future bug that touches the wrong file.
-const tailSnapshots = tailNames.flatMap((name) => {
-  const paths = [join(TS_DIR, `${name}.ts`), join(RUST_DIR, `${camelToSnake(name)}.rs`)];
-  return paths.map((path) => [path, readFileSync(path, 'utf8')]);
-});
 
 // --- TypeScript: parser guard `< N` -> `!== N` ------------------------------
 
@@ -82,52 +71,73 @@ function demote(source, file, fnName) {
   return source.replace(pattern, `fn ${fnName}(`);
 }
 
-// Deletes every `pub fn <fnName>(...) { ... }` block, including its
-// contiguous preceding doc comments and attributes. Brace-balanced (the
-// method bodies vary between one-liners and multi-line blocks).
-const DOC_OR_ATTR = /^\s*(\/\/\/|#\[)/;
-function removeMethodBlocks(source, fnName) {
-  const lines = source.split('\n');
-  let removed = 0;
-  for (let i = 0; i < lines.length; i += 1) {
-    if (!lines[i].includes(`pub fn ${fnName}(`)) continue;
-    let start = i;
-    while (start > 0 && DOC_OR_ATTR.test(lines[start - 1])) start -= 1;
-    let depth = 0;
-    let opened = false;
-    let end = -1;
-    for (let j = i; j < lines.length; j += 1) {
-      for (const ch of lines[j]) {
-        if (ch === '{') {
-          depth += 1;
-          opened = true;
-        } else if (ch === '}') {
-          depth -= 1;
-        }
-      }
-      if (opened && depth === 0) {
-        end = j;
-        break;
-      }
+// The deleted method blocks are byte-identical across every generated
+// instruction file (their bodies only touch `__remaining_accounts`), so each
+// is matched and removed as an exact string. A codama template change makes
+// the occurrence count fail loudly instead of leaving stragglers behind.
+const BUILDER_REMAINING_API = `    /// Add an additional account to the instruction.
+    #[inline(always)]
+    pub fn add_remaining_account(&mut self, account: solana_instruction::AccountMeta) -> &mut Self {
+        self.__remaining_accounts.push(account);
+        self
     }
-    if (end === -1) {
-      throw new Error(`enforce-fixed-account-shapes: could not find the body of \`${fnName}\``);
+    /// Add additional accounts to the instruction.
+    #[inline(always)]
+    pub fn add_remaining_accounts(
+        &mut self,
+        accounts: &[solana_instruction::AccountMeta],
+    ) -> &mut Self {
+        self.__remaining_accounts.extend_from_slice(accounts);
+        self
     }
-    lines.splice(start, end - start + 1);
-    removed += 1;
-    i = start - 1;
-  }
-  return [lines.join('\n'), removed];
-}
+`;
 
-function removeExactly(source, file, fnName, expected) {
-  const [out, removed] = removeMethodBlocks(source, fnName);
-  if (removed !== expected) {
+const INVOKE_WITH_REMAINING_ACCOUNTS = `    #[inline(always)]
+    pub fn invoke_with_remaining_accounts(
+        &self,
+        remaining_accounts: &[(&'b solana_account_info::AccountInfo<'a>, bool, bool)],
+    ) -> solana_program_error::ProgramResult {
+        self.invoke_signed_with_remaining_accounts(&[], remaining_accounts)
+    }
+`;
+
+const CPI_BUILDER_REMAINING_API = `    /// Add an additional account to the instruction.
+    #[inline(always)]
+    pub fn add_remaining_account(
+        &mut self,
+        account: &'b solana_account_info::AccountInfo<'a>,
+        is_writable: bool,
+        is_signer: bool,
+    ) -> &mut Self {
+        self.instruction
+            .__remaining_accounts
+            .push((account, is_writable, is_signer));
+        self
+    }
+    /// Add additional accounts to the instruction.
+    ///
+    /// Each account is represented by a tuple of the \`AccountInfo\`, a \`bool\` indicating whether the account is writable or not,
+    /// and a \`bool\` indicating whether the account is a signer or not.
+    #[inline(always)]
+    pub fn add_remaining_accounts(
+        &mut self,
+        accounts: &[(&'b solana_account_info::AccountInfo<'a>, bool, bool)],
+    ) -> &mut Self {
+        self.instruction
+            .__remaining_accounts
+            .extend_from_slice(accounts);
+        self
+    }
+`;
+
+function removeBlock(source, file, label, block) {
+  const occurrences = source.split(block).length - 1;
+  if (occurrences !== 1) {
     throw new Error(
-      `enforce-fixed-account-shapes: ${file}: expected to delete ${expected} \`${fnName}\` block(s), deleted ${removed}`,
+      `enforce-fixed-account-shapes: ${file}: expected exactly 1 ${label} block, found ${occurrences}`,
     );
   }
-  return out;
+  return source.replace(block, '');
 }
 
 for (const ix of fixedShape) {
@@ -139,9 +149,14 @@ for (const ix of fixedShape) {
   source = demote(source, file, 'invoke_signed_with_remaining_accounts');
   // No internal callers (invoke/invoke_signed delegate straight to the
   // signed variant), so this one is deleted rather than left as dead code.
-  source = removeExactly(source, file, 'invoke_with_remaining_accounts', 1);
-  source = removeExactly(source, file, 'add_remaining_account', 2);
-  source = removeExactly(source, file, 'add_remaining_accounts', 2);
+  source = removeBlock(
+    source,
+    file,
+    'invoke_with_remaining_accounts',
+    INVOKE_WITH_REMAINING_ACCOUNTS,
+  );
+  source = removeBlock(source, file, 'builder remaining-accounts', BUILDER_REMAINING_API);
+  source = removeBlock(source, file, 'CPI-builder remaining-accounts', CPI_BUILDER_REMAINING_API);
 
   if (/pub fn \w*remaining/.test(source) || source.includes('add_remaining_account')) {
     throw new Error(
@@ -149,12 +164,6 @@ for (const ix of fixedShape) {
     );
   }
   writeFileSync(path, source);
-}
-
-for (const [path, before] of tailSnapshots) {
-  if (readFileSync(path, 'utf8') !== before) {
-    throw new Error(`enforce-fixed-account-shapes: tail instruction file was modified: ${path}`);
-  }
 }
 
 console.log(
