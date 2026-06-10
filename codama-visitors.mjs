@@ -2,6 +2,14 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import {
   argumentValueNode,
+  bytesTypeNode,
+  bytesValueNode,
+  constantDiscriminatorNode,
+  constantValueNode,
+  definedTypeNode,
+  eventNode,
+  fixedSizeTypeNode,
+  hiddenPrefixTypeNode,
   instructionRemainingAccountsNode,
   publicKeyValueNode,
 } from '@codama/nodes';
@@ -49,6 +57,85 @@ export const addGeneratedClientAccountMetadata = {
     return { ...root, program: { ...program, instructions } };
   },
 };
+
+// The Rust `CodamaEvent` derive emits eventNodes with a plain struct as data
+// and moves the type out of definedTypes. Neither codama renderer consumes
+// eventNodes, so left alone the generated client types for events would
+// disappear. This visitor reshapes each event to the @codama/nodes-from-anchor
+// convention (the discriminator as an 8-byte hidden prefix on the data, plus a
+// constantDiscriminatorNode at offset 0) so IDL-driven consumers decode our
+// events like any Anchor program's, and mirrors the bare struct back into
+// definedTypes so the renderers keep emitting the same client types, byte for
+// byte. The mirror must use the bare struct and not the hidden-prefix wrapper,
+// otherwise the discriminator gets baked into the type codecs and silently
+// breaks the wire format.
+export const normalizeEvents = {
+  visitRoot(root) {
+    const program = expectProgram(root);
+    const eventNodes = expectArray(program.events, 'program.events');
+    if (eventNodes.length === 0) {
+      throw new Error(
+        'Codama IDL has no events, expected CodamaEvent derives on Opened/PayoutRedirected',
+      );
+    }
+    const definedTypes = [...expectArray(program.definedTypes, 'program.definedTypes')];
+
+    const events = eventNodes.map((event) => {
+      const data = bareEventStruct(event);
+      const discriminator = singleConstantDiscriminator(event);
+
+      if (definedTypes.some((type) => type.name === event.name)) {
+        throw new Error(`Codama IDL event ${event.name} collides with an existing defined type`);
+      }
+      definedTypes.push(definedTypeNode({ name: event.name, type: data }));
+
+      // Rebuilt rather than reused: the raw constant types its bytes as an
+      // unsized bytesTypeNode, while the nodes-from-anchor convention wants
+      // the 8-byte fixed-size form.
+      const constant = constantValueNode(
+        fixedSizeTypeNode(bytesTypeNode(), 8),
+        bytesValueNode('base16', discriminator),
+      );
+      return eventNode({
+        name: event.name,
+        data: hiddenPrefixTypeNode(data, [constant]),
+        discriminators: [constantDiscriminatorNode(constant)],
+      });
+    });
+
+    return { ...root, program: { ...program, events, definedTypes } };
+  },
+};
+
+// The `CodamaEvent` derive always emits the bare borsh struct as event data.
+function bareEventStruct(event) {
+  if (event.data?.kind !== 'structTypeNode') {
+    throw new Error(
+      `Codama IDL event ${event.name}: expected struct data, got ${event.data?.kind}`,
+    );
+  }
+  return event.data;
+}
+
+function singleConstantDiscriminator(event) {
+  const discriminators = expectArray(event.discriminators, `event ${event.name}.discriminators`);
+  if (discriminators.length !== 1) {
+    throw new Error(`Codama IDL event ${event.name}: expected exactly one discriminator`);
+  }
+  const value = discriminators[0]?.constant?.value;
+  if (
+    discriminators[0].kind !== 'constantDiscriminatorNode' ||
+    discriminators[0].offset !== 0 ||
+    value?.kind !== 'bytesValueNode' ||
+    value.encoding !== 'base16' ||
+    value.data.length !== 16
+  ) {
+    throw new Error(
+      `Codama IDL event ${event.name}: expected an 8-byte base16 constant discriminator at offset 0`,
+    );
+  }
+  return value.data;
+}
 
 export const writeCodamaIdl = (outputPath = IDL_PATH) => ({
   visitRoot(root) {

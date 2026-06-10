@@ -167,70 +167,6 @@
     "definedTypes": [
       {
         "kind": "definedTypeNode",
-        "name": "opened",
-        "type": {
-          "fields": [
-            {
-              "kind": "structFieldTypeNode",
-              "name": "channel",
-              "type": {
-                "kind": "publicKeyTypeNode"
-              }
-            }
-          ],
-          "kind": "structTypeNode"
-        }
-      },
-      {
-        "kind": "definedTypeNode",
-        "name": "payoutRedirected",
-        "type": {
-          "fields": [
-            {
-              "kind": "structFieldTypeNode",
-              "name": "channel",
-              "type": {
-                "kind": "publicKeyTypeNode"
-              }
-            },
-            {
-              "kind": "structFieldTypeNode",
-              "name": "owner",
-              "type": {
-                "kind": "publicKeyTypeNode"
-              }
-            },
-            {
-              "kind": "structFieldTypeNode",
-              "name": "amount",
-              "type": {
-                "endian": "le",
-                "format": "u64",
-                "kind": "numberTypeNode"
-              }
-            },
-            {
-              "kind": "structFieldTypeNode",
-              "name": "beneficiary",
-              "type": {
-                "kind": "definedTypeLinkNode",
-                "name": "payoutBeneficiary"
-              }
-            },
-            {
-              "kind": "structFieldTypeNode",
-              "name": "reason",
-              "type": {
-                "kind": "definedTypeLinkNode",
-                "name": "redirectReason"
-              }
-            }
-          ],
-          "kind": "structTypeNode"
-        }
-      },
-      {
-        "kind": "definedTypeNode",
         "name": "distributeArgs",
         "type": {
           "fields": [
@@ -573,6 +509,70 @@
               "name": "closedChannel"
             }
           ]
+        }
+      },
+      {
+        "kind": "definedTypeNode",
+        "name": "opened",
+        "type": {
+          "fields": [
+            {
+              "kind": "structFieldTypeNode",
+              "name": "channel",
+              "type": {
+                "kind": "publicKeyTypeNode"
+              }
+            }
+          ],
+          "kind": "structTypeNode"
+        }
+      },
+      {
+        "kind": "definedTypeNode",
+        "name": "payoutRedirected",
+        "type": {
+          "fields": [
+            {
+              "kind": "structFieldTypeNode",
+              "name": "channel",
+              "type": {
+                "kind": "publicKeyTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "owner",
+              "type": {
+                "kind": "publicKeyTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "amount",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "beneficiary",
+              "type": {
+                "kind": "definedTypeLinkNode",
+                "name": "payoutBeneficiary"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "reason",
+              "type": {
+                "kind": "definedTypeLinkNode",
+                "name": "redirectReason"
+              }
+            }
+          ],
+          "kind": "structTypeNode"
         }
       }
     ],
@@ -944,7 +944,154 @@
         "name": "distributeTransferQueueOverflow"
       }
     ],
-    "events": [],
+    "events": [
+      {
+        "data": {
+          "kind": "hiddenPrefixTypeNode",
+          "prefix": [
+            {
+              "kind": "constantValueNode",
+              "type": {
+                "kind": "fixedSizeTypeNode",
+                "size": 8,
+                "type": {
+                  "kind": "bytesTypeNode"
+                }
+              },
+              "value": {
+                "data": "a6ac61094d4cbd6d",
+                "encoding": "base16",
+                "kind": "bytesValueNode"
+              }
+            }
+          ],
+          "type": {
+            "fields": [
+              {
+                "kind": "structFieldTypeNode",
+                "name": "channel",
+                "type": {
+                  "kind": "publicKeyTypeNode"
+                }
+              }
+            ],
+            "kind": "structTypeNode"
+          }
+        },
+        "discriminators": [
+          {
+            "constant": {
+              "kind": "constantValueNode",
+              "type": {
+                "kind": "fixedSizeTypeNode",
+                "size": 8,
+                "type": {
+                  "kind": "bytesTypeNode"
+                }
+              },
+              "value": {
+                "data": "a6ac61094d4cbd6d",
+                "encoding": "base16",
+                "kind": "bytesValueNode"
+              }
+            },
+            "kind": "constantDiscriminatorNode",
+            "offset": 0
+          }
+        ],
+        "kind": "eventNode",
+        "name": "opened"
+      },
+      {
+        "data": {
+          "kind": "hiddenPrefixTypeNode",
+          "prefix": [
+            {
+              "kind": "constantValueNode",
+              "type": {
+                "kind": "fixedSizeTypeNode",
+                "size": 8,
+                "type": {
+                  "kind": "bytesTypeNode"
+                }
+              },
+              "value": {
+                "data": "d116b9d754a75450",
+                "encoding": "base16",
+                "kind": "bytesValueNode"
+              }
+            }
+          ],
+          "type": {
+            "fields": [
+              {
+                "kind": "structFieldTypeNode",
+                "name": "channel",
+                "type": {
+                  "kind": "publicKeyTypeNode"
+                }
+              },
+              {
+                "kind": "structFieldTypeNode",
+                "name": "owner",
+                "type": {
+                  "kind": "publicKeyTypeNode"
+                }
+              },
+              {
+                "kind": "structFieldTypeNode",
+                "name": "amount",
+                "type": {
+                  "endian": "le",
+                  "format": "u64",
+                  "kind": "numberTypeNode"
+                }
+              },
+              {
+                "kind": "structFieldTypeNode",
+                "name": "beneficiary",
+                "type": {
+                  "kind": "definedTypeLinkNode",
+                  "name": "payoutBeneficiary"
+                }
+              },
+              {
+                "kind": "structFieldTypeNode",
+                "name": "reason",
+                "type": {
+                  "kind": "definedTypeLinkNode",
+                  "name": "redirectReason"
+                }
+              }
+            ],
+            "kind": "structTypeNode"
+          }
+        },
+        "discriminators": [
+          {
+            "constant": {
+              "kind": "constantValueNode",
+              "type": {
+                "kind": "fixedSizeTypeNode",
+                "size": 8,
+                "type": {
+                  "kind": "bytesTypeNode"
+                }
+              },
+              "value": {
+                "data": "d116b9d754a75450",
+                "encoding": "base16",
+                "kind": "bytesValueNode"
+              }
+            },
+            "kind": "constantDiscriminatorNode",
+            "offset": 0
+          }
+        ],
+        "kind": "eventNode",
+        "name": "payoutRedirected"
+      }
+    ],
     "instructions": [
       {
         "accounts": [

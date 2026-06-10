@@ -42,6 +42,9 @@ pub(super) struct OpenRun {
     /// `[(i+1, i+1)]` defaults — let bps-validation and duplicate-recipient
     /// tests drive arbitrary entry payloads through the same builder.
     pub recipients: Option<Vec<(Pubkey, u16)>>,
+    /// Appended after the 13 fixed account metas. The handler's exact-slice
+    /// destructure must reject any non-empty value.
+    pub extra_accounts: Vec<AccountMeta>,
 }
 
 impl OpenRun {
@@ -59,6 +62,7 @@ impl OpenRun {
             channel: Pubkey::new_unique(),
             channel_ata: Pubkey::new_unique(),
             recipients: None,
+            extra_accounts: Vec::new(),
         }
     }
 
@@ -83,25 +87,23 @@ impl OpenRun {
             }
         }
 
-        let ix = Instruction::new_with_bytes(
-            PROGRAM_ID,
-            &data,
-            vec![
-                AccountMeta::new(self.payer, self.payer_is_signer),
-                AccountMeta::new_readonly(self.payee, false),
-                AccountMeta::new_readonly(self.mint, false),
-                AccountMeta::new_readonly(self.authorized_signer, false),
-                AccountMeta::new(self.channel, false),
-                AccountMeta::new(Pubkey::new_unique(), false), // payer_token_account
-                AccountMeta::new(self.channel_ata, false),
-                AccountMeta::new_readonly(SPL_TOKEN, false),
-                AccountMeta::new_readonly(SYSTEM_PROGRAM, false),
-                AccountMeta::new_readonly(SYSVAR_RENT, false),
-                AccountMeta::new_readonly(ATA_PROGRAM, false),
-                AccountMeta::new_readonly(EVENT_AUTHORITY, false),
-                AccountMeta::new_readonly(PROGRAM_ID, false),
-            ],
-        );
+        let mut metas = vec![
+            AccountMeta::new(self.payer, self.payer_is_signer),
+            AccountMeta::new_readonly(self.payee, false),
+            AccountMeta::new_readonly(self.mint, false),
+            AccountMeta::new_readonly(self.authorized_signer, false),
+            AccountMeta::new(self.channel, false),
+            AccountMeta::new(Pubkey::new_unique(), false), // payer_token_account
+            AccountMeta::new(self.channel_ata, false),
+            AccountMeta::new_readonly(SPL_TOKEN, false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM, false),
+            AccountMeta::new_readonly(SYSVAR_RENT, false),
+            AccountMeta::new_readonly(ATA_PROGRAM, false),
+            AccountMeta::new_readonly(EVENT_AUTHORITY, false),
+            AccountMeta::new_readonly(PROGRAM_ID, false),
+        ];
+        metas.extend(self.extra_accounts.iter().cloned());
+        let ix = Instruction::new_with_bytes(PROGRAM_ID, &data, metas);
 
         let dummy = Account {
             lamports: 1_000_000,

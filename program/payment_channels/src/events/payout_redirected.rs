@@ -1,6 +1,6 @@
 use borsh::BorshSerialize;
 #[cfg(feature = "idl")]
-use codama::CodamaType;
+use codama::CodamaEvent;
 use pinocchio::Address;
 
 use crate::event_engine::{EventDiscriminator, EventSerialize};
@@ -11,7 +11,8 @@ use crate::helpers::accounts::view::{PayoutBeneficiary, RedirectReason};
 /// Token-2022 extension, closed/malformed, or frozen/uninitialized). Makes the
 /// otherwise-silent redirect observable to off-chain indexers.
 #[derive(BorshSerialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "idl", derive(CodamaType))]
+#[cfg_attr(feature = "idl", derive(CodamaEvent))]
+#[cfg_attr(feature = "idl", codama(discriminator(bytes = "d116b9d754a75450")))]
 pub struct PayoutRedirected {
     /// Channel PDA whose crank performed the redirect.
     pub channel: Address,

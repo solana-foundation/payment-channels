@@ -12,13 +12,18 @@ use litesvm::types::TransactionMetadata;
 use payment_channels::event_engine::{
     EVENT_DISCRIMINATOR_LEN, EVENT_IX_TAG_LE, EventDiscriminator,
 };
-use payment_channels_client::types::PayoutRedirected;
+use payment_channels_client::types::{Opened, PayoutRedirected};
 
 /// A decodable on-chain event: a generated client struct paired with the
 /// program-defined Anchor discriminator that tags it on the wire. Binding the
 /// discriminator to the type keeps callers from pairing the wrong two.
 pub trait TestEvent: BorshDeserialize {
     const DISCRIMINATOR: [u8; 8];
+}
+
+impl TestEvent for Opened {
+    const DISCRIMINATOR: [u8; 8] =
+        <payment_channels::events::Opened as EventDiscriminator>::DISCRIMINATOR;
 }
 
 impl TestEvent for PayoutRedirected {

@@ -1,12 +1,13 @@
 use borsh::BorshSerialize;
 #[cfg(feature = "idl")]
-use codama::CodamaType;
+use codama::CodamaEvent;
 use pinocchio::Address;
 
 use crate::event_engine::{EventDiscriminator, EventSerialize};
 
 #[derive(BorshSerialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "idl", derive(CodamaType))]
+#[cfg_attr(feature = "idl", derive(CodamaEvent))]
+#[cfg_attr(feature = "idl", codama(discriminator(bytes = "a6ac61094d4cbd6d")))]
 pub struct Opened {
     pub channel: Address,
 }

@@ -22,6 +22,8 @@ Quick reference for every instruction exposed by the payment-channels program: d
 
 The **Signer** column lists transaction-level signers where applicable; `Ed25519 voucher` means precompile-verified authorization rather than an account signer. PDA signer seeds used for internal CPIs are called out in the purpose or account descriptions.
 
+> **Account shape strictness.** Every instruction takes an exact account list: handlers destructure fixed-size slices and reject transactions with missing *or extra* accounts. The single exception is `distribute`, which accepts a dynamic tail of recipient token accounts after its 10 fixed accounts. The generated clients enforce the same shapes: the TypeScript parsers reject extra accounts, the Rust builders drop their remaining-accounts helpers, and only `distribute` keeps the dynamic tail (`scripts/enforce-fixed-account-shapes.mjs` tightens the codama output at generation time).
+
 ## `open` (1)
 
 Payer-signed initializer. Creates the active channel PDA, creates its escrow ATA, transfers `deposit` from the payer token account, stores the exact Blake3 hash of the distribution preimage, and emits `Opened`. The `authorized_signer` account must be a valid Ed25519 public key, but it does not need to sign `open`. The `payee` account is not curve-checked and may be a program-derived address (PDA) beneficiary.
@@ -194,7 +196,7 @@ Payer-signed one-shot refund in `FINALIZED`. Does not tombstone the PDA.
 
 ## `emitEvent` (228)
 
-Internal self-CPI target for Anchor-compatible events. Event instruction data is `EVENT_IX_TAG_LE` (8 bytes) `|| event_discriminator` (8 bytes) `|| borsh_payload`; because `EVENT_IX_TAG_LE[0] == 228`, byte-0 dispatch routes to this handler. Only the event authority PDA may sign.
+Internal self-CPI target for Anchor-compatible events. Event instruction data is `EVENT_IX_TAG_LE` (8 bytes) `|| event_discriminator` (8 bytes) `|| borsh_payload`; because `EVENT_IX_TAG_LE[0] == 228`, byte-0 dispatch routes to this handler. Only the event authority PDA may sign. Both emitted events (`Opened`, `PayoutRedirected`) are declared in the committed Codama IDL (`program.events`) together with their 8-byte Anchor discriminators, so IDL-driven indexers can decode them without custom tooling.
 
 **Accounts**
 

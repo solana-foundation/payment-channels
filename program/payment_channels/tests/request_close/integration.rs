@@ -83,3 +83,29 @@ fn finalized_status_rejects() {
         )),
     );
 }
+
+/// The exact-slice destructure rejects extra accounts (surfaced as the
+/// custom NotEnoughAccountKeys, despite the too-many direction).
+#[test]
+fn extra_account_rejects() {
+    let payer = Pubkey::new_unique();
+    assert_eq!(
+        RequestCloseRun {
+            extra_accounts: vec![solana_instruction::AccountMeta::new_readonly(
+                Pubkey::new_unique(),
+                false
+            )],
+            ..RequestCloseRun::new(
+                payer,
+                ChannelBuilder::new()
+                    .status(ChannelStatus::Open)
+                    .payer(payer)
+                    .build(),
+            )
+        }
+        .run(),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::NotEnoughAccountKeys as u32
+        )),
+    );
+}

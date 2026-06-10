@@ -19,6 +19,9 @@ pub(super) struct RequestCloseRun {
     /// Whether `payer` is marked as a signer in the account metas.
     pub is_signer: bool,
     pub channel_blob: Vec<u8>,
+    /// Appended after the fixed account metas. The handler's exact-slice
+    /// destructure must reject any non-empty value.
+    pub extra_accounts: Vec<AccountMeta>,
 }
 
 impl RequestCloseRun {
@@ -27,6 +30,7 @@ impl RequestCloseRun {
             payer,
             is_signer: true,
             channel_blob,
+            extra_accounts: Vec::new(),
         }
     }
 
@@ -38,14 +42,12 @@ impl RequestCloseRun {
         let mollusk = Mollusk::load_program();
         let channel_pubkey = Pubkey::new_unique();
 
-        let ix = Instruction::new_with_bytes(
-            PROGRAM_ID,
-            &[DISCRIMINATOR],
-            vec![
-                AccountMeta::new_readonly(self.payer, self.is_signer),
-                AccountMeta::new(channel_pubkey, false),
-            ],
-        );
+        let mut metas = vec![
+            AccountMeta::new_readonly(self.payer, self.is_signer),
+            AccountMeta::new(channel_pubkey, false),
+        ];
+        metas.extend(self.extra_accounts.iter().cloned());
+        let ix = Instruction::new_with_bytes(PROGRAM_ID, &[DISCRIMINATOR], metas);
 
         let channel_account = Account {
             lamports: 10_000_000,
