@@ -87,16 +87,18 @@ export const normalizeEvents = {
       if (definedTypes.some((type) => type.name === event.name)) {
         throw new Error(`Codama IDL event ${event.name} collides with an existing defined type`);
       }
-      // Cloned so the mirror and the event wrapper don't share one struct node.
-      definedTypes.push(definedTypeNode({ name: event.name, type: { ...data } }));
+      definedTypes.push(definedTypeNode({ name: event.name, type: data }));
 
+      // Rebuilt rather than reused: the raw constant types its bytes as an
+      // unsized bytesTypeNode, while the nodes-from-anchor convention wants
+      // the 8-byte fixed-size form.
       const constant = constantValueNode(
         fixedSizeTypeNode(bytesTypeNode(), 8),
         bytesValueNode('base16', discriminator),
       );
       return eventNode({
         name: event.name,
-        data: hiddenPrefixTypeNode({ ...data }, [constant]),
+        data: hiddenPrefixTypeNode(data, [constant]),
         discriminators: [constantDiscriminatorNode(constant)],
       });
     });
@@ -105,14 +107,14 @@ export const normalizeEvents = {
   },
 };
 
-// The event's bare struct, whether or not the data was already wrapped
-// (keeps the visitor idempotent if codama ever pre-wraps).
+// The `CodamaEvent` derive always emits the bare borsh struct as event data.
 function bareEventStruct(event) {
-  const data = event.data?.kind === 'hiddenPrefixTypeNode' ? event.data.type : event.data;
-  if (data?.kind !== 'structTypeNode') {
-    throw new Error(`Codama IDL event ${event.name}: expected struct data, got ${data?.kind}`);
+  if (event.data?.kind !== 'structTypeNode') {
+    throw new Error(
+      `Codama IDL event ${event.name}: expected struct data, got ${event.data?.kind}`,
+    );
   }
-  return data;
+  return event.data;
 }
 
 function singleConstantDiscriminator(event) {
