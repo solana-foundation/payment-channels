@@ -19,7 +19,7 @@ use solana_pubkey::{Pubkey, pubkey};
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-use crate::common::events::{TestEvent, events};
+use crate::common::events::events;
 use crate::common::{PROGRAM_ID, ProgramLoader};
 
 const SPL_TOKEN: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -133,21 +133,19 @@ fn open_emits_opened_event_with_anchor_compatible_wire_format() {
         "self-CPI should be at stack height 2"
     );
 
-    // Anchor-style parse:
-    //   [0..8)   tag          = EVENT_IX_TAG_LE
+    // Anchor-style wire format:
+    //   [0..8)   tag          = EVENT_IX_TAG_LE (matched by the find above)
     //   [8..16)  event_disc   = Opened::DISCRIMINATOR (sha256("event:Opened")[..8])
     //   [16..48) borsh body   = channel as [u8; 32]
-    let data = &inner.instruction.data;
-    assert_eq!(data.len(), 48, "wire length = 8 tag + 8 disc + 32 channel");
-    assert_eq!(&data[..8], &EVENT_IX_TAG_LE);
+    assert_eq!(
+        inner.instruction.data.len(),
+        48,
+        "wire length = 8 tag + 8 disc + 32 channel"
+    );
 
-    // The remainder is the Anchor-client discriminated union: 8 disc bytes
-    // then the borsh body.
-    let disc = &data[8..16];
-    assert_eq!(disc, &Opened::DISCRIMINATOR, "event discriminator mismatch");
-
-    // Round-trip the body through the IDL-generated client struct so the
-    // committed event layout stays pinned to the emitted bytes. The runtime
+    // Round-trip through the IDL-generated client struct: `events` matches the
+    // tag and `Opened::DISCRIMINATOR` before decoding the body, so this single
+    // assert pins the committed event layout to the emitted bytes. The runtime
     // crate's `Opened` stays serialize-only: programs emit events, they
     // don't read them. Off-chain consumers decode via the generated types.
     assert_eq!(events::<Opened>(&meta), vec![Opened { channel }]);
