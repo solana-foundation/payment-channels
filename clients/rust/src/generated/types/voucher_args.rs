@@ -14,5 +14,4 @@ pub struct VoucherArgs {
     pub channel_id: Address,
     pub cumulative_amount: u64,
     pub expires_at: i64,
-    pub chain_id: Address,
 }

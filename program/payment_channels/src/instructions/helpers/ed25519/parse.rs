@@ -34,7 +34,7 @@ pub struct Parsed<'a> {
 ///     crate::errors::PaymentChannelsError::MalformedEd25519Instruction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ed25519ParseError {
-    /// `data.len() != CANONICAL_IX_DATA_LEN (= 192)`.
+    /// `data.len() != CANONICAL_IX_DATA_LEN (= 160)`.
     Length,
     /// `num_signatures != 1`. N = 0 verifies nothing; N > 1 appends
     /// further offsets records whose signatures we never parse, so the
@@ -53,7 +53,7 @@ pub enum Ed25519ParseError {
     /// hardcoded slices land on different bytes than the precompile
     /// checked.
     NonCanonicalOffsets,
-    /// `message_data_size != VOUCHER_PAYLOAD_SIZE (= 80)`.
+    /// `message_data_size != VOUCHER_PAYLOAD_SIZE (= 48)`.
     MessageSize,
 }
 
@@ -61,7 +61,7 @@ pub enum Ed25519ParseError {
 /// inline layout. Validates every field of `Ed25519SignatureOffsets`.
 pub fn parse(data: &[u8]) -> Result<Parsed<'_>, Ed25519ParseError> {
     // Full canonical inline layout: `[num_sigs=1, pad=0, offsets×1, pubkey, signature, message]`.
-    // Guard — length. Pins the full 192-byte canonical layout.
+    // Guard — length. Pins the full 160-byte canonical layout.
     if data.len() != CANONICAL_IX_DATA_LEN {
         return Err(Ed25519ParseError::Length);
     }
@@ -113,8 +113,8 @@ pub fn parse(data: &[u8]) -> Result<Parsed<'_>, Ed25519ParseError> {
         return Err(Ed25519ParseError::NonCanonicalOffsets);
     }
 
-    // Guard — canonical message length (80 B: `channel_id ||
-    // cumulative_amount || expires_at || chain_id`, LE).
+    // Guard — canonical message length (48 B: `channel_id ||
+    // cumulative_amount || expires_at`, LE).
     if message_data_size as usize != VOUCHER_PAYLOAD_SIZE {
         return Err(Ed25519ParseError::MessageSize);
     }

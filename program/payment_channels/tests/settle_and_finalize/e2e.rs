@@ -18,7 +18,7 @@ use solana_transaction::Transaction;
 use crate::common::{
     ChannelBuilder, INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, expect_custom_err,
     read_channel,
-    voucher::{TEST_CHAIN_ID, build_ed25519_ix, voucher_payload},
+    voucher::{build_ed25519_ix, voucher_payload},
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -94,7 +94,6 @@ fn open_to_finalized_with_voucher() {
         channel_id: channel,
         cumulative_amount: cumulative,
         expires_at: 0,
-        chain_id: TEST_CHAIN_ID,
     };
     let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = authorized_signer.sign_message(&payload).into();
@@ -156,7 +155,6 @@ fn with_voucher_expired_rejects() {
         channel_id: channel,
         cumulative_amount: 100_000,
         expires_at,
-        chain_id: TEST_CHAIN_ID,
     };
     let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = authorized_signer.sign_message(&payload).into();
@@ -209,7 +207,6 @@ fn with_voucher_wrong_authorized_signer_rejects() {
         channel_id: channel,
         cumulative_amount: 100_000,
         expires_at: 0,
-        chain_id: TEST_CHAIN_ID,
     };
     let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = impostor_signer.sign_message(&payload).into();
