@@ -20,7 +20,7 @@ use solana_compute_budget_interface::ComputeBudgetInstruction;
 use crate::common::{
     ChannelBuilder, INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, expect_custom_err,
     read_channel,
-    voucher::{TEST_CHAIN_ID, build_ed25519_ix, voucher_payload},
+    voucher::{build_ed25519_ix, voucher_payload},
 };
 use payment_channels::state::ChannelStatus;
 
@@ -85,7 +85,6 @@ fn settle_advances_watermark_on_valid_voucher() {
         channel_id: channel,
         cumulative_amount: cumulative,
         expires_at: 0,
-        chain_id: TEST_CHAIN_ID,
     };
     let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = signer.sign_message(&payload).into();
@@ -119,13 +118,11 @@ fn settle_batches_two_paired_ix_advance_watermark() {
         channel_id: channel,
         cumulative_amount: 300_000,
         expires_at: 0,
-        chain_id: TEST_CHAIN_ID,
     };
     let voucher_2 = VoucherArgs {
         channel_id: channel,
         cumulative_amount: 500_000,
         expires_at: 0,
-        chain_id: TEST_CHAIN_ID,
     };
 
     let payload_1 = voucher_payload(&voucher_1);
@@ -171,7 +168,6 @@ fn settle_without_preceding_ed25519_ix_rejects() {
             channel_id: channel,
             cumulative_amount: 500_000,
             expires_at: 0,
-            chain_id: TEST_CHAIN_ID,
         },
     );
 
@@ -209,7 +205,6 @@ fn settle_after_expiry_rejects() {
         channel_id: channel,
         cumulative_amount: 500_000,
         expires_at,
-        chain_id: TEST_CHAIN_ID,
     };
     let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = signer.sign_message(&payload).into();
@@ -245,7 +240,6 @@ fn settle_voucher_channel_mismatch_rejects() {
         channel_id: channel_b,
         cumulative_amount: 500_000,
         expires_at: 0,
-        chain_id: TEST_CHAIN_ID,
     };
     let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = signer.sign_message(&payload).into();
@@ -280,7 +274,6 @@ fn settle_voucher_over_deposit_rejects() {
         channel_id: channel,
         cumulative_amount: 500_001,
         expires_at: 0,
-        chain_id: TEST_CHAIN_ID,
     };
     let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = signer.sign_message(&payload).into();
@@ -302,46 +295,6 @@ fn settle_voucher_over_deposit_rejects() {
 }
 
 #[test]
-fn settle_voucher_foreign_chain_id_rejects() {
-    let mut svm = LiteSVM::load_program();
-    let fee_payer = Keypair::new();
-    svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
-
-    let signer = Keypair::new();
-    let channel = Pubkey::new_unique();
-    seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
-
-    // Correctly signed, correct channel, within deposit — but bound to another
-    // cluster's chain id. The ed25519 precompile passes; the program must reject
-    // the cross-cluster replay at the CHAIN_ID check.
-    let foreign_chain = Pubkey::new_unique();
-    assert_ne!(foreign_chain, TEST_CHAIN_ID);
-    let voucher = VoucherArgs {
-        channel_id: channel,
-        cumulative_amount: 500_000,
-        expires_at: 0,
-        chain_id: foreign_chain,
-    };
-    let payload = voucher_payload(&voucher);
-    let signature: [u8; 64] = signer.sign_message(&payload).into();
-    let pubkey = signer.pubkey().to_bytes();
-
-    let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
-    let settle_ix = build_settle_ix(&channel, voucher);
-
-    let tx = Transaction::new_signed_with_payer(
-        &[ed25519_ix, settle_ix],
-        Some(&fee_payer.pubkey()),
-        &[&fee_payer],
-        svm.latest_blockhash(),
-    );
-    expect_custom_err(
-        svm.send_transaction(tx),
-        PaymentChannelsError::VoucherChainMismatch,
-    );
-}
-
-#[test]
 fn settle_voucher_not_monotonic_rejects() {
     let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
@@ -355,7 +308,6 @@ fn settle_voucher_not_monotonic_rejects() {
         channel_id: channel,
         cumulative_amount: 500_000,
         expires_at: 0,
-        chain_id: TEST_CHAIN_ID,
     };
     let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = signer.sign_message(&payload).into();
@@ -392,13 +344,11 @@ fn settle_voucher_message_mismatch_rejects() {
         channel_id: channel,
         cumulative_amount: 100_000,
         expires_at: 0,
-        chain_id: TEST_CHAIN_ID,
     };
     let voucher_submitted = VoucherArgs {
         channel_id: channel,
         cumulative_amount: 200_000,
         expires_at: 0,
-        chain_id: TEST_CHAIN_ID,
     };
     let payload_signed = voucher_payload(&voucher_signed);
     let signature: [u8; 64] = signer.sign_message(&payload_signed).into();
@@ -434,7 +384,6 @@ fn settle_voucher_signer_mismatch_rejects() {
         channel_id: channel,
         cumulative_amount: 500_000,
         expires_at: 0,
-        chain_id: TEST_CHAIN_ID,
     };
     let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = impostor.sign_message(&payload).into();
@@ -469,7 +418,6 @@ fn settle_malformed_ed25519_ix_rejects() {
         channel_id: channel,
         cumulative_amount: 500_000,
         expires_at: 0,
-        chain_id: TEST_CHAIN_ID,
     };
     let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = signer.sign_message(&payload).into();
@@ -508,7 +456,6 @@ fn settle_preceding_compute_budget_ix_rejects() {
         channel_id: channel,
         cumulative_amount: 500_000,
         expires_at: 0,
-        chain_id: TEST_CHAIN_ID,
     };
     // Preceding ix resolves cleanly, but its program id is not the Ed25519
     // precompile — exercises the program-id branch of
@@ -551,7 +498,6 @@ fn settle_with_invalid_signature_rejects_before_settle_runs() {
         channel_id: channel,
         cumulative_amount: 500_000,
         expires_at: 0,
-        chain_id: TEST_CHAIN_ID,
     };
     let payload = voucher_payload(&voucher);
     let pubkey = signer.pubkey().to_bytes();

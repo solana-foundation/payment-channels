@@ -102,7 +102,6 @@ pub struct Voucher {
     pub channel_id:        Pubkey,        // JSON: base58 string
     pub cumulative_amount: u64,           // JSON: decimal ASCII string (base units)
     pub expires_at:        i64,           // JSON: ISO 8601 string when != 0, omitted when 0
-    pub chain_id:          Pubkey,        // JSON: base58 string; cluster genesis hash, equals on-chain CHAIN_ID
 }
 
 pub struct SignedVoucher {
@@ -128,15 +127,16 @@ pub struct VoucherArgs {
     pub channel_id:        Pubkey,        // 32 bytes
     pub cumulative_amount: u64,           //  8 bytes, LE
     pub expires_at:        i64,           //  8 bytes, LE
-    pub chain_id:          Pubkey,        // 32 bytes (cluster genesis hash)
 }
 ```
 
-Total 80 bytes, stored align-1 (`[u8; 8]` arrays for the two ints). Field order matches `Borsh({ channel_id, cumulative_amount, expires_at, chain_id })`, so the struct's raw bytes ARE the Ed25519-signed payload — no repack between `VoucherArgs` and the precompile message.
+Total 48 bytes, stored align-1 (`[u8; 8]` arrays for the two ints). Field order matches `Borsh({ channel_id, cumulative_amount, expires_at })`, so the struct's raw bytes ARE the Ed25519-signed payload — no repack between `VoucherArgs` and the precompile message.
 
 **Verification.** The caller bundles an Ed25519 native-program ix immediately before each voucher-bearing program ix in the same transaction. The program reads the verified message bytes from that ix via the Instructions sysvar and asserts they equal `VoucherArgs::as_bytes()`. The pubkey embedded in the precompile ix MUST equal `Channel.authorized_signer` (which equals `payer` if no delegate was bound at `open`). `open` rejects `authorized_signer` values that are not valid Ed25519 public-key points.
 
-**Replay protection.** `channel_id` (a PDA, hence program- and seed-specific) + an explicit `chain_id` checked against this cluster's `CHAIN_ID` (genesis hash), so a voucher signed for one cluster cannot be replayed against an identically-addressed channel on another + strictly monotonic `cumulative_amount > settled` + optional `expires_at`. No explicit nonce. This strict watermark rule applies to `settle` and to `settleAndFinalize` when a voucher is supplied. A supplied `settleAndFinalize` voucher with `cumulative_amount <= settled` is invalid and MUST cause the `settleAndFinalize` instruction to reject; if no additional settlement is needed, call `settleAndFinalize` without a voucher to finalize the current `settled` watermark.
+**Replay protection.** `channel_id` (a PDA, hence program- and seed-specific) + strictly monotonic `cumulative_amount > settled` + optional `expires_at`. No explicit nonce. This strict watermark rule applies to `settle` and to `settleAndFinalize` when a voucher is supplied. A supplied `settleAndFinalize` voucher with `cumulative_amount <= settled` is invalid and MUST cause the `settleAndFinalize` instruction to reject; if no additional settlement is needed, call `settleAndFinalize` without a voucher to finalize the current `settled` watermark.
+
+**Cluster scope.** Vouchers are not bound to a cluster. A voucher could in principle be replayed against an identically-addressed channel on another cluster — which requires the same program, mint, salt, payer, and authorized_signer at identical addresses on two clusters plus an operator accepting it cross-cluster. This residual replay is an accepted operational risk (no parallel clusters in use; SVM has no EVM-style cross-chain vector), mitigated off-chain by pinning each server and channel to one cluster — see ADR-002, Server Implementation Requirements.
 
 ### FSM
 

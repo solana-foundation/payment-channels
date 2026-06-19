@@ -20,7 +20,6 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
     expect(() =>
       encoder.encode({
         channelId: SYSTEM_ADDR,
-        chainId: SYSTEM_ADDR,
         cumulativeAmount: 9007199254740993 as unknown as bigint,
         expiresAt: 0n,
       }),
@@ -36,25 +35,22 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
     const encoder = getVoucherArgsEncoder();
     const a = encoder.encode({
       channelId: SYSTEM_ADDR,
-      chainId: SYSTEM_ADDR,
       cumulativeAmount: 2n ** 53n,
       expiresAt: 0n,
     });
     const b = encoder.encode({
       channelId: SYSTEM_ADDR,
-      chainId: SYSTEM_ADDR,
       cumulativeAmount: 2n ** 53n + 1n,
       expiresAt: 0n,
     });
-    expect(a.length).toBe(80);
-    expect(b.length).toBe(80);
+    expect(a.length).toBe(48);
+    expect(b.length).toBe(48);
     expect(Buffer.from(a).equals(Buffer.from(b))).toBe(false);
   });
 
   it('round-trips bigint cumulativeAmount through encoder/decoder as bigint', () => {
     const bytes = getVoucherArgsEncoder().encode({
       channelId: SYSTEM_ADDR,
-      chainId: SYSTEM_ADDR,
       cumulativeAmount: 100n,
       expiresAt: 0n,
     });
@@ -68,13 +64,11 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
     const encoder = getVoucherArgsEncoder();
     const fromNumber = encoder.encode({
       channelId: SYSTEM_ADDR,
-      chainId: SYSTEM_ADDR,
       cumulativeAmount: 100 as unknown as bigint,
       expiresAt: 0n,
     });
     const fromBigint = encoder.encode({
       channelId: SYSTEM_ADDR,
-      chainId: SYSTEM_ADDR,
       cumulativeAmount: 100n,
       expiresAt: 0n,
     });
@@ -87,7 +81,6 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
     expect(() =>
       encoder.encode({
         channelId: SYSTEM_ADDR,
-        chainId: SYSTEM_ADDR,
         cumulativeAmount: 0n,
         expiresAt: -1n,
       }),
@@ -96,7 +89,6 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
     expect(() =>
       encoder.encode({
         channelId: SYSTEM_ADDR,
-        chainId: SYSTEM_ADDR,
         cumulativeAmount: 0n,
         expiresAt: 2n ** 63n,
       }),
@@ -164,7 +156,7 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
     );
   });
 
-  it('still throws on junk voucher when hasVoucher == 0 - encoder must produce well-formed 80 bytes', () => {
+  it('still throws on junk voucher when hasVoucher == 0 - encoder must produce well-formed 48 bytes', () => {
     const encoder = getSettleAndFinalizeArgsEncoder();
     // The program ignores the voucher when hasVoucher=0, but the encoder
     // still serializes it, so the safety guard should still fire.
@@ -173,7 +165,6 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
         hasVoucher: 0,
         voucher: {
           channelId: SYSTEM_ADDR,
-          chainId: SYSTEM_ADDR,
           cumulativeAmount: 9007199254740993 as unknown as bigint,
           expiresAt: 0n,
         },
@@ -188,7 +179,6 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
         hasVoucher: 0,
         voucher: {
           channelId: SYSTEM_ADDR,
-          chainId: SYSTEM_ADDR,
           cumulativeAmount: 0n,
           expiresAt: 0n,
         },

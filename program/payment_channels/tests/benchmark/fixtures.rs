@@ -31,7 +31,7 @@ use spl_token_2022_interface::instruction::initialize_mint2;
 use crate::common::{
     ATA_PROGRAM, INSTRUCTIONS_SYSVAR, PROGRAM_ID, SYSTEM_PROGRAM, SYSVAR_RENT, event_authority,
     treasury_owner,
-    voucher::{TEST_CHAIN_ID, build_ed25519_ix, voucher_payload},
+    voucher::{build_ed25519_ix, voucher_payload},
 };
 
 pub const GRACE_PERIOD: u32 = 3_600;
@@ -290,7 +290,6 @@ pub fn build_settle_pair(
         channel_id: f.channel,
         cumulative_amount,
         expires_at,
-        chain_id: TEST_CHAIN_ID,
     };
     let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = f.authorized_signer.sign_message(&payload).into();

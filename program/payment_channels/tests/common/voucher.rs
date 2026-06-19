@@ -1,7 +1,7 @@
 //! Voucher + Ed25519 precompile helpers shared across litesvm-driven tests.
 //!
 //! The on-chain `VoucherArgs` field order
-//! (`channel_id || cumulative_amount || expires_at || chain_id`) matches the
+//! (`channel_id || cumulative_amount || expires_at`) matches the
 //! Ed25519-signed payload byte-for-byte, so the client's Borsh output IS
 //! the message the precompile must verify.
 
@@ -9,13 +9,8 @@ use payment_channels::VOUCHER_PAYLOAD_SIZE;
 use payment_channels::ed25519;
 use payment_channels_client::types::VoucherArgs;
 use solana_instruction::Instruction;
-use solana_pubkey::Pubkey;
 
 use super::ed25519_program_id;
-
-/// The program's [`CHAIN_ID`](payment_channels::CHAIN_ID) — the localnet
-/// placeholder our tests build against.
-pub const TEST_CHAIN_ID: Pubkey = Pubkey::new_from_array(*payment_channels::CHAIN_ID.as_array());
 
 /// Borsh-serialize a voucher into the byte string the Ed25519 precompile
 /// must verify.
