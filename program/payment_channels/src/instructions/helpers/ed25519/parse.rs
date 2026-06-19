@@ -16,7 +16,7 @@ use crate::instructions::VOUCHER_PAYLOAD_SIZE;
 const CANONICAL_IX_DATA_LEN: usize = MESSAGE_OFFSET + VOUCHER_PAYLOAD_SIZE;
 
 /// Parsed Ed25519 precompile ix data. Sized-array refs let the caller
-/// compare against `[u8; 32]` / `[u8; 80]` fixtures without slice-length
+/// compare against `[u8; 32]` / `[u8; 48]` fixtures without slice-length
 /// runtime checks.
 pub struct Parsed<'a> {
     pub pubkey: &'a [u8; PUBKEY_SERIALIZED_SIZE],
