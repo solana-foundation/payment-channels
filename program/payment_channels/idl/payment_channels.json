@@ -331,34 +331,9 @@
       },
       {
         "kind": "definedTypeNode",
-        "name": "settleArgs",
-        "type": {
-          "fields": [
-            {
-              "kind": "structFieldTypeNode",
-              "name": "voucher",
-              "type": {
-                "kind": "definedTypeLinkNode",
-                "name": "voucherArgs"
-              }
-            }
-          ],
-          "kind": "structTypeNode"
-        }
-      },
-      {
-        "kind": "definedTypeNode",
         "name": "settleAndFinalizeArgs",
         "type": {
           "fields": [
-            {
-              "kind": "structFieldTypeNode",
-              "name": "voucher",
-              "type": {
-                "kind": "definedTypeLinkNode",
-                "name": "voucherArgs"
-              }
-            },
             {
               "kind": "structFieldTypeNode",
               "name": "hasVoucher",
@@ -759,7 +734,7 @@
       {
         "code": 236,
         "kind": "errorNode",
-        "message": "Ed25519 message does not match Borsh voucher payload",
+        "message": "Reserved (formerly: Ed25519 message does not match Borsh voucher payload)",
         "name": "voucherMessageMismatch"
       },
       {
@@ -1239,14 +1214,6 @@
               "endian": "le",
               "format": "u8",
               "kind": "numberTypeNode"
-            }
-          },
-          {
-            "kind": "instructionArgumentNode",
-            "name": "settleArgs",
-            "type": {
-              "kind": "definedTypeLinkNode",
-              "name": "settleArgs"
             }
           }
         ],

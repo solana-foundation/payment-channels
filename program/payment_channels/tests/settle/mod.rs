@@ -11,29 +11,20 @@ use crate::common::{PROGRAM_ID, ProgramLoader};
 
 /// Execution descriptor for a single `settle` Mollusk run.
 ///
-/// Construct with [`SettleRun::new`] for the required fields; override any
-/// public field via struct update syntax before calling [`SettleRun::run`].
+/// Construct with [`SettleRun::new`]; call [`SettleRun::run`] to execute.
 ///
-/// Pre-`verify_voucher` guards (status, owner, discriminator, version) fire
-/// before the Instructions sysvar is read, so this harness wires a dummy
-/// account at that slot. Tests that need a real Ed25519 precompile ix live
-/// in `e2e.rs` under LiteSVM.
+/// These tests exercise the pre-`verify_voucher` guards (status, owner,
+/// discriminator, version), which fire before the Instructions sysvar is read,
+/// so this harness wires a dummy account at that slot and the `settle`
+/// instruction carries no data beyond its discriminator. Tests that need a
+/// real Ed25519 precompile ix live in `e2e.rs` under LiteSVM.
 pub(super) struct SettleRun {
     pub channel_blob: Vec<u8>,
-    /// Voucher `channel_id` field (32 bytes).
-    pub voucher_channel_id: Pubkey,
-    pub voucher_cumulative_amount: u64,
-    pub voucher_expires_at: i64,
 }
 
 impl SettleRun {
     pub fn new(channel_blob: Vec<u8>) -> Self {
-        Self {
-            channel_blob,
-            voucher_channel_id: Pubkey::default(),
-            voucher_cumulative_amount: 0,
-            voucher_expires_at: 0,
-        }
+        Self { channel_blob }
     }
 
     pub fn run(self) -> ProgramResult {
@@ -44,12 +35,10 @@ impl SettleRun {
         let mollusk = Mollusk::load_program();
         let channel_pubkey = Pubkey::new_unique();
 
-        // Wire layout: [discriminator(1)] [channel_id(32)] [cumulative(8)]
-        //              [expires_at(8)] = 49 bytes total.
-        let mut ix_data = vec![DISCRIMINATOR];
-        ix_data.extend_from_slice(self.voucher_channel_id.as_ref());
-        ix_data.extend_from_slice(&self.voucher_cumulative_amount.to_le_bytes());
-        ix_data.extend_from_slice(&self.voucher_expires_at.to_le_bytes());
+        // `settle` carries no data beyond its discriminator; the voucher rides
+        // in the (here-absent) bundled Ed25519 ix, which these pre-sysvar guard
+        // tests never reach.
+        let ix_data = vec![DISCRIMINATOR];
 
         let ix = Instruction::new_with_bytes(
             PROGRAM_ID,

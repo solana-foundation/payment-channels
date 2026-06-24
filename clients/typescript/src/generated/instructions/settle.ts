@@ -31,12 +31,6 @@ import {
 } from "@solana/program-client-core";
 import { getU8Decoder, getU8Encoder } from "../../safe-codecs.js";
 import { PAYMENT_CHANNELS_PROGRAM_ADDRESS } from "../programs";
-import {
-  getSettleArgsDecoder,
-  getSettleArgsEncoder,
-  type SettleArgs,
-  type SettleArgsArgs,
-} from "../types";
 
 export const SETTLE_DISCRIMINATOR = 2;
 
@@ -63,28 +57,19 @@ export type SettleInstruction<
     ]
   >;
 
-export type SettleInstructionData = {
-  discriminator: number;
-  settleArgs: SettleArgs;
-};
+export type SettleInstructionData = { discriminator: number };
 
-export type SettleInstructionDataArgs = { settleArgs: SettleArgsArgs };
+export type SettleInstructionDataArgs = {};
 
 export function getSettleInstructionDataEncoder(): FixedSizeEncoder<SettleInstructionDataArgs> {
   return transformEncoder(
-    getStructEncoder([
-      ["discriminator", getU8Encoder()],
-      ["settleArgs", getSettleArgsEncoder()],
-    ]),
+    getStructEncoder([["discriminator", getU8Encoder()]]),
     (value) => ({ ...value, discriminator: SETTLE_DISCRIMINATOR }),
   );
 }
 
 export function getSettleInstructionDataDecoder(): FixedSizeDecoder<SettleInstructionData> {
-  return getStructDecoder([
-    ["discriminator", getU8Decoder()],
-    ["settleArgs", getSettleArgsDecoder()],
-  ]);
+  return getStructDecoder([["discriminator", getU8Decoder()]]);
 }
 
 export function getSettleInstructionDataCodec(): FixedSizeCodec<
@@ -103,7 +88,6 @@ export type SettleInput<
 > = {
   channel: Address<TAccountChannel>;
   instructionsSysvar: Address<TAccountInstructionsSysvar>;
-  settleArgs: SettleInstructionDataArgs["settleArgs"];
 };
 
 export function getSettleInstruction<
@@ -135,18 +119,13 @@ export function getSettleInstruction<
     ResolvedInstructionAccount
   >;
 
-  // Original args.
-  const args = { ...input };
-
   const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
   return Object.freeze({
     accounts: [
       getAccountMeta("channel", accounts.channel),
       getAccountMeta("instructionsSysvar", accounts.instructionsSysvar),
     ],
-    data: getSettleInstructionDataEncoder().encode(
-      args as SettleInstructionDataArgs,
-    ),
+    data: getSettleInstructionDataEncoder().encode({}),
     programAddress,
   } as SettleInstruction<
     TProgramAddress,

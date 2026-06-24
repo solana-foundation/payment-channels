@@ -16,10 +16,8 @@
 
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, MintTo};
-use payment_channels_client::instructions::{
-    Open, OpenInstructionArgs, Settle, SettleInstructionArgs,
-};
-use payment_channels_client::types::{DistributionEntry, OpenArgs, SettleArgs, VoucherArgs};
+use payment_channels_client::instructions::{Open, OpenInstructionArgs, Settle};
+use payment_channels_client::types::{DistributionEntry, OpenArgs, VoucherArgs};
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -299,9 +297,7 @@ pub fn build_settle_pair(
         channel: f.channel,
         instructions_sysvar: INSTRUCTIONS_SYSVAR,
     }
-    .instruction(SettleInstructionArgs {
-        settle_args: SettleArgs { voucher },
-    });
+    .instruction();
     (ed_ix, settle_ix)
 }
 

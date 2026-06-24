@@ -198,7 +198,7 @@ if (process.env["NODE_ENV"] !== "production") {
     [PAYMENT_CHANNELS_ERROR__UNSUPPORTED_CHANNEL_VERSION]: `Unsupported channel version`,
     [PAYMENT_CHANNELS_ERROR__VOUCHER_CHANNEL_MISMATCH]: `Voucher channel_id does not match channel PDA`,
     [PAYMENT_CHANNELS_ERROR__VOUCHER_EXPIRED]: `Voucher expired`,
-    [PAYMENT_CHANNELS_ERROR__VOUCHER_MESSAGE_MISMATCH]: `Ed25519 message does not match Borsh voucher payload`,
+    [PAYMENT_CHANNELS_ERROR__VOUCHER_MESSAGE_MISMATCH]: `Reserved (formerly: Ed25519 message does not match Borsh voucher payload)`,
     [PAYMENT_CHANNELS_ERROR__VOUCHER_OVER_DEPOSIT]: `Voucher cumulative_amount exceeds channel deposit`,
     [PAYMENT_CHANNELS_ERROR__VOUCHER_SIGNER_MISMATCH]: `Voucher signer does not match channel authorized_signer`,
     [PAYMENT_CHANNELS_ERROR__VOUCHER_WATERMARK_NOT_MONOTONIC]: `Voucher watermark not strictly monotonic`,

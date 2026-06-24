@@ -18,12 +18,10 @@ pub(super) struct SettleAndFinalizeRun {
     pub merchant: Pubkey,
     pub is_signer: bool,
     pub channel_blob: Vec<u8>,
-    /// `0` = no voucher; any other byte = apply voucher bytes below.
+    /// `0` = no voucher; any other byte = apply the voucher carried by the
+    /// bundled Ed25519 ix. These Mollusk runs wire no real precompile ix, so a
+    /// non-zero value here exercises the missing-Ed25519 path, not a happy one.
     pub has_voucher: u8,
-    /// Voucher `channel_id` field (32 bytes). Ignored when `has_voucher == 0`.
-    pub voucher_channel_id: Pubkey,
-    pub voucher_cumulative_amount: u64,
-    pub voucher_expires_at: i64,
 }
 
 impl SettleAndFinalizeRun {
@@ -33,9 +31,6 @@ impl SettleAndFinalizeRun {
             is_signer: true,
             channel_blob,
             has_voucher: 0,
-            voucher_channel_id: Pubkey::default(),
-            voucher_cumulative_amount: 0,
-            voucher_expires_at: 0,
         }
     }
 
@@ -47,13 +42,9 @@ impl SettleAndFinalizeRun {
         let mollusk = Mollusk::load_program();
         let channel_pubkey = Pubkey::new_unique();
 
-        // Wire layout: [discriminator(1)] [channel_id(32)] [cumulative(8)]
-        //              [expires_at(8)] [has_voucher(1)] = 50 bytes total.
-        let mut ix_data = vec![DISCRIMINATOR];
-        ix_data.extend_from_slice(self.voucher_channel_id.as_ref());
-        ix_data.extend_from_slice(&self.voucher_cumulative_amount.to_le_bytes());
-        ix_data.extend_from_slice(&self.voucher_expires_at.to_le_bytes());
-        ix_data.push(self.has_voucher);
+        // Wire layout: [discriminator(1)] [has_voucher(1)] = 2 bytes total. The
+        // voucher itself (when applied) rides in the bundled Ed25519 ix.
+        let ix_data = vec![DISCRIMINATOR, self.has_voucher];
 
         let ix = Instruction::new_with_bytes(
             PROGRAM_ID,

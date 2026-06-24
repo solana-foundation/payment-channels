@@ -5,8 +5,8 @@
 use litesvm::LiteSVM;
 use payment_channels::PaymentChannelsError;
 use payment_channels::ed25519;
-use payment_channels_client::instructions::{Settle, SettleInstructionArgs};
-use payment_channels_client::types::{SettleArgs, VoucherArgs};
+use payment_channels_client::instructions::Settle;
+use payment_channels_client::types::VoucherArgs;
 use solana_account::Account;
 use solana_clock::Clock;
 use solana_instruction::Instruction;
@@ -56,14 +56,12 @@ fn channel_status_from_u8(s: u8) -> ChannelStatus {
     ChannelStatus::try_from(s).expect("valid status byte")
 }
 
-fn build_settle_ix(channel: &Pubkey, voucher: VoucherArgs) -> Instruction {
+fn build_settle_ix(channel: &Pubkey) -> Instruction {
     Settle {
         channel: *channel,
         instructions_sysvar: INSTRUCTIONS_SYSVAR,
     }
-    .instruction(SettleInstructionArgs {
-        settle_args: SettleArgs { voucher },
-    })
+    .instruction()
 }
 
 fn read_settled(svm: &LiteSVM, channel: &Pubkey) -> u64 {
@@ -91,7 +89,7 @@ fn settle_advances_watermark_on_valid_voucher() {
     let pubkey = signer.pubkey().to_bytes();
 
     let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
-    let settle_ix = build_settle_ix(&channel, voucher);
+    let settle_ix = build_settle_ix(&channel);
 
     let tx = Transaction::new_signed_with_payer(
         &[ed25519_ix, settle_ix],
@@ -133,8 +131,8 @@ fn settle_batches_two_paired_ix_advance_watermark() {
 
     let ed25519_ix_1 = build_ed25519_ix(&pubkey, &signature_1, &payload_1);
     let ed25519_ix_2 = build_ed25519_ix(&pubkey, &signature_2, &payload_2);
-    let settle_ix_1 = build_settle_ix(&channel, voucher_1);
-    let settle_ix_2 = build_settle_ix(&channel, voucher_2);
+    let settle_ix_1 = build_settle_ix(&channel);
+    let settle_ix_2 = build_settle_ix(&channel);
 
     // Batch layout `[ed25519_1, settle_1, ed25519_2, settle_2]`: each
     // `settle` reads its paired ed25519 ix at `current - 1`. Positional
@@ -162,14 +160,7 @@ fn settle_without_preceding_ed25519_ix_rejects() {
     let channel = Pubkey::new_unique();
     seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
 
-    let settle_ix = build_settle_ix(
-        &channel,
-        VoucherArgs {
-            channel_id: channel,
-            cumulative_amount: 500_000,
-            expires_at: 0,
-        },
-    );
+    let settle_ix = build_settle_ix(&channel);
 
     let tx = Transaction::new_signed_with_payer(
         &[settle_ix],
@@ -211,7 +202,7 @@ fn settle_after_expiry_rejects() {
     let pubkey = signer.pubkey().to_bytes();
 
     let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
-    let settle_ix = build_settle_ix(&channel, voucher);
+    let settle_ix = build_settle_ix(&channel);
 
     let tx = Transaction::new_signed_with_payer(
         &[ed25519_ix, settle_ix],
@@ -246,7 +237,7 @@ fn settle_voucher_channel_mismatch_rejects() {
     let pubkey = signer.pubkey().to_bytes();
 
     let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
-    let settle_ix = build_settle_ix(&channel_a, voucher);
+    let settle_ix = build_settle_ix(&channel_a);
 
     let tx = Transaction::new_signed_with_payer(
         &[ed25519_ix, settle_ix],
@@ -280,7 +271,7 @@ fn settle_voucher_over_deposit_rejects() {
     let pubkey = signer.pubkey().to_bytes();
 
     let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
-    let settle_ix = build_settle_ix(&channel, voucher);
+    let settle_ix = build_settle_ix(&channel);
 
     let tx = Transaction::new_signed_with_payer(
         &[ed25519_ix, settle_ix],
@@ -314,7 +305,7 @@ fn settle_voucher_not_monotonic_rejects() {
     let pubkey = signer.pubkey().to_bytes();
 
     let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
-    let settle_ix = build_settle_ix(&channel, voucher);
+    let settle_ix = build_settle_ix(&channel);
 
     let tx = Transaction::new_signed_with_payer(
         &[ed25519_ix, settle_ix],
@@ -328,46 +319,11 @@ fn settle_voucher_not_monotonic_rejects() {
     );
 }
 
-#[test]
-fn settle_voucher_message_mismatch_rejects() {
-    let mut svm = LiteSVM::load_program();
-    let fee_payer = Keypair::new();
-    svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
-
-    let signer = Keypair::new();
-    let channel = Pubkey::new_unique();
-    seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
-
-    // Sign one payload but submit a different `VoucherArgs`. Both cumulative
-    // values pass cap/monotonicity, so only the message check can fire.
-    let voucher_signed = VoucherArgs {
-        channel_id: channel,
-        cumulative_amount: 100_000,
-        expires_at: 0,
-    };
-    let voucher_submitted = VoucherArgs {
-        channel_id: channel,
-        cumulative_amount: 200_000,
-        expires_at: 0,
-    };
-    let payload_signed = voucher_payload(&voucher_signed);
-    let signature: [u8; 64] = signer.sign_message(&payload_signed).into();
-    let pubkey = signer.pubkey().to_bytes();
-
-    let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload_signed);
-    let settle_ix = build_settle_ix(&channel, voucher_submitted);
-
-    let tx = Transaction::new_signed_with_payer(
-        &[ed25519_ix, settle_ix],
-        Some(&fee_payer.pubkey()),
-        &[&fee_payer],
-        svm.latest_blockhash(),
-    );
-    expect_custom_err(
-        svm.send_transaction(tx),
-        PaymentChannelsError::VoucherMessageMismatch,
-    );
-}
+// (Former `settle_voucher_message_mismatch_rejects` removed: the settle
+// instruction no longer carries a voucher copy in its data, so a caller cannot
+// submit a voucher that diverges from the Ed25519-signed message. The voucher
+// is read straight from that message, making divergence structurally
+// impossible — the case the old `VoucherMessageMismatch` guarded against.)
 
 #[test]
 fn settle_voucher_signer_mismatch_rejects() {
@@ -390,7 +346,7 @@ fn settle_voucher_signer_mismatch_rejects() {
     let pubkey = impostor.pubkey().to_bytes();
 
     let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
-    let settle_ix = build_settle_ix(&channel, voucher);
+    let settle_ix = build_settle_ix(&channel);
 
     let tx = Transaction::new_signed_with_payer(
         &[ed25519_ix, settle_ix],
@@ -428,7 +384,7 @@ fn settle_malformed_ed25519_ix_rejects() {
     // program's `parse` then rejects on the `padding == 0` guard.
     let mut ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
     ed25519_ix.data[1] = 1;
-    let settle_ix = build_settle_ix(&channel, voucher);
+    let settle_ix = build_settle_ix(&channel);
 
     let tx = Transaction::new_signed_with_payer(
         &[ed25519_ix, settle_ix],
@@ -452,16 +408,11 @@ fn settle_preceding_compute_budget_ix_rejects() {
     let channel = Pubkey::new_unique();
     seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
 
-    let voucher = VoucherArgs {
-        channel_id: channel,
-        cumulative_amount: 500_000,
-        expires_at: 0,
-    };
     // Preceding ix resolves cleanly, but its program id is not the Ed25519
     // precompile — exercises the program-id branch of
     // `MissingEd25519Verification`.
     let preceding_ix = ComputeBudgetInstruction::set_compute_unit_limit(200_000);
-    let settle_ix = build_settle_ix(&channel, voucher);
+    let settle_ix = build_settle_ix(&channel);
 
     let tx = Transaction::new_signed_with_payer(
         &[preceding_ix, settle_ix],
@@ -504,7 +455,7 @@ fn settle_with_invalid_signature_rejects_before_settle_runs() {
     let forged_signature = [0u8; ed25519::SIGNATURE_SERIALIZED_SIZE];
 
     let ed25519_ix = build_ed25519_ix(&pubkey, &forged_signature, &payload);
-    let settle_ix = build_settle_ix(&channel, voucher);
+    let settle_ix = build_settle_ix(&channel);
 
     let tx = Transaction::new_signed_with_payer(
         &[ed25519_ix, settle_ix],

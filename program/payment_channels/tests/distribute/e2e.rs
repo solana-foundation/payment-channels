@@ -10,9 +10,9 @@ use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 use payment_channels::PaymentChannelsError;
 use payment_channels::instructions::distribute::DISCRIMINATOR;
 use payment_channels::instructions::open::DISCRIMINATOR as OPEN_DISCRIMINATOR;
-use payment_channels_client::instructions::{Settle, SettleInstructionArgs, WithdrawPayer};
+use payment_channels_client::instructions::{Settle, WithdrawPayer};
 use payment_channels_client::types::{
-    DistributionEntry, PayoutBeneficiary, PayoutRedirected, RedirectReason, SettleArgs, VoucherArgs,
+    DistributionEntry, PayoutBeneficiary, PayoutRedirected, RedirectReason, VoucherArgs,
 };
 use solana_instruction::error::InstructionError;
 use solana_instruction::{AccountMeta, Instruction};
@@ -289,14 +289,12 @@ fn open_channel(
 // Settle helper — drives the precompile + settle bundle to advance the
 // `settled` watermark.
 
-fn build_settle_ix(channel: &Pubkey, voucher: VoucherArgs) -> Instruction {
+fn build_settle_ix(channel: &Pubkey) -> Instruction {
     Settle {
         channel: *channel,
         instructions_sysvar: INSTRUCTIONS_SYSVAR,
     }
-    .instruction(SettleInstructionArgs {
-        settle_args: SettleArgs { voucher },
-    })
+    .instruction()
 }
 
 fn settle_to(
@@ -317,7 +315,7 @@ fn settle_to(
     let pubkey = authorized_signer.pubkey().to_bytes();
 
     let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
-    let settle_ix = build_settle_ix(channel, voucher);
+    let settle_ix = build_settle_ix(channel);
 
     let tx = Transaction::new_signed_with_payer(
         &[ed25519_ix, settle_ix],
@@ -2273,7 +2271,7 @@ fn settle_on_tombstoned_channel_rejects() {
     let signature: [u8; 64] = s.authorized_signer.sign_message(&payload).into();
     let pubkey = s.authorized_signer.pubkey().to_bytes();
     let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
-    let settle_ix = build_settle_ix(&s.channel, voucher);
+    let settle_ix = build_settle_ix(&s.channel);
 
     let blockhash = s.svm.latest_blockhash();
     let tx = Transaction::new_signed_with_payer(

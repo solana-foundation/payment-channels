@@ -101,10 +101,7 @@ fn open_to_finalized_with_voucher() {
     let ed25519_ix = build_ed25519_ix(&authorized_signer.pubkey().to_bytes(), &signature, &payload);
     let saf_ix = build_saf_ix(
         &channel,
-        SettleAndFinalizeArgs {
-            voucher,
-            has_voucher: 1,
-        },
+        SettleAndFinalizeArgs { has_voucher: 1 },
         &merchant.pubkey(),
     );
 
@@ -162,10 +159,7 @@ fn with_voucher_expired_rejects() {
     let ed25519_ix = build_ed25519_ix(&authorized_signer.pubkey().to_bytes(), &signature, &payload);
     let saf_ix = build_saf_ix(
         &channel,
-        SettleAndFinalizeArgs {
-            voucher,
-            has_voucher: 1,
-        },
+        SettleAndFinalizeArgs { has_voucher: 1 },
         &merchant.pubkey(),
     );
 
@@ -214,10 +208,7 @@ fn with_voucher_wrong_authorized_signer_rejects() {
     let ed25519_ix = build_ed25519_ix(&impostor_signer.pubkey().to_bytes(), &signature, &payload);
     let saf_ix = build_saf_ix(
         &channel,
-        SettleAndFinalizeArgs {
-            voucher,
-            has_voucher: 1,
-        },
+        SettleAndFinalizeArgs { has_voucher: 1 },
         &merchant.pubkey(),
     );
 

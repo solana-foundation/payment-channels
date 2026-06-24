@@ -16,7 +16,6 @@ export * from "./payoutBeneficiary";
 export * from "./payoutRedirected";
 export * from "./redirectReason";
 export * from "./settleAndFinalizeArgs";
-export * from "./settleArgs";
 export * from "./settlementWatermarks";
 export * from "./topUpArgs";
 export * from "./voucherArgs";
