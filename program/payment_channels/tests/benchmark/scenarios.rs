@@ -303,7 +303,6 @@ fn run_settle_and_finalize(from_closing: bool, with_voucher: bool, label: &str) 
     }
     .instruction(SettleAndFinalizeInstructionArgs {
         settle_and_finalize_args: SettleAndFinalizeArgs {
-            voucher,
             has_voucher: if with_voucher { 1 } else { 0 },
         },
     });

@@ -124,7 +124,7 @@ pub enum PaymentChannelsInstruction<'a> {
         codama(account(name = "channel", writable)),
         codama(account(name = "instructions_sysvar"))
     )]
-    Settle(#[cfg_attr(feature = "idl", codama(name = "settle_args"))] &'a settle::SettleArgs) = 2,
+    Settle = 2,
 
     /// Extends [`deposit`](crate::Channel::deposit) while `OPEN` and
     /// pre-`requestClose`. `OPEN → OPEN`.
@@ -239,7 +239,7 @@ impl<'a> PaymentChannelsInstruction<'a> {
     pub fn name(&self) -> &'static str {
         match self {
             Self::Open(_) => "open",
-            Self::Settle(_) => "settle",
+            Self::Settle => "settle",
             Self::TopUp(_) => "top_up",
             Self::SettleAndFinalize(_) => "settle_and_finalize",
             Self::RequestClose => "request_close",
@@ -257,7 +257,7 @@ impl<'a> PaymentChannelsInstruction<'a> {
 
         match *disc {
             open::DISCRIMINATOR => Ok(Self::Open(open::OpenArgs::load(rest)?)),
-            settle::DISCRIMINATOR => Ok(Self::Settle(settle::SettleArgs::load(rest)?)),
+            settle::DISCRIMINATOR => Ok(Self::Settle),
             top_up::DISCRIMINATOR => Ok(Self::TopUp(top_up::TopUpArgs::load(rest)?)),
             settle_and_finalize::DISCRIMINATOR => Ok(Self::SettleAndFinalize(
                 settle_and_finalize::SettleAndFinalizeArgs::load(rest)?,
@@ -287,7 +287,6 @@ mod tests {
 
     #[test]
     fn discriminators_match_variants() {
-        let settle: settle::SettleArgs = unsafe { core::mem::zeroed() };
         let top_up: top_up::TopUpArgs = unsafe { core::mem::zeroed() };
         let saf: settle_and_finalize::SettleAndFinalizeArgs = unsafe { core::mem::zeroed() };
 
@@ -301,7 +300,7 @@ mod tests {
             open::DISCRIMINATOR,
         );
         assert_eq!(
-            tag(&PaymentChannelsInstruction::Settle(&settle)),
+            tag(&PaymentChannelsInstruction::Settle),
             settle::DISCRIMINATOR,
         );
         assert_eq!(

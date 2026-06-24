@@ -2,7 +2,6 @@ import type { Address } from '@solana/kit';
 import { describe, expect, it } from 'vitest';
 import {
   getOpenArgsEncoder,
-  getSettleAndFinalizeArgsEncoder,
   getTopUpArgsEncoder,
   getVoucherArgsDecoder,
   getVoucherArgsEncoder,
@@ -156,33 +155,9 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
     );
   });
 
-  it('still throws on junk voucher when hasVoucher == 0 - encoder must produce well-formed 48 bytes', () => {
-    const encoder = getSettleAndFinalizeArgsEncoder();
-    // The program ignores the voucher when hasVoucher=0, but the encoder
-    // still serializes it, so the safety guard should still fire.
-    expect(() =>
-      encoder.encode({
-        hasVoucher: 0,
-        voucher: {
-          channelId: SYSTEM_ADDR,
-          cumulativeAmount: 9007199254740993 as unknown as bigint,
-          expiresAt: 0n,
-        },
-      }),
-    ).toThrow(TypeError);
-  });
-
-  it('encodes a zeroed voucher with hasVoucher == 0 without error (mirror "ok" case)', () => {
-    const encoder = getSettleAndFinalizeArgsEncoder();
-    expect(() =>
-      encoder.encode({
-        hasVoucher: 0,
-        voucher: {
-          channelId: SYSTEM_ADDR,
-          cumulativeAmount: 0n,
-          expiresAt: 0n,
-        },
-      }),
-    ).not.toThrow();
-  });
+  // (The former SettleAndFinalizeArgs voucher-embedding tests were removed:
+  // `settleAndFinalize` no longer carries a voucher in its instruction data —
+  // the voucher rides in the bundled Ed25519 precompile ix. Voucher numeric
+  // safety is covered directly via getVoucherArgsEncoder above, which is the
+  // encoder the off-chain signer uses to build that precompile payload.)
 });

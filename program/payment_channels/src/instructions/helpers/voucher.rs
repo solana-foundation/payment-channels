@@ -1,10 +1,12 @@
 //! Voucher verification.
 //!
 //! Parses the caller-bundled Ed25519 precompile ix from the Instructions
-//! sysvar at `current - 1`, reconstructs the signed payload, and checks
-//! binding / freshness / cap / strict monotonicity / message / precompile
-//! pubkey against the channel state. Pure validator; the caller is
-//! responsible for writing [`Channel::settled`] back.
+//! sysvar at `current - 1`, reads the voucher fields straight out of the
+//! precompile-verified message, and checks binding / freshness / cap / strict
+//! monotonicity / precompile pubkey against the channel state. The signed
+//! message IS the Borsh voucher payload, so there is no second on-wire copy
+//! to carry or reconcile. Pure validator; the caller is responsible for
+//! writing [`Channel::settled`] back.
 //!
 //! Precompile wire layout + parser live in the sibling [`super::ed25519`]
 //! module.
@@ -14,15 +16,14 @@ use pinocchio::{AccountView, Address, error::ProgramError, sysvars::instructions
 use super::ed25519::parse as ed25519_ix;
 use crate::errors::PaymentChannelsError;
 use crate::instructions::VoucherArgs;
-use crate::state::Transmutable;
 use crate::state::channel::Channel;
+use crate::state::load;
 
 /// Verify a voucher against the channel and the preceding Ed25519 ix.
 /// Returns the new watermark on success.
 pub fn verify_voucher(
     channel_address: &Address,
     channel: &Channel,
-    voucher: &VoucherArgs,
     instructions_sysvar: &AccountView,
     now_unix: i64,
 ) -> Result<u64, ProgramError> {
@@ -39,17 +40,29 @@ pub fn verify_voucher(
     }
     let parsed = ed25519_ix::parse(ix.get_instruction_data())
         .map_err(|_| PaymentChannelsError::MalformedEd25519Instruction)?;
-    verify_parsed(channel_address, channel, voucher, &parsed, now_unix)
+    verify_parsed(channel_address, channel, &parsed, now_unix)
 }
 
-/// Validate a voucher against channel state and a parsed Ed25519 ix data.
+/// Validate the precompile-verified voucher against channel state.
+///
+/// The Ed25519 precompile has already proven that `parsed.message` was signed
+/// by `parsed.pubkey`. That message *is* the Borsh voucher payload
+/// (`channel_id || cumulative_amount || expires_at`), so the voucher fields
+/// are read directly from it — there is no caller-supplied copy, hence no
+/// message-equality check to perform.
 fn verify_parsed(
     channel_address: &Address,
     channel: &Channel,
-    voucher: &VoucherArgs,
     parsed: &ed25519_ix::Parsed<'_>,
     now_unix: i64,
 ) -> Result<u64, ProgramError> {
+    // `ed25519_ix::parse` pinned `message_data_size == VOUCHER_PAYLOAD_SIZE`
+    // at the canonical offset, so `parsed.message` is exactly a `VoucherArgs`
+    // bit-pattern. `VoucherArgs` is align-1, so this zero-copy load cannot
+    // fail on length or alignment (the map_err is unreachable in practice).
+    let voucher: &VoucherArgs = unsafe { load::<VoucherArgs>(parsed.message) }
+        .map_err(|_| PaymentChannelsError::MalformedEd25519Instruction)?;
+
     let v_channel_id: Address = voucher.channel_id;
     if v_channel_id != *channel_address {
         return Err(PaymentChannelsError::VoucherChannelMismatch.into());
@@ -71,10 +84,6 @@ fn verify_parsed(
         return Err(PaymentChannelsError::VoucherWatermarkNotMonotonic.into());
     }
 
-    if parsed.message != voucher.as_bytes() {
-        return Err(PaymentChannelsError::VoucherMessageMismatch.into());
-    }
-
     let authorized: Address = channel.authorized_signer;
     if parsed.pubkey != authorized.as_array() {
         return Err(PaymentChannelsError::VoucherSignerMismatch.into());
@@ -90,6 +99,7 @@ mod tests {
 
     use super::*;
     use crate::instructions::VOUCHER_PAYLOAD_SIZE;
+    use crate::state::Transmutable;
 
     const CHANNEL_ID: Address = Address::new_from_array([7u8; 32]);
     /// Channel authorized signer.
@@ -199,7 +209,7 @@ mod tests {
         let v = VoucherArgs::new(CHANNEL_ID, 200, 0);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
-        let out = verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 1_000_000).unwrap();
+        let out = verify_parsed(&CHANNEL_ID, &ch, &parsed, 1_000_000).unwrap();
         assert_eq!(out, 200);
     }
 
@@ -209,7 +219,7 @@ mod tests {
         let v = VoucherArgs::new(CHANNEL_ID, 500, 2_000);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
-        let out = verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 1_999).unwrap();
+        let out = verify_parsed(&CHANNEL_ID, &ch, &parsed, 1_999).unwrap();
         assert_eq!(out, 500);
     }
 
@@ -222,7 +232,7 @@ mod tests {
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
-            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
+            verify_parsed(&CHANNEL_ID, &ch, &parsed, 0),
             PaymentChannelsError::VoucherChannelMismatch,
         );
     }
@@ -234,7 +244,7 @@ mod tests {
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
-            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 500),
+            verify_parsed(&CHANNEL_ID, &ch, &parsed, 500),
             PaymentChannelsError::VoucherExpired,
         );
     }
@@ -246,7 +256,7 @@ mod tests {
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
-            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 501),
+            verify_parsed(&CHANNEL_ID, &ch, &parsed, 501),
             PaymentChannelsError::VoucherExpired,
         );
     }
@@ -258,7 +268,7 @@ mod tests {
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
-            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
+            verify_parsed(&CHANNEL_ID, &ch, &parsed, 0),
             PaymentChannelsError::VoucherExpired,
         );
     }
@@ -270,7 +280,7 @@ mod tests {
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
-            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
+            verify_parsed(&CHANNEL_ID, &ch, &parsed, 0),
             PaymentChannelsError::VoucherWatermarkNotMonotonic,
         );
     }
@@ -282,7 +292,7 @@ mod tests {
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
-            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
+            verify_parsed(&CHANNEL_ID, &ch, &parsed, 0),
             PaymentChannelsError::VoucherWatermarkNotMonotonic,
         );
     }
@@ -294,7 +304,7 @@ mod tests {
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
-            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
+            verify_parsed(&CHANNEL_ID, &ch, &parsed, 0),
             PaymentChannelsError::VoucherWatermarkNotMonotonic,
         );
     }
@@ -306,7 +316,7 @@ mod tests {
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
-            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
+            verify_parsed(&CHANNEL_ID, &ch, &parsed, 0),
             PaymentChannelsError::VoucherOverDeposit,
         );
     }
@@ -500,18 +510,13 @@ mod tests {
 
     // --- Ed25519 content failures ----------------------------------------
 
-    #[test]
-    fn message_off_by_one_byte() {
-        let ch = make_channel(0, 500, AUTH);
-        let v = VoucherArgs::new(CHANNEL_ID, 100, 0);
-        let mut msg: Vec<u8> = v.as_bytes().to_vec();
-        msg[0] ^= 1;
-        let parsed = valid_parsed(&msg);
-        expect_err(
-            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
-            PaymentChannelsError::VoucherMessageMismatch,
-        );
-    }
+    // The former `message_off_by_one_byte` test was removed alongside the
+    // message-equality check: the voucher is now read straight from the
+    // precompile-verified message, so there is no caller-supplied copy to
+    // diverge from it. A tampered message either fails the Ed25519 signature
+    // check in the precompile itself, or — when a field byte is altered —
+    // trips the channel / expiry / cap / monotonic guards exercised above
+    // (e.g. flipping a `channel_id` byte yields `VoucherChannelMismatch`).
 
     #[test]
     fn precompile_pubkey_not_authorized_signer() {
@@ -525,7 +530,7 @@ mod tests {
                 .expect("test message must be VOUCHER_PAYLOAD_SIZE"),
         };
         expect_err(
-            verify_parsed(&CHANNEL_ID, &ch, &v, &parsed, 0),
+            verify_parsed(&CHANNEL_ID, &ch, &parsed, 0),
             PaymentChannelsError::VoucherSignerMismatch,
         );
     }

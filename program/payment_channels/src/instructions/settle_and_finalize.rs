@@ -8,7 +8,6 @@ use pinocchio::{
 };
 
 use crate::errors::PaymentChannelsError;
-use crate::instructions::VoucherArgs;
 use crate::instructions::helpers::voucher::verify_voucher;
 use crate::state::channel::{Channel, ChannelStatus};
 use crate::state::{Transmutable, load};
@@ -16,19 +15,17 @@ use crate::state::{Transmutable, load};
 /// Instruction discriminator byte for `settleAndFinalize`.
 pub const DISCRIMINATOR: u8 = 4;
 
-/// Cooperative-close payload. [`Self::has_voucher`] is the option tag
-/// because a Rust `Option<VoucherArgs>` cannot be carried over a zero-copy
-/// wire format; the explicit u8 keeps the struct's length deterministic.
+/// Cooperative-close payload: a single option-tag byte. When the voucher is
+/// applied it is read from the bundled Ed25519 precompile ix — the same source
+/// as `settle` — so it is never duplicated in this instruction's data.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct SettleAndFinalizeArgs {
-    /// Final voucher when [`Self::has_voucher`] == 1; ignored otherwise.
-    /// Same freshness and monotonicity rules as `settle`.
-    pub voucher: VoucherArgs,
     /// Option tag: `0` skips the voucher (lock whatever is already in
-    /// [`settled`](crate::Channel::settled)), `1` applies [`Self::voucher`]
-    /// first.
+    /// [`settled`](crate::Channel::settled)); any non-zero value applies the
+    /// voucher carried by the preceding Ed25519 precompile ix first, under the
+    /// same freshness and monotonicity rules as `settle`.
     pub has_voucher: u8,
 }
 
@@ -114,13 +111,7 @@ pub fn process(
     }
 
     if args.has_voucher != 0 {
-        let new_watermark = verify_voucher(
-            &channel_address,
-            &ch,
-            &args.voucher,
-            accs.instructions_sysvar,
-            now,
-        )?;
+        let new_watermark = verify_voucher(&channel_address, &ch, accs.instructions_sysvar, now)?;
         ch.set_settled(new_watermark);
     }
 

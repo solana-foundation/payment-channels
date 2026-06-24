@@ -82,7 +82,12 @@ pub enum PaymentChannelsError {
     VoucherWatermarkNotMonotonic = 234,
     #[error("Voucher cumulative_amount exceeds channel deposit")]
     VoucherOverDeposit = 235,
-    #[error("Ed25519 message does not match Borsh voucher payload")]
+    /// Reserved. Formerly returned when a caller-supplied voucher copy in the
+    /// instruction data disagreed with the Ed25519-signed message. The voucher
+    /// is now read directly from that message, so there is no second copy and
+    /// this code is never emitted; the discriminant is retained so existing
+    /// error codes stay stable.
+    #[error("Reserved (formerly: Ed25519 message does not match Borsh voucher payload)")]
     VoucherMessageMismatch = 236,
     #[error("Voucher signer does not match channel authorized_signer")]
     VoucherSignerMismatch = 237,

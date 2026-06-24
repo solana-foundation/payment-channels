@@ -42,7 +42,7 @@ fn process_instruction(
 ) -> ProgramResult {
     match PaymentChannelsInstruction::from_bytes(instruction_data)? {
         PaymentChannelsInstruction::Open(args) => open::process(program_id, accounts, &args),
-        PaymentChannelsInstruction::Settle(args) => settle::process(program_id, accounts, args),
+        PaymentChannelsInstruction::Settle => settle::process(program_id, accounts),
         PaymentChannelsInstruction::TopUp(args) => top_up::process(program_id, accounts, args),
         PaymentChannelsInstruction::SettleAndFinalize(args) => {
             settle_and_finalize::process(program_id, accounts, args)

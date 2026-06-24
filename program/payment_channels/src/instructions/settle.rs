@@ -1,6 +1,3 @@
-#[cfg(feature = "idl")]
-use codama::CodamaType;
-use core::mem::size_of;
 use pinocchio::{
     AccountView, Address, ProgramResult,
     error::ProgramError,
@@ -8,35 +5,11 @@ use pinocchio::{
 };
 
 use crate::errors::PaymentChannelsError;
-use crate::instructions::VoucherArgs;
 use crate::instructions::helpers::voucher::verify_voucher;
 use crate::state::channel::{Channel, ChannelStatus};
-use crate::state::{Transmutable, load};
 
 /// Instruction discriminator byte for `settle`.
 pub const DISCRIMINATOR: u8 = 2;
-
-/// Mid-session watermark advance. Carries exactly one voucher; no token
-/// movement — only [`Channel::settled`](crate::Channel::settled) is updated.
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-#[cfg_attr(feature = "idl", derive(CodamaType))]
-pub struct SettleArgs {
-    /// Authorization signed by `Channel.authorized_signer`. See [`VoucherArgs`].
-    pub voucher: VoucherArgs,
-}
-
-impl SettleArgs {
-    pub const LEN: usize = size_of::<Self>();
-
-    pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
-        unsafe { load::<Self>(data) }.map_err(|_| ProgramError::InvalidInstructionData)
-    }
-}
-
-unsafe impl Transmutable for SettleArgs {
-    const LEN: usize = size_of::<Self>();
-}
 
 pub struct SettleAccounts<'a> {
     /// [`settled`](crate::Channel::settled) is advanced in place.
@@ -61,14 +34,13 @@ impl<'a> TryFrom<&'a mut [AccountView]> for SettleAccounts<'a> {
 
 /// Permissionless crank: authority is the authorized-signer voucher, not the
 /// transaction signer. Advances [`Channel::settled`](crate::Channel::settled)
-/// in `OPEN` only — `settled` `<`
-/// [`voucher.cumulative_amount`](VoucherArgs::cumulative_amount) `≤`
-/// [`deposit`](crate::Channel::deposit) and voucher must be fresh.
-pub fn process(
-    _program_id: &Address,
-    accounts: &mut [AccountView],
-    args: &SettleArgs,
-) -> ProgramResult {
+/// in `OPEN` only — `settled` `< cumulative_amount ≤`
+/// [`deposit`](crate::Channel::deposit), and the voucher must be fresh.
+///
+/// The voucher rides entirely in the bundled Ed25519 precompile ix at
+/// `current - 1` (its signed message *is* the voucher payload), so this
+/// instruction carries no data beyond its discriminator.
+pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
     let accs = SettleAccounts::try_from(accounts)?;
 
     let channel_address = *accs.channel.address();
@@ -80,13 +52,7 @@ pub fn process(
         return Err(PaymentChannelsError::InvalidChannelStatus.into());
     }
 
-    let new_watermark = verify_voucher(
-        &channel_address,
-        &ch,
-        &args.voucher,
-        accs.instructions_sysvar,
-        now,
-    )?;
+    let new_watermark = verify_voucher(&channel_address, &ch, accs.instructions_sysvar, now)?;
 
     ch.set_settled(new_watermark);
     Ok(())

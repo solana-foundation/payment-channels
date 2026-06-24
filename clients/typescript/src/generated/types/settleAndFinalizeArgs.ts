@@ -14,36 +14,18 @@ import {
   type FixedSizeDecoder,
   type FixedSizeEncoder,
 } from "@solana/kit";
-import {
-  getVoucherArgsDecoder,
-  getVoucherArgsEncoder,
-  type VoucherArgs,
-  type VoucherArgsArgs,
-} from ".";
 import { getU8Decoder, getU8Encoder } from "../../safe-codecs.js";
 
-export type SettleAndFinalizeArgs = {
-  voucher: VoucherArgs;
-  hasVoucher: number;
-};
+export type SettleAndFinalizeArgs = { hasVoucher: number };
 
-export type SettleAndFinalizeArgsArgs = {
-  voucher: VoucherArgsArgs;
-  hasVoucher: number;
-};
+export type SettleAndFinalizeArgsArgs = SettleAndFinalizeArgs;
 
 export function getSettleAndFinalizeArgsEncoder(): FixedSizeEncoder<SettleAndFinalizeArgsArgs> {
-  return getStructEncoder([
-    ["voucher", getVoucherArgsEncoder()],
-    ["hasVoucher", getU8Encoder()],
-  ]);
+  return getStructEncoder([["hasVoucher", getU8Encoder()]]);
 }
 
 export function getSettleAndFinalizeArgsDecoder(): FixedSizeDecoder<SettleAndFinalizeArgs> {
-  return getStructDecoder([
-    ["voucher", getVoucherArgsDecoder()],
-    ["hasVoucher", getU8Decoder()],
-  ]);
+  return getStructDecoder([["hasVoucher", getU8Decoder()]]);
 }
 
 export function getSettleAndFinalizeArgsCodec(): FixedSizeCodec<
