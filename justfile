@@ -4,7 +4,7 @@ set shell := ["bash", "-uc"]
 
 program_dir   := "program/payment_channels"
 ts_client_dir := "clients/typescript"
-program_id    := "CQAyft83tN1w2bRofB5PZ79eVDU2xZUVo43LU1qL4zRg"
+program_id    := "CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX"
 idl_file      := program_dir / "idl/payment_channels.json"
 raw_idl_file  := program_dir / "idl/payment_channels.raw.json"
 
@@ -120,3 +120,118 @@ clean:
     rm -rf clients/typescript/src/generated
     rm -rf clients/typescript/dist
     rm -rf node_modules clients/*/node_modules
+
+# ---------- deploy / verify / on-chain IDL ----------
+#
+# These recipes PREPARE and run
+# deterministic builds + on-chain operations; the irreversible, SOL-spending
+# steps (deploy / idl upload / verify) require you to pass the keypairs and are
+# meant to be run by a human with eyes on the output.
+#
+# One-time tool install:
+#   cargo install solana-verify                 # deterministic docker build + verification
+#   # program-metadata CLI: see github.com/solana-program/program-metadata
+#   # Docker must be running (solana-verify build executes in a container).
+#
+# HARD PREREQUISITES before any cluster deploy (the build will refuse otherwise):
+#   1. constants.rs: set the real TREASURY_OWNER for the target cluster — the
+#      0xBEEF placeholder trips a compile-time guard on devnet/testnet/mainnet.
+#   2. `program_id` below MUST equal declare_id! in src/lib.rs AND the program
+#      keypair you control. The committed IDL embeds this address, so after any
+#      change run `just generate-client` and commit.
+#   3. Commit + push to the public repo — verified builds verify a pushed commit.
+
+repo_url    := "https://github.com/Moonsong-Labs/solana-payment-channels"
+lib_name    := "payment_channels"
+mainnet_url := "https://api.mainnet-beta.solana.com"
+devnet_url  := "https://api.devnet.solana.com"
+# Pin the verifiable-build image to a platform-tools that supports edition 2024
+# (the default image ships Cargo 1.84, which predates it). 3.1.13 matches the
+# local `solana --version`. The same image is recorded in the verification PDA
+# so the remote (OtterSec) build reproduces the on-chain binary.
+base_image  := "solanafoundation/solana-verifiable-build:3.1.13"
+
+# Deterministic, container-based build for a cluster (default mainnet-beta) and
+# print the executable hash. The resulting target/deploy/payment_channels.so is
+# the exact byte image you deploy and that verification re-derives.
+verified-build cluster="mainnet-beta":
+    solana-verify build --library-name {{lib_name}} \
+        --base-image {{base_image}} \
+        --cargo-build-sbf-args="--no-default-features --features {{cluster}}"
+    @echo "local executable hash:"
+    solana-verify get-executable-hash target/deploy/{{lib_name}}.so
+
+# On-chain program hash, to cross-check against the local build hash above.
+# Override the endpoint with RPC_URL=... (the public mainnet RPC is unreliable).
+program-hash-mainnet:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    solana-verify get-program-hash -u "${RPC_URL:-{{mainnet_url}}}" {{program_id}}
+
+program-hash-devnet:
+    solana-verify get-program-hash -u {{devnet_url}} {{program_id}}
+
+# FIRST mainnet deploy only. Creates the program account at the PROGRAM_KEYPAIR
+# address (must equal {{program_id}}) and sets DEPLOYER_KEYPAIR as the upgrade
+# authority. Build with `just verified-build` first.
+deploy-mainnet-initial:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${PROGRAM_KEYPAIR:?set PROGRAM_KEYPAIR=path/to/program-account-keypair.json}"
+    : "${DEPLOYER_KEYPAIR:?set DEPLOYER_KEYPAIR=path/to/funded-payer-and-authority.json}"
+    test -f target/deploy/{{lib_name}}.so || { echo "run 'just verified-build' first"; exit 1; }
+    test "$(solana address -k "$PROGRAM_KEYPAIR")" = "{{program_id}}" \
+        || { echo "PROGRAM_KEYPAIR address != {{program_id}}"; exit 1; }
+    RPC="${RPC_URL:-{{mainnet_url}}}"
+    echo "deploying via $RPC (set RPC_URL to a dedicated endpoint if this is the public RPC)"
+    solana program deploy -u "$RPC" target/deploy/{{lib_name}}.so \
+        --program-id "$PROGRAM_KEYPAIR" \
+        --keypair "$DEPLOYER_KEYPAIR" \
+        --upgrade-authority "$DEPLOYER_KEYPAIR" \
+        --with-compute-unit-price 50000 --max-sign-attempts 100 --use-rpc
+
+# Upgrade an already-deployed mainnet program. DEPLOYER_KEYPAIR must be the
+# current upgrade authority.
+deploy-mainnet-upgrade:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${DEPLOYER_KEYPAIR:?set DEPLOYER_KEYPAIR=path/to/upgrade-authority.json}"
+    test -f target/deploy/{{lib_name}}.so || { echo "run 'just verified-build' first"; exit 1; }
+    RPC="${RPC_URL:-{{mainnet_url}}}"
+    solana program deploy -u "$RPC" target/deploy/{{lib_name}}.so \
+        --program-id {{program_id}} \
+        --keypair "$DEPLOYER_KEYPAIR" \
+        --with-compute-unit-price 50000 --max-sign-attempts 100 --use-rpc
+
+# Upload / refresh the on-chain IDL via the Program Metadata program.
+# IDL_AUTHORITY_KEYPAIR is the program upgrade authority (or a delegated
+# metadata authority). Regenerates the IDL first so it matches the source.
+deploy-idl-mainnet: generate-idl
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${IDL_AUTHORITY_KEYPAIR:?set IDL_AUTHORITY_KEYPAIR=path/to/authority.json}"
+    program-metadata write idl {{program_id}} {{idl_file}} \
+        --keypair "$IDL_AUTHORITY_KEYPAIR" --rpc "${RPC_URL:-{{mainnet_url}}}"
+
+deploy-idl-devnet: generate-idl
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${IDL_AUTHORITY_KEYPAIR:?set IDL_AUTHORITY_KEYPAIR=path/to/authority.json}"
+    program-metadata write idl {{program_id}} {{idl_file}} \
+        --keypair "$IDL_AUTHORITY_KEYPAIR" --rpc {{devnet_url}}
+
+# Submit the deployed mainnet program for verified-build verification against
+# the public repo at the CURRENT commit. Run on a clean, pushed tree. The
+# feature flags MUST match those used for the deployed build, and are forwarded
+# to the remote (OtterSec) builder; confirm an end-to-end hash match on devnet
+# first.
+verify-mainnet:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    test -z "$(git status --porcelain)" || { echo "working tree dirty; commit + push first"; exit 1; }
+    solana-verify verify-from-repo {{repo_url}} -u "${RPC_URL:-{{mainnet_url}}}" \
+        --program-id {{program_id}} \
+        --library-name {{lib_name}} \
+        --base-image {{base_image}} \
+        --commit-hash "$(git rev-parse HEAD)" \
+        --cargo-build-sbf-args="--no-default-features --features mainnet-beta"
