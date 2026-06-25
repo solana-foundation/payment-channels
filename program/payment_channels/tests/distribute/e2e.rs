@@ -1951,7 +1951,12 @@ fn happy_path_spl_token_max_recipients_plus_payee() {
         SPL_TOKEN,
     );
 
-    s.send_v0_distribute(s.recipient_atas.clone(), None)
+    // SPL OPEN at N=32 also needs the raised CU limit now that `blake3` runs
+    // in userspace (see `src/instructions/helpers/hash.rs`): the syscalled
+    // hash was ~150 CU, the userspace impl costs a few thousand and pushes
+    // even this slimmer path (distribute pool + payee, no refund/sweep/close)
+    // up against the default 200k cap.
+    s.send_v0_distribute(s.recipient_atas.clone(), Some(MAX_COMPUTE_UNIT_LIMIT))
         .expect("spl distribute max recipients ok");
 
     assert_eq!(s.recipient_atas.len(), N);
