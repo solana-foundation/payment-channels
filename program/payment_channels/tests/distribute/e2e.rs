@@ -512,9 +512,9 @@ impl Scenario {
 
     /// Versioned-tx path for the N=32 distribute tests. An ALT is always
     /// installed because the worst-case ix exceeds the 32 static-key legacy
-    /// limit. `compute_unit_limit` is per-call-site: SPL batched paths fit in
-    /// the default 200k cap (`None`); Token-2022 paths overrun it and need
-    /// to increase it to `Some(MAX_COMPUTE_UNIT_LIMIT)`.
+    /// limit. `compute_unit_limit` is per-call-site: SPL batched paths and
+    /// Token-2022 paths overrun it and need to increase it to
+    /// `Some(MAX_COMPUTE_UNIT_LIMIT)`.
     fn send_v0_distribute(
         &mut self,
         recipient_atas_for_alt: Vec<Pubkey>,
@@ -1997,7 +1997,12 @@ fn happy_path_spl_token_finalized_max_recipients_plus_payee_refund_sweep() {
     let channel_lamports_before = s.svm.get_account(&s.channel).unwrap().lamports;
     let channel_ata_lamports_before = s.svm.get_account(&s.channel_ata).unwrap().lamports;
 
-    s.send_v0_distribute(s.recipient_atas.clone(), None)
+    // SPL FINALIZED at N=32 needs the raised CU limit: the userspace `blake3`
+    // crate (used because `sol_blake3` is feature-gated off on devnet/testnet/
+    // mainnet) costs a few thousand CU more than the syscall, pushing the
+    // worst-case all-phases path (32 recipients + payee + refund + sweep +
+    // escrow close) past the default 200k cap.
+    s.send_v0_distribute(s.recipient_atas.clone(), Some(MAX_COMPUTE_UNIT_LIMIT))
         .expect("spl finalized max recipients ok");
 
     let expected_per_recipient: u64 = 999;

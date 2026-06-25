@@ -37,6 +37,8 @@ codama                             = { version = "0.9.1", optional = true }
 const-crypto                       = "0.3"
 borsh                              = { version = "1", default-features = false, features = ["derive"] }
 thiserror                          = { version = "2", default-features = false }
+# `sol_blake3` syscall is gated behind an inactive feature, so we compute blake3 in userspace.
+blake3                             = { version = "1", default-features = false }
 
 [dev-dependencies]
 litesvm                  = { version = "0.11", features = ["precompiles"] }
@@ -55,7 +57,6 @@ solana-transaction       = "^3"
 solana-transaction-error = "^3"
 serde_json               = "1"
 rstest                   = "0.26"
-blake3                   = { version = "1", default-features = false }
 mollusk-svm              = "0.11.0"
 solana-instructions-sysvar = "^3"
 solana-program-error       = "^3"
