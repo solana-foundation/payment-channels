@@ -87,7 +87,7 @@ fn open_sets_channel_fields() {
 fn open_with_no_splits_succeeds() {
     // count == 0 collapses to a vanilla two-party channel: pool flows entirely
     // to the payee at `distribute`. The full `open` CPI chain must still run
-    // and the on-chain digest must equal blake3(count=0u32 LE) — the
+    // and the on-chain digest must equal sha256(count=0u32 LE) — the
     // canonical preimage for a zero-recipient plan.
     let mut svm = LiteSVM::load_program();
 
@@ -115,7 +115,9 @@ fn open_with_no_splits_succeeds() {
     svm.send_transaction(tx)
         .expect("open with zero splits should succeed");
 
-    let expected: [u8; 32] = blake3::hash(&0u32.to_le_bytes()).into();
+    let expected: [u8; 32] = const_crypto::sha2::Sha256::new()
+        .update(&0u32.to_le_bytes())
+        .finalize();
     read_channel(&svm, &channel, |ch| {
         assert_eq!(ch.status, ChannelStatus::Open as u8);
         assert_eq!(ch.distribution_hash, expected, "distribution_hash");
@@ -250,7 +252,9 @@ fn open_with_no_splits_succeeds_token_2022() {
     svm.send_transaction(tx)
         .expect("open with zero splits should succeed");
 
-    let expected: [u8; 32] = blake3::hash(&0u32.to_le_bytes()).into();
+    let expected: [u8; 32] = const_crypto::sha2::Sha256::new()
+        .update(&0u32.to_le_bytes())
+        .finalize();
     read_channel(&svm, &channel, |ch| {
         assert_eq!(ch.status, ChannelStatus::Open as u8);
         assert_eq!(ch.distribution_hash, expected, "distribution_hash");

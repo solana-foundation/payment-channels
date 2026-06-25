@@ -34,7 +34,7 @@ use crate::instructions::helpers::{DistributionPreimage, channel_signer_seeds};
 /// Instruction discriminator byte for `open`.
 pub const DISCRIMINATOR: u8 = 1;
 
-/// Init payload. The distribution plan is hashed on-chain with `blake3` and
+/// Init payload. The distribution plan is hashed on-chain with `sha256` and
 /// the digest stored in
 /// [`Channel::distribution_hash`](crate::Channel::distribution_hash).
 /// [`distribute`](crate::instructions::distribute) later verifies a matching

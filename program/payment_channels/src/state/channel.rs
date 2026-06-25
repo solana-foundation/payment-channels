@@ -108,7 +108,7 @@ pub struct Channel {
     /// the `CLOSING → FINALIZED` unlock for permissionless `finalize`.
     #[cfg_attr(feature = "idl", codama(type = number(u32)))]
     grace_period: [u8; 4],
-    /// Blake3 commitment to the distribution preimage.
+    /// SHA-256 commitment to the distribution preimage.
     pub distribution_hash: [u8; 32],
     /// Refund destination and payer-side authority signer (required for
     /// `topUp`, `requestClose`, `withdraw_payer`).

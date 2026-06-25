@@ -156,9 +156,9 @@ impl<'a> DistributionPreimage<'a> {
         self.preimage
     }
 
-    /// Blake3 hash of the active preimage committed into the channel at `open`.
+    /// SHA-256 hash of the active preimage committed into the channel at `open`.
     pub fn preimage_hash(&self) -> [u8; 32] {
-        super::hash::blake3(self.preimage)
+        super::hash::sha256(self.preimage)
     }
 }
 
