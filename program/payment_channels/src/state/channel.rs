@@ -63,7 +63,7 @@ impl TryFrom<u8> for ChannelStatus {
 
 /// Active channel PDA: escrowed deposit, settled watermark, closure
 /// timestamps, distribution commitment, and participant bindings. Fixed
-/// 216-byte layout for zero-copy load.
+/// 248-byte layout for zero-copy load.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaAccount))]

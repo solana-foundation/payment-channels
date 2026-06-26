@@ -140,6 +140,11 @@ pub struct OpenAccounts<'a> {
     /// Funds the PDA + escrow-ATA rent (the transaction submitter / operator).
     /// Stored as [`Channel::rent_payer`](crate::Channel::rent_payer) and
     /// refunded on FINALIZED cleanup. MAY equal [`Self::payer`].
+    ///
+    /// MUST be a signer: rent is pulled from here via a `SystemTransfer`, which
+    /// debits the account and therefore requires its signature. A gas-less
+    /// relayer must be passed as this signer account meta — merely being the
+    /// transaction fee payer is not sufficient.
     pub rent_payer: &'a AccountView,
     /// Bound into [`Channel::payee`](crate::Channel::payee).
     pub payee: PayeeAccountView<'a>,
