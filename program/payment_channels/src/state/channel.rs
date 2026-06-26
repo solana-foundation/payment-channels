@@ -125,6 +125,11 @@ pub struct Channel {
     /// Token mint bound at `open`. All escrow and payout transfers ride
     /// this mint.
     pub mint: Address,
+    /// Funds the PDA + escrow-ATA rent at `open` and receives that SOL back on
+    /// FINALIZED cleanup. Lets a stablecoin-only client avoid holding SOL: the
+    /// transaction submitter (typically the operator/fee payer) fronts the rent
+    /// and reclaims it at close. MAY equal [`Self::payer`].
+    pub rent_payer: Address,
 }
 
 impl Channel {
@@ -254,6 +259,7 @@ impl Channel {
         payee: Address,
         authorized_signer: Address,
         mint: Address,
+        rent_payer: Address,
     ) -> Result<(), ProgramError> {
         // SAFETY: `Channel` is `repr(C)` with alignment 1; load_mut checks length.
         let ch = unsafe { load_mut::<Self>(bytes) }?;
@@ -272,6 +278,7 @@ impl Channel {
         ch.payee = payee;
         ch.authorized_signer = authorized_signer;
         ch.mint = mint;
+        ch.rent_payer = rent_payer;
         Ok(())
     }
 
@@ -303,7 +310,7 @@ unsafe impl Transmutable for Channel {
 }
 
 const _: () = {
-    assert!(Channel::LEN == 216);
+    assert!(Channel::LEN == 248);
 };
 
 /// Cumulative settlement watermarks stored inside [`Channel`].
@@ -438,8 +445,8 @@ mod tests {
     }
 
     #[test]
-    fn size_is_216_bytes() {
-        assert_eq!(core::mem::size_of::<Channel>(), 216);
+    fn size_is_248_bytes() {
+        assert_eq!(core::mem::size_of::<Channel>(), 248);
     }
 
     #[test]

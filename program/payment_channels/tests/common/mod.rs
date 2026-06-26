@@ -106,6 +106,7 @@ pub fn open_channel(
         &data,
         vec![
             AccountMeta::new(payer.pubkey(), true),
+            AccountMeta::new(payer.pubkey(), true), // rent_payer (= payer)
             AccountMeta::new_readonly(*payee, false),
             AccountMeta::new_readonly(*mint, false),
             AccountMeta::new_readonly(*authorized_signer, false),

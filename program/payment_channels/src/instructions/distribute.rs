@@ -59,9 +59,15 @@ pub struct DistributeAccounts<'a> {
     /// is never recycled, blocking voucher replay against a re-initialized
     /// channel at the same seeds.
     pub channel: ChannelAccountView<'a>,
-    /// Original payer wallet. Receives SOL rent on FINALIZED cleanup and must
-    /// match [`Channel::payer`](crate::Channel::payer).
+    /// Original payer wallet. Receives the **token** refund (`deposit − settled`)
+    /// on FINALIZED cleanup and must match [`Channel::payer`](crate::Channel::payer).
     pub payer: PayerAccountView<'a>,
+    /// Receives the **SOL rent** (escrow-ATA close + freed PDA delta) on
+    /// FINALIZED cleanup; must match
+    /// [`Channel::rent_payer`](crate::Channel::rent_payer). Not a signer —
+    /// receiving lamports needs no signature, so `distribute` stays
+    /// permissionless. MAY equal [`Self::payer`].
+    pub rent_payer: &'a mut AccountView,
     /// Escrow; source for all splits, the payee implicit remainder, and the
     /// FINALIZED payer refund.
     pub channel_token_account: ChannelTokenAccountView<'a>,
@@ -99,6 +105,7 @@ impl<'a> TryFrom<&'a mut [AccountView]> for DistributeAccounts<'a> {
         let [
             channel,
             payer,
+            rent_payer,
             channel_token_account,
             payer_token_account,
             payee_token_account,
@@ -115,6 +122,7 @@ impl<'a> TryFrom<&'a mut [AccountView]> for DistributeAccounts<'a> {
         Ok(Self {
             channel: channel.into(),
             payer: payer.into(),
+            rent_payer,
             channel_token_account: channel_token_account.into(),
             payer_token_account: payer_token_account.into(),
             payee_token_account: payee_token_account.into(),
@@ -161,7 +169,7 @@ pub fn process(
     accounts: &mut [AccountView],
     args: &DistributeArgs<'_>,
 ) -> ProgramResult {
-    let mut accs = DistributeAccounts::try_from(accounts)?;
+    let accs = DistributeAccounts::try_from(accounts)?;
 
     // Owner / discriminator / version checks.
     let ch = Channel::from_account(&accs.channel)?;
@@ -178,6 +186,11 @@ pub fn process(
     }
     if accs.mint.address() != &ch.mint {
         return Err(PaymentChannelsError::InvalidChannelMint.into());
+    }
+    // Bind the rent recipient to the funder recorded at `open`, so a caller
+    // cannot redirect the freed rent to an arbitrary account on cleanup.
+    if accs.rent_payer.address() != &ch.rent_payer {
+        return Err(PaymentChannelsError::InvalidChannelRentPayer.into());
     }
 
     // drop initial ch
@@ -325,7 +338,7 @@ pub fn process(
 
     if is_finalized {
         // Close escrow ATA and tombstone the channel PDA in place.
-        tombstone_finalized_channel(&mut channel_ctx, &mut accs.payer, &signers)?;
+        tombstone_finalized_channel(&mut channel_ctx, accs.rent_payer, &signers)?;
     } else {
         // OPEN: advance the accounted watermark to the settled watermark so
         // future cumulative deltas only cover newly settled amounts.
@@ -339,19 +352,19 @@ pub fn process(
 /// Closes the finalized channel's escrow token account and tombstones the
 /// Channel PDA in place: shrinks the data buffer to
 /// [`ClosedChannel::LEN`], writes the [`AccountDiscriminator::ClosedChannel`]
-/// payload, and refunds the freed rent delta to the payer. The PDA stays
+/// payload, and refunds the freed rent delta to the rent payer. The PDA stays
 /// alive forever — program-owned, non-empty — so the system program rejects
 /// any future `CreateAccount` against the same seeds, blocking voucher
 /// replay against a re-initialized channel.
 fn tombstone_finalized_channel(
     channel_ctx: &mut ChannelContext<'_>,
-    payer: &mut PayerAccountView<'_>,
+    rent_payer: &mut AccountView,
     signers: &[Signer<'_, '_>],
 ) -> ProgramResult {
-    // Close the escrow SPL account; rent flows to payer SOL account.
+    // Close the escrow SPL account; its rent flows to the rent payer.
     CloseAccount {
         account: &channel_ctx.channel_token_account,
-        destination: payer,
+        destination: rent_payer,
         authority: &channel_ctx.channel,
         token_program: channel_ctx.token_ctx.token_program.address(),
     }
@@ -368,7 +381,7 @@ fn tombstone_finalized_channel(
     }
 
     // Rebalance lamports to the new rent-exempt minimum and refund the
-    // delta to the payer. The PDA must remain rent-exempt so the runtime
+    // delta to the rent payer. The PDA must remain rent-exempt so the runtime
     // never garbage-collects it, which is what keeps the address reserved.
     let rent = Rent::get()?;
     let new_min = rent.try_minimum_balance(ClosedChannel::LEN)?;
@@ -376,12 +389,12 @@ fn tombstone_finalized_channel(
     let delta = current
         .checked_sub(new_min)
         .ok_or(PaymentChannelsError::DistributeBalanceCalculationOverflow)?;
-    let new_payer_bal = payer
+    let new_rent_payer_bal = rent_payer
         .lamports()
         .checked_add(delta)
         .ok_or(PaymentChannelsError::DistributePayerBalanceOverflow)?;
     channel_ctx.channel.set_lamports(new_min);
-    payer.set_lamports(new_payer_bal);
+    rent_payer.set_lamports(new_rent_payer_bal);
     Ok(())
 }
 

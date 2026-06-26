@@ -34,6 +34,8 @@ pub enum PaymentChannelsError {
     InvalidEventAuthority = 8,
     #[error("Not enough accounts were provided")]
     NotEnoughAccountKeys = 9,
+    #[error("Account does not match channel rent_payer")]
+    InvalidChannelRentPayer = 10,
 
     // general account validations
     #[error("Channel account does not match derived PDA")]

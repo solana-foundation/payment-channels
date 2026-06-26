@@ -65,6 +65,7 @@ pub(super) fn build_distribute_ix(
     let accounts = Distribute {
         channel: Address::from(channel.to_bytes()),
         payer: Address::from(payer.to_bytes()),
+        rent_payer: Address::from(payer.to_bytes()),
         channel_token_account: Address::from(channel_ata.to_bytes()),
         payer_token_account: Address::from(payer_ata.to_bytes()),
         payee_token_account: Address::from(payee_ata.to_bytes()),

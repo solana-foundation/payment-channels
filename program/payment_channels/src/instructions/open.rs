@@ -135,8 +135,12 @@ impl<'a> OpenArgs<'a> {
 /// [`Self::payer`], [`Self::payee`], [`Self::mint`],
 /// [`Self::authorized_signer`] are PDA seed inputs.
 pub struct OpenAccounts<'a> {
-    /// Funds the deposit and the PDA rent.
+    /// Funds the token deposit and signs the authorization.
     pub payer: PayerAccountView<'a>,
+    /// Funds the PDA + escrow-ATA rent (the transaction submitter / operator).
+    /// Stored as [`Channel::rent_payer`](crate::Channel::rent_payer) and
+    /// refunded on FINALIZED cleanup. MAY equal [`Self::payer`].
+    pub rent_payer: &'a AccountView,
     /// Bound into [`Channel::payee`](crate::Channel::payee).
     pub payee: PayeeAccountView<'a>,
     /// Token mint for the channel's escrow.
@@ -172,6 +176,7 @@ impl<'a> TryFrom<&'a mut [AccountView]> for OpenAccounts<'a> {
     fn try_from(accounts: &'a mut [AccountView]) -> Result<Self, Self::Error> {
         let [
             payer,
+            rent_payer,
             payee,
             mint,
             authorized_signer,
@@ -190,6 +195,7 @@ impl<'a> TryFrom<&'a mut [AccountView]> for OpenAccounts<'a> {
         };
         Ok(Self {
             payer: payer.into(),
+            rent_payer,
             payee: payee.into(),
             mint: mint.into(),
             authorized_signer,
@@ -216,6 +222,12 @@ pub fn process(
     let accs = OpenAccounts::try_from(accounts)?;
 
     if !accs.payer.is_signer() {
+        return Err(PaymentChannelsError::MissingRequiredSignature.into());
+    }
+
+    // The rent payer funds the PDA + escrow-ATA rent via system CPI, so it must
+    // sign. It MAY be the same account as `payer`.
+    if !accs.rent_payer.is_signer() {
         return Err(PaymentChannelsError::MissingRequiredSignature.into());
     }
 
@@ -284,7 +296,7 @@ pub fn process(
     let pending_balance = min_rent.saturating_sub(channel_ctx.channel.lamports());
     if pending_balance > 0 {
         SystemTransfer {
-            from: &payer_ctx.payer,
+            from: accs.rent_payer,
             to: &channel_ctx.channel,
             lamports: pending_balance,
         }
@@ -305,7 +317,7 @@ pub fn process(
     // a pre-existing canonical ATA so a griefer cannot block open by
     // front-running ATA creation.
     CreateIdempotent {
-        funding_account: &payer_ctx.payer,
+        funding_account: accs.rent_payer,
         account: &channel_ctx.channel_token_account,
         wallet: &channel_ctx.channel,
         mint: &channel_ctx.token_ctx.mint,
@@ -337,6 +349,7 @@ pub fn process(
         *accs.payee.address(),
         *accs.authorized_signer.address(),
         *channel_ctx.token_ctx.mint.address(),
+        *accs.rent_payer.address(),
     )?;
 
     let event = Opened {
