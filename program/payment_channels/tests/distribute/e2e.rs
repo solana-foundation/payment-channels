@@ -208,6 +208,7 @@ fn open_ix_for_splits(
         &open_ix_data_for_splits(salt, deposit, grace_period, splits),
         vec![
             AccountMeta::new(*payer, true),
+            AccountMeta::new(*payer, true), // rent_payer (= payer)
             AccountMeta::new_readonly(*payee, false),
             AccountMeta::new_readonly(*mint, false),
             AccountMeta::new_readonly(*authorized_signer, false),

@@ -88,7 +88,8 @@ impl OpenRun {
         }
 
         let mut metas = vec![
-            AccountMeta::new(self.payer, self.payer_is_signer),
+            AccountMeta::new(self.payer, self.payer_is_signer), // payer
+            AccountMeta::new(self.payer, self.payer_is_signer), // rent_payer (= payer)
             AccountMeta::new_readonly(self.payee, false),
             AccountMeta::new_readonly(self.mint, false),
             AccountMeta::new_readonly(self.authorized_signer, false),
@@ -258,6 +259,7 @@ pub(super) fn open_ix_with_token_program(
         &data,
         vec![
             AccountMeta::new(*payer, true),
+            AccountMeta::new(*payer, true), // rent_payer (= payer)
             AccountMeta::new_readonly(*payee, false),
             AccountMeta::new_readonly(*mint, false),
             AccountMeta::new_readonly(*authorized_signer, false),

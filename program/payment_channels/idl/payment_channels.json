@@ -138,6 +138,13 @@
               "type": {
                 "kind": "publicKeyTypeNode"
               }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "rentPayer",
+              "type": {
+                "kind": "publicKeyTypeNode"
+              }
             }
           ],
           "kind": "structTypeNode"
@@ -606,6 +613,12 @@
         "name": "notEnoughAccountKeys"
       },
       {
+        "code": 10,
+        "kind": "errorNode",
+        "message": "Account does not match channel rent_payer",
+        "name": "invalidChannelRentPayer"
+      },
+      {
         "code": 50,
         "kind": "errorNode",
         "message": "Channel account does not match derived PDA",
@@ -1064,6 +1077,12 @@
             "name": "payer"
           },
           {
+            "isSigner": true,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "rentPayer"
+          },
+          {
             "isSigner": false,
             "isWritable": false,
             "kind": "instructionAccountNode",
@@ -1144,7 +1163,7 @@
           {
             "defaultValue": {
               "kind": "publicKeyValueNode",
-              "publicKey": "CQAyft83tN1w2bRofB5PZ79eVDU2xZUVo43LU1qL4zRg"
+              "publicKey": "CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX"
             },
             "isSigner": false,
             "isWritable": false,
@@ -1449,6 +1468,12 @@
             "isSigner": false,
             "isWritable": true,
             "kind": "instructionAccountNode",
+            "name": "rentPayer"
+          },
+          {
+            "isSigner": false,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
             "name": "channelTokenAccount"
           },
           {
@@ -1498,7 +1523,7 @@
           {
             "defaultValue": {
               "kind": "publicKeyValueNode",
-              "publicKey": "CQAyft83tN1w2bRofB5PZ79eVDU2xZUVo43LU1qL4zRg"
+              "publicKey": "CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX"
             },
             "isSigner": false,
             "isWritable": false,
@@ -1681,7 +1706,7 @@
         ]
       }
     ],
-    "publicKey": "CQAyft83tN1w2bRofB5PZ79eVDU2xZUVo43LU1qL4zRg",
+    "publicKey": "CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX",
     "version": "0.1.0"
   },
   "standard": "codama",

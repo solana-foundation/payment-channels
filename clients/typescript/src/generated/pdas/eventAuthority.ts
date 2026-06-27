@@ -17,7 +17,7 @@ export async function findEventAuthorityPda(
   config: { programAddress?: Address | undefined } = {},
 ): Promise<ProgramDerivedAddress> {
   const {
-    programAddress = "CQAyft83tN1w2bRofB5PZ79eVDU2xZUVo43LU1qL4zRg" as Address<"CQAyft83tN1w2bRofB5PZ79eVDU2xZUVo43LU1qL4zRg">,
+    programAddress = "CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX" as Address<"CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX">,
   } = config;
   return await getProgramDerivedAddress({
     programAddress,

@@ -242,6 +242,7 @@ pub fn build_open_ix(f: &Fixture, deposit: u64) -> Instruction {
         .collect();
     Open {
         payer: f.payer.pubkey(),
+        rent_payer: f.payer.pubkey(),
         payee: f.payee.pubkey(),
         mint: f.mint,
         authorized_signer: f.authorized_signer.pubkey(),

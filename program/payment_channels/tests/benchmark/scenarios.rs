@@ -366,6 +366,7 @@ fn run_distribute(
     let ix = Distribute {
         channel: f.channel,
         payer: f.payer.pubkey(),
+        rent_payer: f.payer.pubkey(),
         channel_token_account: f.channel_ata,
         payer_token_account: f.payer_ata,
         payee_token_account: accts.payee_ata,
@@ -491,6 +492,7 @@ fn run_distribute_alt(
     let ix = Distribute {
         channel: f.channel,
         payer: f.payer.pubkey(),
+        rent_payer: f.payer.pubkey(),
         channel_token_account: f.channel_ata,
         payer_token_account: f.payer_ata,
         payee_token_account: accts.payee_ata,

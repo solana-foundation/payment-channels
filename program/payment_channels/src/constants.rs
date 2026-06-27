@@ -16,8 +16,8 @@ const TREASURY_OWNER_SENTINEL: [u8; 32] = [
 // `const_crypto::bs58::decode_pubkey("Your…Owner")`.
 #[cfg(feature = "mainnet-beta")]
 mod cluster {
-    use super::*;
-    pub const TREASURY_OWNER: [u8; 32] = TREASURY_OWNER_SENTINEL; // TODO: real mainnet-beta owner
+    pub const TREASURY_OWNER: [u8; 32] =
+        const_crypto::bs58::decode_pubkey("Cs2zdfUNonRdRGsiZUQQLdTxzxVvJZmgiX2mpLYKuEqP");
 }
 
 #[cfg(all(feature = "devnet", not(feature = "mainnet-beta")))]
