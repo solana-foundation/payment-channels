@@ -51,6 +51,7 @@ export function getOpenDiscriminatorBytes(): ReadonlyUint8Array {
 export type OpenInstruction<
   TProgram extends string = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
   TAccountPayer extends string | AccountMeta<string> = string,
+  TAccountRentPayer extends string | AccountMeta<string> = string,
   TAccountPayee extends string | AccountMeta<string> = string,
   TAccountMint extends string | AccountMeta<string> = string,
   TAccountAuthorizedSigner extends string | AccountMeta<string> = string,
@@ -74,6 +75,10 @@ export type OpenInstruction<
         ? WritableSignerAccount<TAccountPayer> &
             AccountSignerMeta<TAccountPayer>
         : TAccountPayer,
+      TAccountRentPayer extends string
+        ? WritableSignerAccount<TAccountRentPayer> &
+            AccountSignerMeta<TAccountRentPayer>
+        : TAccountRentPayer,
       TAccountPayee extends string
         ? ReadonlyAccount<TAccountPayee>
         : TAccountPayee,
@@ -147,6 +152,7 @@ export function getOpenInstructionDataCodec(): Codec<
 
 export type OpenAsyncInput<
   TAccountPayer extends string = string,
+  TAccountRentPayer extends string = string,
   TAccountPayee extends string = string,
   TAccountMint extends string = string,
   TAccountAuthorizedSigner extends string = string,
@@ -161,6 +167,7 @@ export type OpenAsyncInput<
   TAccountSelfProgram extends string = string,
 > = {
   payer: TransactionSigner<TAccountPayer>;
+  rentPayer: TransactionSigner<TAccountRentPayer>;
   payee: Address<TAccountPayee>;
   mint: Address<TAccountMint>;
   authorizedSigner: Address<TAccountAuthorizedSigner>;
@@ -178,6 +185,7 @@ export type OpenAsyncInput<
 
 export async function getOpenInstructionAsync<
   TAccountPayer extends string,
+  TAccountRentPayer extends string,
   TAccountPayee extends string,
   TAccountMint extends string,
   TAccountAuthorizedSigner extends string,
@@ -194,6 +202,7 @@ export async function getOpenInstructionAsync<
 >(
   input: OpenAsyncInput<
     TAccountPayer,
+    TAccountRentPayer,
     TAccountPayee,
     TAccountMint,
     TAccountAuthorizedSigner,
@@ -212,6 +221,7 @@ export async function getOpenInstructionAsync<
   OpenInstruction<
     TProgramAddress,
     TAccountPayer,
+    TAccountRentPayer,
     TAccountPayee,
     TAccountMint,
     TAccountAuthorizedSigner,
@@ -233,6 +243,7 @@ export async function getOpenInstructionAsync<
   // Original accounts.
   const originalAccounts = {
     payer: { value: input.payer ?? null, isWritable: true },
+    rentPayer: { value: input.rentPayer ?? null, isWritable: true },
     payee: { value: input.payee ?? null, isWritable: false },
     mint: { value: input.mint ?? null, isWritable: false },
     authorizedSigner: {
@@ -283,6 +294,7 @@ export async function getOpenInstructionAsync<
   return Object.freeze({
     accounts: [
       getAccountMeta("payer", accounts.payer),
+      getAccountMeta("rentPayer", accounts.rentPayer),
       getAccountMeta("payee", accounts.payee),
       getAccountMeta("mint", accounts.mint),
       getAccountMeta("authorizedSigner", accounts.authorizedSigner),
@@ -303,6 +315,7 @@ export async function getOpenInstructionAsync<
   } as OpenInstruction<
     TProgramAddress,
     TAccountPayer,
+    TAccountRentPayer,
     TAccountPayee,
     TAccountMint,
     TAccountAuthorizedSigner,
@@ -320,6 +333,7 @@ export async function getOpenInstructionAsync<
 
 export type OpenInput<
   TAccountPayer extends string = string,
+  TAccountRentPayer extends string = string,
   TAccountPayee extends string = string,
   TAccountMint extends string = string,
   TAccountAuthorizedSigner extends string = string,
@@ -334,6 +348,7 @@ export type OpenInput<
   TAccountSelfProgram extends string = string,
 > = {
   payer: TransactionSigner<TAccountPayer>;
+  rentPayer: TransactionSigner<TAccountRentPayer>;
   payee: Address<TAccountPayee>;
   mint: Address<TAccountMint>;
   authorizedSigner: Address<TAccountAuthorizedSigner>;
@@ -351,6 +366,7 @@ export type OpenInput<
 
 export function getOpenInstruction<
   TAccountPayer extends string,
+  TAccountRentPayer extends string,
   TAccountPayee extends string,
   TAccountMint extends string,
   TAccountAuthorizedSigner extends string,
@@ -367,6 +383,7 @@ export function getOpenInstruction<
 >(
   input: OpenInput<
     TAccountPayer,
+    TAccountRentPayer,
     TAccountPayee,
     TAccountMint,
     TAccountAuthorizedSigner,
@@ -384,6 +401,7 @@ export function getOpenInstruction<
 ): OpenInstruction<
   TProgramAddress,
   TAccountPayer,
+  TAccountRentPayer,
   TAccountPayee,
   TAccountMint,
   TAccountAuthorizedSigner,
@@ -404,6 +422,7 @@ export function getOpenInstruction<
   // Original accounts.
   const originalAccounts = {
     payer: { value: input.payer ?? null, isWritable: true },
+    rentPayer: { value: input.rentPayer ?? null, isWritable: true },
     payee: { value: input.payee ?? null, isWritable: false },
     mint: { value: input.mint ?? null, isWritable: false },
     authorizedSigner: {
@@ -451,6 +470,7 @@ export function getOpenInstruction<
   return Object.freeze({
     accounts: [
       getAccountMeta("payer", accounts.payer),
+      getAccountMeta("rentPayer", accounts.rentPayer),
       getAccountMeta("payee", accounts.payee),
       getAccountMeta("mint", accounts.mint),
       getAccountMeta("authorizedSigner", accounts.authorizedSigner),
@@ -471,6 +491,7 @@ export function getOpenInstruction<
   } as OpenInstruction<
     TProgramAddress,
     TAccountPayer,
+    TAccountRentPayer,
     TAccountPayee,
     TAccountMint,
     TAccountAuthorizedSigner,
@@ -493,18 +514,19 @@ export type ParsedOpenInstruction<
   programAddress: Address<TProgram>;
   accounts: {
     payer: TAccountMetas[0];
-    payee: TAccountMetas[1];
-    mint: TAccountMetas[2];
-    authorizedSigner: TAccountMetas[3];
-    channel: TAccountMetas[4];
-    payerTokenAccount: TAccountMetas[5];
-    channelTokenAccount: TAccountMetas[6];
-    tokenProgram: TAccountMetas[7];
-    systemProgram: TAccountMetas[8];
-    rent: TAccountMetas[9];
-    associatedTokenProgram: TAccountMetas[10];
-    eventAuthority: TAccountMetas[11];
-    selfProgram: TAccountMetas[12];
+    rentPayer: TAccountMetas[1];
+    payee: TAccountMetas[2];
+    mint: TAccountMetas[3];
+    authorizedSigner: TAccountMetas[4];
+    channel: TAccountMetas[5];
+    payerTokenAccount: TAccountMetas[6];
+    channelTokenAccount: TAccountMetas[7];
+    tokenProgram: TAccountMetas[8];
+    systemProgram: TAccountMetas[9];
+    rent: TAccountMetas[10];
+    associatedTokenProgram: TAccountMetas[11];
+    eventAuthority: TAccountMetas[12];
+    selfProgram: TAccountMetas[13];
   };
   data: OpenInstructionData;
 };
@@ -517,12 +539,12 @@ export function parseOpenInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedOpenInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length !== 13) {
+  if (instruction.accounts.length !== 14) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 13,
+        expectedAccountMetas: 14,
       },
     );
   }
@@ -536,6 +558,7 @@ export function parseOpenInstruction<
     programAddress: instruction.programAddress,
     accounts: {
       payer: getNextAccount(),
+      rentPayer: getNextAccount(),
       payee: getNextAccount(),
       mint: getNextAccount(),
       authorizedSigner: getNextAccount(),

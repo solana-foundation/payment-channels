@@ -100,6 +100,7 @@ pub enum PaymentChannelsInstruction<'a> {
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "payer", signer, writable)),
+        codama(account(name = "rent_payer", signer, writable)),
         codama(account(name = "payee")),
         codama(account(name = "mint")),
         codama(account(name = "authorized_signer")),
@@ -190,6 +191,7 @@ pub enum PaymentChannelsInstruction<'a> {
         feature = "idl",
         codama(account(name = "channel", writable)),
         codama(account(name = "payer", writable)),
+        codama(account(name = "rent_payer", writable)),
         codama(account(name = "channel_token_account", writable)),
         codama(account(name = "payer_token_account", writable)),
         codama(account(name = "payee_token_account", writable)),

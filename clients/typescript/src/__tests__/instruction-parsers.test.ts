@@ -47,9 +47,9 @@ describe('fixed-shape parsers mirror the on-chain exact account lists', () => {
     );
   });
 
-  it('still parses distribute with a remaining-accounts tail (10 fixed + 2 extra)', () => {
+  it('still parses distribute with a remaining-accounts tail (11 fixed + 2 extra)', () => {
     // Distinct address per slot so the assertion pins positional mapping.
-    const metas: AccountMeta[] = Array.from({ length: 12 }, (_, i) => ({
+    const metas: AccountMeta[] = Array.from({ length: 13 }, (_, i) => ({
       address: getAddressDecoder().decode(new Uint8Array(32).fill(i + 1)),
       role: AccountRole.READONLY,
     }));
@@ -64,6 +64,7 @@ describe('fixed-shape parsers mirror the on-chain exact account lists', () => {
     const named = [
       parsed.accounts.channel,
       parsed.accounts.payer,
+      parsed.accounts.rentPayer,
       parsed.accounts.channelTokenAccount,
       parsed.accounts.payerTokenAccount,
       parsed.accounts.payeeTokenAccount,
@@ -74,7 +75,7 @@ describe('fixed-shape parsers mirror the on-chain exact account lists', () => {
       parsed.accounts.selfProgram,
     ];
     expect(named.map((meta) => meta.address)).toEqual(
-      metas.slice(0, 10).map((meta) => meta.address),
+      metas.slice(0, 11).map((meta) => meta.address),
     );
   });
 });
