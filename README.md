@@ -1,63 +1,73 @@
-# solana-payment-channels
+# payment-channels
 
-## Overview
+> Unidirectional payment channels on Solana: escrow a deposit, authorize cumulative spend with off-chain Ed25519 vouchers, then settle and distribute on-chain. A small [Pinocchio](https://github.com/anza-xyz/pinocchio) program over SPL Token / Token-2022.
 
-This repo contains the Pinocchio Solana program that supports the MPP protocol for unidirectional payment channels.
+**Status — live on mainnet:** [`CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX`](https://explorer.solana.com/address/CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX)
 
-The program escrows SPL Token or Token-2022 deposits. A payer signs off-chain Ed25519 vouchers for cumulative spend. The merchant can settle those vouchers on-chain and distribute settled funds.
+## Why
 
-## How It Works
+One on-chain `open` and one `settle` replace a transaction per payment. The payer escrows a ceiling; the merchant claims only what off-chain vouchers authorize; the payer recovers the rest. That makes **metered, streamed, or many-small** payments viable where settling every request on-chain is too slow and too expensive.
 
-- `open` creates a channel PDA and moves the deposit into escrow.
-- Vouchers authorize cumulative spend. They are signed off-chain by the payer or authorized signer.
-- `settle` advances the on-chain settled amount.
-- `distribute` pays settled funds to the payee and any configured split recipients.
-- Cooperative close uses `settleAndFinalize`, then `distribute`.
-- Forced close uses `requestClose`, waits through the grace period, then uses `finalize` and `distribute`.
+## Lifecycle
 
-## Status
+```mermaid
+flowchart LR
+  A["open<br/>(escrow a deposit)"] --> B["off-chain vouchers<br/>(cumulative spend)"]
+  B --> C["settle<br/>(advance settled amount)"]
+  C --> D["distribute<br/>(payee + splits, refund payer)"]
+```
 
-- No production program keypair is committed or uploaded by CI. Keep operator keypairs outside version control and pass the program-id keypair explicitly when deploying, e.g. `solana program deploy target/deploy/payment_channels.so --program-id <program-keypair>`.
-- Local/test program id: `CQAyft83tN1w2bRofB5PZ79eVDU2xZUVo43LU1qL4zRg`. This ID is for generated fixtures and tests only; mainnet integrations must use the explicitly deployed production program address.
-- `TREASURY_OWNER` is selected per cluster via Cargo features: `localnet` (default) uses a non-production placeholder for dev/test/CI; `devnet`/`testnet`/`mainnet-beta` builds (`just build-devnet` / `just build-testnet` / `just build-mainnet-beta`) require that cluster's real owner set in `program/payment_channels/src/constants.rs` and fail to compile while the placeholder remains. The operator must hold the corresponding private key, otherwise accumulated residuals are unspendable.
+```mermaid
+stateDiagram-v2
+  [*] --> Open: open
+  Open --> Open: settle / top_up
+  Open --> Finalized: settle_and_finalize (cooperative)
+  Open --> Closing: request_close (forced)
+  Closing --> Finalized: settle_and_finalize / finalize (after grace)
+  Finalized --> [*]
+```
 
-## Repo Layout
+Vouchers are signed off-chain (Ed25519) and carry a **cumulative** amount, so a newer voucher supersedes older ones and the program never settles more than the deposit. `distribute` / `withdraw_payer` move the settled funds out and refund the unspent remainder.
 
-- `program/payment_channels`: Pinocchio program.
-  - `src/instructions`: instruction processors and helpers.
-  - `src/state`: channel account state.
-  - `src/events`: program events.
-  - `tests`: program tests.
-  - `idl`: generated IDL.
-- `clients/typescript`: generated TypeScript client.
-- `clients/rust`: generated Rust client.
-- `docs`: protocol ADRs and diagrams.
-- `codama.js`: Codama generation config.
-- `codama-visitors.mjs`: local Codama visitors.
+## Used by pay.sh
 
-## Development
+This program is the on-chain settlement layer behind two [pay.sh](https://pay.sh) payment primitives. Both deposit a ceiling here, meter off-chain, and settle the actual amount on this program:
+
+- **x402 `upto`** — a single metered call: the operator settles one voucher for the actual amount and refunds the rest.
+- **MPP `session`** — a streamed channel: many cumulative vouchers, settled once when the session idle-closes.
+
+See **[Payment channels](https://pay.sh/docs/building-with-pay/payment-channels/concept)** on pay.sh for the protocol handshakes and when to pick each.
+
+## Instructions
+
+| Instruction | Role |
+| --- | --- |
+| `open` | Create the channel PDA and escrow the deposit. |
+| `settle` | Advance the on-chain settled amount from a signed voucher. |
+| `settle_and_finalize` | Settle a final voucher and close in one step (cooperative). |
+| `top_up` | Add funds to an open channel. |
+| `request_close` | Payer-initiated forced close — starts the grace period. |
+| `finalize` | Finalize a forced-closing channel once the grace period elapses. |
+| `distribute` | Pay the payee and any split recipients; refund the payer. |
+| `withdraw_payer` | Payer recovers the unspent remainder. |
+
+## Build & test
 
 ```sh
 just setup
 just build-program
 just generate-client
 just test-program
-just check
-just fmt
-
-# Cluster builds (require that cluster's real TREASURY_OWNER in constants.rs):
-just build-devnet
-just build-testnet
-just build-mainnet-beta
 ```
 
-The committed IDL declares the program's emitted events (`Opened`, `PayoutRedirected`), and the generated clients enforce the on-chain fixed account shapes, and only `distribute` accepts remaining accounts.
+Cluster builds (`just build-mainnet-beta`, `just build-devnet`, …) require that cluster's real `TREASURY_OWNER` in `program/payment_channels/src/constants.rs` and refuse to compile with the placeholder. No production keypair is committed — pass the program-id keypair explicitly when deploying.
 
-## More Docs
+## Docs & clients
 
 - [State machine](docs/001-payment-channel-state-machine.md)
 - [HTTP protocol](docs/002-http-protocol.md)
 - [Instruction reference](docs/003-program-instructions.md)
+- Generated clients: [TypeScript](clients/typescript), [Rust](clients/rust).
 
 ## License
 
