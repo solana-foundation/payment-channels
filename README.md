@@ -1,4 +1,4 @@
-# solana-payment-channels
+# payment-channels
 
 > Unidirectional payment channels on Solana: escrow a deposit, authorize cumulative spend with off-chain Ed25519 vouchers, then settle and distribute on-chain. A small [Pinocchio](https://github.com/anza-xyz/pinocchio) program over SPL Token / Token-2022.
 
