@@ -29,6 +29,9 @@ pub(super) struct TopUpRun {
     /// override only when targeting the unknown-program dispatch arm.
     pub token_program: Pubkey,
     pub amount: u64,
+    /// Value passed as `expected_open_slot` in `TopUpArgs`. Defaults to 0,
+    /// matching the zeroed channel blobs produced by `ChannelBuilder`.
+    pub expected_open_slot: u64,
 }
 
 impl TopUpRun {
@@ -41,6 +44,7 @@ impl TopUpRun {
             channel_ata: Pubkey::new_unique(),
             token_program: SPL_TOKEN,
             amount,
+            expected_open_slot: 0,
         }
     }
 
@@ -52,6 +56,7 @@ impl TopUpRun {
         ix_data.extend_from_slice(
             TopUpArgs {
                 amount: self.amount.to_le_bytes(),
+                expected_open_slot: self.expected_open_slot.to_le_bytes(),
             }
             .as_bytes(),
         );

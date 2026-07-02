@@ -20,7 +20,7 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 
 use crate::common::events::events;
-use crate::common::{PROGRAM_ID, ProgramLoader};
+use crate::common::{PROGRAM_ID, ProgramLoader, read_channel};
 
 const SPL_TOKEN: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const ATA_PROGRAM: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
@@ -135,19 +135,25 @@ fn open_emits_opened_event_with_anchor_compatible_wire_format() {
     );
 
     // Anchor-style wire format:
-    //   [0..8)   tag          = EVENT_IX_TAG_LE (matched by the find above)
-    //   [8..16)  event_disc   = Opened::DISCRIMINATOR (sha256("event:Opened")[..8])
-    //   [16..48) borsh body   = channel as [u8; 32]
+    //   [0..8)     tag          = EVENT_IX_TAG_LE (matched by the find above)
+    //   [8..16)    event_disc   = Opened::DISCRIMINATOR (sha256("event:Opened")[..8])
+    //   [16..48)   channel      = channel as [u8; 32]
+    //   [48..56)   open_slot    = u64 LE
     assert_eq!(
         inner.instruction.data.len(),
-        48,
-        "wire length = 8 tag + 8 disc + 32 channel"
+        56,
+        "wire length = 8 tag + 8 disc + 32 channel + 8 open_slot"
     );
+
+    // `open_slot` is Clock::slot at open time, which is nondeterministic across
+    // test runs. Read it back from the channel PDA the tx just created so the
+    // event round-trip assertion still pins the full struct.
+    let open_slot = read_channel(&svm, &channel, |ch| ch.open_slot());
 
     // Round-trip through the IDL-generated client struct: `events` matches the
     // tag and `Opened::DISCRIMINATOR` before decoding the body, so this single
     // assert pins the committed event layout to the emitted bytes. The runtime
     // crate's `Opened` stays serialize-only: programs emit events, they
     // don't read them. Off-chain consumers decode via the generated types.
-    assert_eq!(events::<Opened>(&meta), vec![Opened { channel }]);
+    assert_eq!(events::<Opened>(&meta), vec![Opened { channel, open_slot }],);
 }

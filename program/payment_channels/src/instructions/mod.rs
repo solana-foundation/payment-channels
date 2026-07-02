@@ -16,7 +16,7 @@ use pinocchio::{Address, error::ProgramError};
 use crate::state::Transmutable;
 
 /// On-chain wire encoding of the voucher. Field order matches
-/// Borsh(`{ channel_id, cumulative_amount, expires_at }`), so the
+/// Borsh(`{ channel_id, open_slot, cumulative_amount, expires_at }`), so the
 /// struct's raw bytes ARE the ed25519-signed payload — no repack.
 /// Ed25519-only; signature verification is offloaded to a caller-bundled
 /// Ed25519 native-program ix whose message bytes are read back via the
@@ -27,6 +27,11 @@ use crate::state::Transmutable;
 pub struct VoucherArgs {
     /// Replay scope; must equal the [`Channel`](crate::Channel) PDA.
     pub channel_id: Address,
+    /// Must equal [`Channel::open_slot`](crate::Channel::open_slot). Blocks
+    /// replay of vouchers signed for a prior incarnation at the same PDA
+    /// seeds.
+    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    open_slot: [u8; 8],
     /// Monotonic watermark. Must satisfy
     /// [`settled`](crate::Channel::settled) `< cumulative_amount ≤`
     /// [`deposit`](crate::Channel::deposit); the strict increase also
@@ -40,14 +45,24 @@ pub struct VoucherArgs {
 }
 
 impl VoucherArgs {
-    pub fn new(channel_id: Address, cumulative_amount: u64, expires_at: i64) -> Self {
+    pub fn new(
+        channel_id: Address,
+        open_slot: u64,
+        cumulative_amount: u64,
+        expires_at: i64,
+    ) -> Self {
         Self {
             channel_id,
+            open_slot: open_slot.to_le_bytes(),
             cumulative_amount: cumulative_amount.to_le_bytes(),
             expires_at: expires_at.to_le_bytes(),
         }
     }
 
+    #[inline(always)]
+    pub fn open_slot(&self) -> u64 {
+        u64::from_le_bytes(self.open_slot)
+    }
     #[inline(always)]
     pub fn cumulative_amount(&self) -> u64 {
         u64::from_le_bytes(self.cumulative_amount)
@@ -59,8 +74,8 @@ impl VoucherArgs {
 }
 
 /// Byte length of the signed voucher payload — `channel_id (32) ||
-/// cumulative_amount (8 LE) || expires_at (8 LE)`, which is
-/// exactly the in-memory layout of [`VoucherArgs`]. Also the canonical
+/// open_slot (8 LE) || cumulative_amount (8 LE) || expires_at (8 LE)`, which
+/// is exactly the in-memory layout of [`VoucherArgs`]. Also the canonical
 /// `message_data_size` every Ed25519 precompile ix must declare; pinned
 /// against a layout where an attacker has the precompile verify a
 /// truncated or extended message.
@@ -165,7 +180,10 @@ pub enum PaymentChannelsInstruction<'a> {
         codama(account(name = "payer", signer)),
         codama(account(name = "channel", writable))
     )]
-    RequestClose = 5,
+    RequestClose(
+        #[cfg_attr(feature = "idl", codama(name = "request_close_args"))]
+        &'a request_close::RequestCloseArgs,
+    ) = 5,
 
     /// Permissionless post-grace crank: freezes the watermark and moves
     /// `CLOSING → FINALIZED` once the grace has elapsed; resets
@@ -184,7 +202,9 @@ pub enum PaymentChannelsInstruction<'a> {
     /// residual is swept to treasury, the payer receives the unspent
     /// [`deposit`](crate::Channel::deposit) `−`
     /// [`settled`](crate::Channel::settled) headroom (if not already
-    /// withdrawn) and tombstones the escrow ATA + the Channel PDA.
+    /// withdrawn), the escrow ATA is closed, and the Channel PDA is fully
+    /// closed — data resized to 0 and all lamports refunded to
+    /// [`Channel::rent_payer`](crate::Channel::rent_payer).
     /// Recipient token accounts are appended as remaining accounts in the
     /// same order as the`DistributionEntry`s in the preimage.
     #[cfg_attr(
@@ -209,7 +229,8 @@ pub enum PaymentChannelsInstruction<'a> {
     /// Payer-signed one-shot refund of [`deposit`](crate::Channel::deposit)
     /// `−` [`settled`](crate::Channel::settled) during `FINALIZED`;
     /// records [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at)
-    /// `= now`. Does not tombstone.
+    /// `= now`. Does not close the PDA — [`distribute`] does that on the
+    /// FINALIZED branch after all payouts complete.
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "payer", signer)),
@@ -219,7 +240,10 @@ pub enum PaymentChannelsInstruction<'a> {
         codama(account(name = "mint")),
         codama(account(name = "token_program"))
     )]
-    WithdrawPayer = 8,
+    WithdrawPayer(
+        #[cfg_attr(feature = "idl", codama(name = "withdraw_payer_args"))]
+        &'a withdraw_payer::WithdrawPayerArgs,
+    ) = 8,
 
     /// Self-CPI target for the event pipeline; not part of the public
     /// instruction set. `228 = EVENT_IX_TAG_LE[0]`: self-CPI event data
@@ -244,10 +268,10 @@ impl<'a> PaymentChannelsInstruction<'a> {
             Self::Settle => "settle",
             Self::TopUp(_) => "top_up",
             Self::SettleAndFinalize(_) => "settle_and_finalize",
-            Self::RequestClose => "request_close",
+            Self::RequestClose(_) => "request_close",
             Self::Finalize => "finalize",
             Self::Distribute(_) => "distribute",
-            Self::WithdrawPayer => "withdraw_payer",
+            Self::WithdrawPayer(_) => "withdraw_payer",
             Self::EmitEvent => "emit_event",
         }
     }
@@ -264,12 +288,16 @@ impl<'a> PaymentChannelsInstruction<'a> {
             settle_and_finalize::DISCRIMINATOR => Ok(Self::SettleAndFinalize(
                 settle_and_finalize::SettleAndFinalizeArgs::load(rest)?,
             )),
-            request_close::DISCRIMINATOR => Ok(Self::RequestClose),
+            request_close::DISCRIMINATOR => Ok(Self::RequestClose(
+                request_close::RequestCloseArgs::load(rest)?,
+            )),
             finalize::DISCRIMINATOR => Ok(Self::Finalize),
             distribute::DISCRIMINATOR => {
                 Ok(Self::Distribute(distribute::DistributeArgs::load(rest)?))
             }
-            withdraw_payer::DISCRIMINATOR => Ok(Self::WithdrawPayer),
+            withdraw_payer::DISCRIMINATOR => Ok(Self::WithdrawPayer(
+                withdraw_payer::WithdrawPayerArgs::load(rest)?,
+            )),
             emit_event::DISCRIMINATOR => Ok(Self::EmitEvent),
             _ => Err(ProgramError::InvalidInstructionData),
         }
@@ -289,8 +317,10 @@ mod tests {
 
     #[test]
     fn discriminators_match_variants() {
-        let top_up: top_up::TopUpArgs = unsafe { core::mem::zeroed() };
+        let top_up_args: top_up::TopUpArgs = unsafe { core::mem::zeroed() };
         let saf: settle_and_finalize::SettleAndFinalizeArgs = unsafe { core::mem::zeroed() };
+        let request_close_args: request_close::RequestCloseArgs = unsafe { core::mem::zeroed() };
+        let withdraw_payer_args: withdraw_payer::WithdrawPayerArgs = unsafe { core::mem::zeroed() };
 
         let open_data = [0u8; 20 + 4];
         let open = open::OpenArgs::load(&open_data).unwrap();
@@ -306,7 +336,7 @@ mod tests {
             settle::DISCRIMINATOR,
         );
         assert_eq!(
-            tag(&PaymentChannelsInstruction::TopUp(&top_up)),
+            tag(&PaymentChannelsInstruction::TopUp(&top_up_args)),
             top_up::DISCRIMINATOR,
         );
         assert_eq!(
@@ -314,7 +344,9 @@ mod tests {
             settle_and_finalize::DISCRIMINATOR,
         );
         assert_eq!(
-            tag(&PaymentChannelsInstruction::RequestClose),
+            tag(&PaymentChannelsInstruction::RequestClose(
+                &request_close_args
+            )),
             request_close::DISCRIMINATOR,
         );
         assert_eq!(
@@ -326,7 +358,9 @@ mod tests {
             distribute::DISCRIMINATOR,
         );
         assert_eq!(
-            tag(&PaymentChannelsInstruction::WithdrawPayer),
+            tag(&PaymentChannelsInstruction::WithdrawPayer(
+                &withdraw_payer_args
+            )),
             withdraw_payer::DISCRIMINATOR,
         );
         assert_eq!(

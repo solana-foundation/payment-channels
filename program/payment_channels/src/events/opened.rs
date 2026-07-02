@@ -10,6 +10,7 @@ use crate::event_engine::{EventDiscriminator, EventSerialize};
 #[cfg_attr(feature = "idl", codama(discriminator(bytes = "a6ac61094d4cbd6d")))]
 pub struct Opened {
     pub channel: Address,
+    pub open_slot: u64,
 }
 
 impl EventDiscriminator for Opened {
@@ -17,5 +18,5 @@ impl EventDiscriminator for Opened {
 }
 
 impl EventSerialize for Opened {
-    const DATA_LEN: usize = 32;
+    const DATA_LEN: usize = 32 + 8;
 }

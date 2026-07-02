@@ -1,3 +1,6 @@
+#[cfg(feature = "idl")]
+use codama::CodamaType;
+use core::mem::size_of;
 use pinocchio::{
     AccountView, Address, ProgramResult,
     cpi::Signer,
@@ -12,15 +15,45 @@ use crate::helpers::accounts::view::{
 };
 use crate::instructions::helpers::channel_signer_seeds;
 use crate::state::channel::{Channel, ChannelStatus};
+use crate::state::{Transmutable, load};
 
 /// Instruction discriminator byte for `withdrawPayer`.
 pub const DISCRIMINATOR: u8 = 8;
+
+/// Payer-signed refund payload.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "idl", derive(CodamaType))]
+pub struct WithdrawPayerArgs {
+    /// Must equal [`Channel::open_slot`](crate::Channel::open_slot). Scopes
+    /// the refund to the intended channel incarnation.
+    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    pub expected_open_slot: [u8; 8],
+}
+
+impl WithdrawPayerArgs {
+    pub const LEN: usize = size_of::<Self>();
+
+    #[inline(always)]
+    pub fn expected_open_slot(&self) -> u64 {
+        u64::from_le_bytes(self.expected_open_slot)
+    }
+
+    pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
+        unsafe { load::<Self>(data) }.map_err(|_| ProgramError::InvalidInstructionData)
+    }
+}
+
+unsafe impl Transmutable for WithdrawPayerArgs {
+    const LEN: usize = size_of::<Self>();
+}
 
 pub struct WithdrawPayerAccounts<'a> {
     /// Must equal [`Channel::payer`](crate::Channel::payer) and be a signer.
     pub payer: PayerAccountView<'a>,
     /// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at)
-    /// stamped; not tombstoned.
+    /// stamped; the PDA is not closed here — [`distribute`] closes it on
+    /// the FINALIZED branch after all payouts complete.
     pub channel: ChannelAccountView<'a>,
     pub channel_token_account: ChannelTokenAccountView<'a>,
     pub payer_token_account: PayerTokenAccountView<'a>,
@@ -56,9 +89,14 @@ impl<'a> TryFrom<&'a mut [AccountView]> for WithdrawPayerAccounts<'a> {
 
 /// Payer-only refund of [`deposit`](crate::Channel::deposit) `−`
 /// [`settled`](crate::Channel::settled) during `FINALIZED`; records
-/// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `= now` and
-/// does **not** tombstone the PDA.
-pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
+/// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `= now`. Does
+/// **not** close the PDA — [`crate::instructions::distribute`] closes it on
+/// the FINALIZED branch after all payouts complete.
+pub fn process(
+    _program_id: &Address,
+    accounts: &mut [AccountView],
+    args: &WithdrawPayerArgs,
+) -> ProgramResult {
     let accs = WithdrawPayerAccounts::try_from(accounts)?;
     let now = Clock::get()?.unix_timestamp;
 
@@ -84,6 +122,9 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
     }
     if accs.mint.address() != &ch.mint {
         return Err(PaymentChannelsError::InvalidChannelMint.into());
+    }
+    if args.expected_open_slot() != ch.open_slot() {
+        return Err(PaymentChannelsError::ChannelSlotMismatch.into());
     }
 
     // Snapshot accounting + PDA seed material before dropping ch.

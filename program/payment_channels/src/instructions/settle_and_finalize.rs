@@ -15,9 +15,9 @@ use crate::state::{Transmutable, load};
 /// Instruction discriminator byte for `settleAndFinalize`.
 pub const DISCRIMINATOR: u8 = 4;
 
-/// Cooperative-close payload: a single option-tag byte. When the voucher is
-/// applied it is read from the bundled Ed25519 precompile ix — the same source
-/// as `settle` — so it is never duplicated in this instruction's data.
+/// Cooperative-close payload. When the voucher is applied it is read from the
+/// bundled Ed25519 precompile ix — the same source as `settle` — so it is
+/// never duplicated in this instruction's data.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
@@ -27,10 +27,20 @@ pub struct SettleAndFinalizeArgs {
     /// voucher carried by the preceding Ed25519 precompile ix first, under the
     /// same freshness and monotonicity rules as `settle`.
     pub has_voucher: u8,
+    /// Must equal [`Channel::open_slot`](crate::Channel::open_slot). Scopes
+    /// the finalize to the intended incarnation independent of the voucher
+    /// path (which binds `open_slot` through its own signed payload).
+    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    pub expected_open_slot: [u8; 8],
 }
 
 impl SettleAndFinalizeArgs {
     pub const LEN: usize = size_of::<Self>();
+
+    #[inline(always)]
+    pub fn expected_open_slot(&self) -> u64 {
+        u64::from_le_bytes(self.expected_open_slot)
+    }
 
     pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
         unsafe { load::<Self>(data) }.map_err(|_| ProgramError::InvalidInstructionData)
@@ -108,6 +118,13 @@ pub fn process(
 
     if accs.merchant.address() != &ch.payee {
         return Err(PaymentChannelsError::InvalidChannelPayee.into());
+    }
+
+    // Scopes the finalize to the intended incarnation. Redundant when a
+    // voucher is applied (that path binds `open_slot` too); necessary when
+    // `has_voucher == 0`.
+    if args.expected_open_slot() != ch.open_slot() {
+        return Err(PaymentChannelsError::ChannelSlotMismatch.into());
     }
 
     if args.has_voucher != 0 {

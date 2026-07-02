@@ -48,6 +48,29 @@ fn unsigned_merchant_rejects() {
 }
 
 #[test]
+fn wrong_expected_open_slot_rejects() {
+    // No-voucher path: channel blob has open_slot=0; a non-zero
+    // `expected_open_slot` trips the incarnation guard.
+    let merchant = Pubkey::new_unique();
+    assert_eq!(
+        SettleAndFinalizeRun {
+            expected_open_slot: 1,
+            ..SettleAndFinalizeRun::new(
+                merchant,
+                ChannelBuilder::new()
+                    .status(ChannelStatus::Open)
+                    .payee(merchant)
+                    .build(),
+            )
+        }
+        .run(),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::ChannelSlotMismatch as u32
+        )),
+    );
+}
+
+#[test]
 fn finalized_status_rejects() {
     let merchant = Pubkey::new_unique();
     assert_eq!(

@@ -24,6 +24,7 @@ describe('fixed-shape parsers mirror the on-chain exact account lists', () => {
   const exact = getRequestCloseInstruction({
     payer: createNoopSigner(SYSTEM_ADDR),
     channel: SYSTEM_ADDR,
+    requestCloseArgs: { expectedOpenSlot: 0n },
   });
 
   it('parses a builder-produced requestClose instruction (exactly 2 accounts)', () => {

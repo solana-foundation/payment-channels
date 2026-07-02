@@ -7,20 +7,8 @@
 
 use borsh::BorshDeserialize;
 use borsh::BorshSerialize;
-use num_derive::FromPrimitive;
 
-#[derive(
-    BorshSerialize,
-    BorshDeserialize,
-    Clone,
-    Debug,
-    Eq,
-    PartialEq,
-    Copy,
-    PartialOrd,
-    Hash,
-    FromPrimitive,
-)]
-pub enum AccountDiscriminator {
-    Channel,
+#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Eq, PartialEq)]
+pub struct WithdrawPayerArgs {
+    pub expected_open_slot: u64,
 }

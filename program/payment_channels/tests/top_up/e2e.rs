@@ -44,8 +44,13 @@ fn read_deposit(svm: &LiteSVM, channel: &Pubkey) -> u64 {
     read_channel(svm, channel, |ch| ch.deposit())
 }
 
+fn read_open_slot(svm: &LiteSVM, channel: &Pubkey) -> u64 {
+    read_channel(svm, channel, |ch| ch.open_slot())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_top_up_ix(
+    svm: &LiteSVM,
     payer: &Pubkey,
     channel: &Pubkey,
     payer_token_account: &Pubkey,
@@ -54,6 +59,7 @@ fn build_top_up_ix(
     amount: u64,
     token_program: Pubkey,
 ) -> Instruction {
+    let expected_open_slot = read_open_slot(svm, channel);
     TopUp {
         payer: *payer,
         channel: *channel,
@@ -63,7 +69,10 @@ fn build_top_up_ix(
         token_program,
     }
     .instruction(TopUpInstructionArgs {
-        top_up_args: TopUpArgs { amount },
+        top_up_args: TopUpArgs {
+            amount,
+            expected_open_slot,
+        },
     })
 }
 
@@ -109,6 +118,7 @@ fn top_up_increases_deposit() {
     assert_eq!(read_deposit(&svm, &channel), deposit);
 
     let ix = build_top_up_ix(
+        &svm,
         &payer.pubkey(),
         &channel,
         &payer_ata,
@@ -140,6 +150,7 @@ fn top_up_zero_amount_rejects() {
     seed_channel(&mut svm, &channel, 0, 1_000_000, &payer.pubkey());
 
     let ix = build_top_up_ix(
+        &svm,
         &payer.pubkey(),
         &channel,
         &Pubkey::new_unique(),
@@ -176,6 +187,7 @@ fn top_up_non_open_status_rejects() {
     );
 
     let ix = build_top_up_ix(
+        &svm,
         &payer.pubkey(),
         &channel,
         &Pubkey::new_unique(),
@@ -207,6 +219,7 @@ fn top_up_wrong_payer_rejects() {
     seed_channel(&mut svm, &channel, 0, 1_000_000, &alice.pubkey());
 
     let ix = build_top_up_ix(
+        &svm,
         &bob.pubkey(),
         &channel,
         &Pubkey::new_unique(),
@@ -269,6 +282,7 @@ fn top_up_wrong_mint_rejects() {
     let wrong_mint = Pubkey::new_unique();
 
     let ix = build_top_up_ix(
+        &svm,
         &payer.pubkey(),
         &channel,
         &payer_ata,
@@ -329,6 +343,7 @@ fn top_up_wrong_escrow_rejects() {
     // Pass payer_ata in place of the channel escrow — same mint so the ATA
     // derivation check fires before the token CPI can catch it.
     let ix = build_top_up_ix(
+        &svm,
         &payer.pubkey(),
         &channel,
         &payer_ata,
@@ -360,7 +375,8 @@ fn top_up_unsigned_payer_rejects() {
     seed_channel(&mut svm, &channel, 0, 1_000_000, &channel_payer.pubkey());
 
     let mut data = vec![3u8]; // DISCRIMINATOR
-    data.extend_from_slice(&50_000u64.to_le_bytes());
+    data.extend_from_slice(&50_000u64.to_le_bytes()); // amount
+    data.extend_from_slice(&0u64.to_le_bytes()); // expected_open_slot
     let ix = Instruction {
         program_id: PROGRAM_ID,
         accounts: vec![
@@ -427,6 +443,7 @@ fn top_up_increases_deposit_token_2022() {
     assert_eq!(read_deposit(&svm, &channel), deposit);
 
     let ix = build_top_up_ix(
+        &svm,
         &payer.pubkey(),
         &channel,
         &payer_ata,
@@ -486,6 +503,7 @@ fn top_up_token_2022_nonzero_decimals_succeeds() {
     );
 
     let ix = build_top_up_ix(
+        &svm,
         &payer.pubkey(),
         &channel,
         &payer_ata,
@@ -551,6 +569,7 @@ fn top_up_unsupported_token_2022_mint_extension_rejects_without_state_changes() 
     add_mint_extension(&mut svm, &mint, EXT_TRANSFER_FEE_CONFIG, 108);
 
     let ix = build_top_up_ix(
+        &svm,
         &payer.pubkey(),
         &channel,
         &payer_ata,
@@ -615,6 +634,7 @@ fn top_up_wrong_escrow_rejects_token_2022() {
     // Pass payer_ata in place of the channel escrow — same mint so the ATA
     // derivation check fires before the token CPI can catch it.
     let ix = build_top_up_ix(
+        &svm,
         &payer.pubkey(),
         &channel,
         &payer_ata,

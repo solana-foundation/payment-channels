@@ -30,14 +30,7 @@ import {
   type SelfPlanAndSendFunctions,
 } from "@solana/program-client-core";
 import { getU8Encoder } from "../../safe-codecs.js";
-import {
-  getChannelCodec,
-  getClosedChannelCodec,
-  type Channel,
-  type ChannelArgs,
-  type ClosedChannel,
-  type ClosedChannelArgs,
-} from "../accounts";
+import { getChannelCodec, type Channel, type ChannelArgs } from "../accounts";
 import {
   getDistributeInstructionAsync,
   getEmitEventInstructionAsync,
@@ -83,7 +76,6 @@ export const PAYMENT_CHANNELS_PROGRAM_ADDRESS =
 
 export enum PaymentChannelsAccount {
   Channel,
-  ClosedChannel,
 }
 
 export enum PaymentChannelsInstruction {
@@ -254,8 +246,6 @@ export type PaymentChannelsPlugin = {
 export type PaymentChannelsPluginAccounts = {
   channel: ReturnType<typeof getChannelCodec> &
     SelfFetchFunctions<ChannelArgs, Channel>;
-  closedChannel: ReturnType<typeof getClosedChannelCodec> &
-    SelfFetchFunctions<ClosedChannelArgs, ClosedChannel>;
 };
 
 export type PaymentChannelsPluginInstructions = {
@@ -310,10 +300,7 @@ export function paymentChannelsProgram() {
   } => {
     return extendClient(client, {
       paymentChannels: <PaymentChannelsPlugin>{
-        accounts: {
-          channel: addSelfFetchFunctions(client, getChannelCodec()),
-          closedChannel: addSelfFetchFunctions(client, getClosedChannelCodec()),
-        },
+        accounts: { channel: addSelfFetchFunctions(client, getChannelCodec()) },
         instructions: {
           open: (input) =>
             addSelfPlanAndSendFunctions(client, getOpenInstructionAsync(input)),

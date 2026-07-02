@@ -84,6 +84,27 @@ fn finalized_status_rejects() {
     );
 }
 
+#[test]
+fn wrong_expected_open_slot_rejects() {
+    let payer = Pubkey::new_unique();
+    assert_eq!(
+        RequestCloseRun {
+            expected_open_slot: 1, // channel blob has open_slot=0
+            ..RequestCloseRun::new(
+                payer,
+                ChannelBuilder::new()
+                    .status(ChannelStatus::Open)
+                    .payer(payer)
+                    .build(),
+            )
+        }
+        .run(),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::ChannelSlotMismatch as u32
+        )),
+    );
+}
+
 /// The exact-slice destructure rejects extra accounts (surfaced as the
 /// custom NotEnoughAccountKeys, despite the too-many direction).
 #[test]

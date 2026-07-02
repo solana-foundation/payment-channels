@@ -30,7 +30,7 @@ pub enum ChannelStatus {
     /// [`Closing`](Self::Closing).
     Open = 0,
     /// Watermark locked. Awaits `distribute` (splits + optional payer
-    /// refund + tombstone) and/or a standalone `withdraw_payer`.
+    /// refund + PDA close) and/or a standalone `withdraw_payer`.
     Finalized = 1,
     /// `requestClose` has started the grace window. Exits to
     /// [`Finalized`](Self::Finalized) cooperatively (merchant
@@ -41,7 +41,7 @@ pub enum ChannelStatus {
 
 impl ChannelStatus {
     /// Whether the channel is in [`Finalized`](Self::Finalized), gating
-    /// refund/sweep/tombstone branches in `distribute`.
+    /// refund/sweep/close branches in `distribute`.
     #[inline]
     pub const fn is_finalized(&self) -> bool {
         matches!(self, Self::Finalized)
@@ -63,7 +63,7 @@ impl TryFrom<u8> for ChannelStatus {
 
 /// Active channel PDA: escrowed deposit, settled watermark, closure
 /// timestamps, distribution commitment, and participant bindings. Fixed
-/// 248-byte layout for zero-copy load.
+/// 256-byte layout for zero-copy load.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaAccount))]
@@ -85,6 +85,10 @@ pub struct Channel {
     /// and sign as the channel PDA without off-chain data.
     #[cfg_attr(feature = "idl", codama(type = number(u64)))]
     salt: [u8; 8],
+    /// `Clock::slot` at `open`. Vouchers and instructions bind this value so
+    /// that they can only target the intended channel incarnation.
+    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    open_slot: [u8; 8],
     /// Initial escrow; immutable ceiling on [`Self::settled`]. Raised only
     /// by `topUp` while [`Self::status`] == [`ChannelStatus::Open`];
     /// `requestClose` locks it by atomically moving the channel to
@@ -138,6 +142,11 @@ impl Channel {
     #[inline(always)]
     pub fn salt(&self) -> u64 {
         u64::from_le_bytes(self.salt)
+    }
+
+    #[inline(always)]
+    pub fn open_slot(&self) -> u64 {
+        u64::from_le_bytes(self.open_slot)
     }
 
     #[inline(always)]
@@ -252,6 +261,7 @@ impl Channel {
         bytes: &mut [u8],
         bump: u8,
         salt: u64,
+        open_slot: u64,
         deposit: u64,
         grace_period: u32,
         distribution_hash: [u8; 32],
@@ -268,6 +278,7 @@ impl Channel {
         ch.bump = bump;
         ch.status = ChannelStatus::Open as u8;
         ch.salt = salt.to_le_bytes();
+        ch.open_slot = open_slot.to_le_bytes();
         ch.deposit = deposit.to_le_bytes();
         ch.settlement = SettlementWatermarks::new(0, 0);
         ch.closure_started_at = 0i64.to_le_bytes();
@@ -310,7 +321,7 @@ unsafe impl Transmutable for Channel {
 }
 
 const _: () = {
-    assert!(Channel::LEN == 248);
+    assert!(Channel::LEN == 256);
 };
 
 /// Cumulative settlement watermarks stored inside [`Channel`].
@@ -445,8 +456,8 @@ mod tests {
     }
 
     #[test]
-    fn size_is_248_bytes() {
-        assert_eq!(core::mem::size_of::<Channel>(), 248);
+    fn size_is_256_bytes() {
+        assert_eq!(core::mem::size_of::<Channel>(), 256);
     }
 
     #[test]

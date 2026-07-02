@@ -81,6 +81,7 @@ fn settle_advances_watermark_on_valid_voucher() {
     let cumulative = 500_000u64;
     let voucher = VoucherArgs {
         channel_id: channel,
+        open_slot: 0,
         cumulative_amount: cumulative,
         expires_at: 0,
     };
@@ -114,11 +115,13 @@ fn settle_batches_two_paired_ix_advance_watermark() {
 
     let voucher_1 = VoucherArgs {
         channel_id: channel,
+        open_slot: 0,
         cumulative_amount: 300_000,
         expires_at: 0,
     };
     let voucher_2 = VoucherArgs {
         channel_id: channel,
+        open_slot: 0,
         cumulative_amount: 500_000,
         expires_at: 0,
     };
@@ -194,6 +197,7 @@ fn settle_after_expiry_rejects() {
 
     let voucher = VoucherArgs {
         channel_id: channel,
+        open_slot: 0,
         cumulative_amount: 500_000,
         expires_at,
     };
@@ -229,6 +233,7 @@ fn settle_voucher_channel_mismatch_rejects() {
 
     let voucher = VoucherArgs {
         channel_id: channel_b,
+        open_slot: 0,
         cumulative_amount: 500_000,
         expires_at: 0,
     };
@@ -263,6 +268,7 @@ fn settle_voucher_over_deposit_rejects() {
 
     let voucher = VoucherArgs {
         channel_id: channel,
+        open_slot: 0,
         cumulative_amount: 500_001,
         expires_at: 0,
     };
@@ -297,6 +303,7 @@ fn settle_voucher_not_monotonic_rejects() {
 
     let voucher = VoucherArgs {
         channel_id: channel,
+        open_slot: 0,
         cumulative_amount: 500_000,
         expires_at: 0,
     };
@@ -338,6 +345,7 @@ fn settle_voucher_signer_mismatch_rejects() {
 
     let voucher = VoucherArgs {
         channel_id: channel,
+        open_slot: 0,
         cumulative_amount: 500_000,
         expires_at: 0,
     };
@@ -372,6 +380,7 @@ fn settle_malformed_ed25519_ix_rejects() {
 
     let voucher = VoucherArgs {
         channel_id: channel,
+        open_slot: 0,
         cumulative_amount: 500_000,
         expires_at: 0,
     };
@@ -447,6 +456,7 @@ fn settle_with_invalid_signature_rejects_before_settle_runs() {
 
     let voucher = VoucherArgs {
         channel_id: channel,
+        open_slot: 0,
         cumulative_amount: 500_000,
         expires_at: 0,
     };

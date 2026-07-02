@@ -16,8 +16,8 @@ Quick reference for every instruction exposed by the payment-channels program: d
 | 4 | `settleAndFinalize` | merchant/payee | merchant/payee, optional Ed25519 voucher | `OPEN/CLOSING → FINALIZED` | Optional final settle, then lock the channel for distribution/refund. |
 | 5 | `requestClose` | payer | payer | `OPEN → CLOSING` | Start the grace-period close window. |
 | 6 | `finalize` | permissionless | — | `CLOSING → FINALIZED` | Finalize after the grace period expires. |
-| 7 | `distribute` | permissionless | — | `OPEN → OPEN` or `FINALIZED → CLOSED` | Pay cumulative floor deltas to recipients/payee; on `FINALIZED`, refund/sweep/close/tombstone. Channel PDA signs token CPIs internally. |
-| 8 | `withdrawPayer` | payer | payer | `FINALIZED → FINALIZED` | One-shot payer refund of `deposit - settled` without tombstoning. Channel PDA signs the refund CPI internally. |
+| 7 | `distribute` | permissionless | — | `OPEN → OPEN` or `FINALIZED → CLOSED` | Pay cumulative floor deltas to recipients/payee; on `FINALIZED`, refund/sweep/close the escrow ATA + fully close the channel PDA (data → 0, lamports → `rent_payer`). Channel PDA signs token CPIs internally. |
+| 8 | `withdrawPayer` | payer | payer | `FINALIZED → FINALIZED` | One-shot payer refund of `deposit - settled` without closing the PDA (`distribute` does that). Channel PDA signs the refund CPI internally. |
 | 228 | `emitEvent` | program self-CPI | event authority PDA | — | Internal Anchor-compatible event emission target. |
 
 The **Signer** column lists transaction-level signers where applicable; `Ed25519 voucher` means precompile-verified authorization rather than an account signer. PDA signer seeds used for internal CPIs are called out in the purpose or account descriptions.
@@ -28,7 +28,7 @@ The **Signer** column lists transaction-level signers where applicable; `Ed25519
 
 Payer-signed initializer. Creates the active channel PDA, creates its escrow ATA, transfers `deposit` from the payer token account, stores the exact Blake3 hash of the distribution preimage, and emits `Opened`. The `authorized_signer` account must be a valid Ed25519 public key, but it does not need to sign `open`. The `payee` account is not curve-checked and may be a program-derived address (PDA) beneficiary.
 
-Both creates are **prefund-tolerant**: lamports already sitting on the channel PDA (the PDA is allocated with `Allocate` + `Assign` after topping up only the rent shortfall) and a pre-existing canonical escrow ATA (idempotent CPI) are accepted. Surplus PDA lamports refund to the payer at tombstone; tokens already on the escrow ATA are swept to treasury at `finalize` via the existing residual logic. See [Accounting authority](./001-payment-channel-state-machine.md#accounting-authority).
+Both creates are **prefund-tolerant**: lamports already sitting on the channel PDA (the PDA is allocated with `Allocate` + `Assign` after topping up only the rent shortfall) and a pre-existing canonical escrow ATA (idempotent CPI) are accepted. Surplus PDA lamports refund to `rent_payer` when `distribute` closes the PDA on the FINALIZED branch; tokens already on the escrow ATA are swept to treasury at `finalize` via the existing residual logic. See [Accounting authority](./001-payment-channel-state-machine.md#accounting-authority).
 
 > **Mint trust model.** `open` does not reject mints with a live freeze authority (or mint authority). A merchant accepting a channel denominated in mint `M` is implicitly accepting that `M`'s freeze authority can freeze the channel's escrow ATA and wedge `topUp`, `distribute`, and `withdrawPayer` until thawed. This is intentional so that mainstream stablecoins (USDC, USDT, PYUSD, …) remain usable; merchants are expected to vet the mint off-chain. See [ADR-001 → Mint trust model](./001-payment-channel-state-machine.md#mint-trust-model).
 
@@ -149,7 +149,7 @@ Permissionless post-grace crank.
 
 ## `distribute` (7)
 
-Permissionless crank. Verifies the committed splits preimage (Blake3) against `Channel.distribution_hash`, then pays cumulative floor deltas between `payout_watermark` and `settled` to the merchant side: each recipient gets `floor(settled * bps[i] / 10000) - floor(payout_watermark * bps[i] / 10000)` and the **payee** gets the implicit remainder delta using `10000 - sum(bps)`. From `OPEN`, zero-delta shares are skipped, residual dust remains in escrow for later cumulative deltas, and `payout_watermark` advances to `settled` as the accounted watermark. From `FINALIZED`, the final cumulative merchant payout runs before the payer receives the unspent `deposit - settled` headroom (gated by `payer_withdrawn_at == 0`); final irreducible residual dust is swept to treasury, and the escrow ATA + Channel PDA are tombstoned. On a nonzero share, if the beneficiary's canonical ATA is unusable — missing/uninitialized, frozen, closed/malformed, carrying an unsupported Token-2022 extension, or with a reassigned authority — that share is redirected to the treasury, a `PayoutRedirected` event is emitted, and `payout_watermark` **still advances**, so the beneficiary **permanently forfeits** it (repairing the ATA later does not reclaim it, since future cumulative deltas only cover newly settled amounts). Operators should ensure recipient/payee ATAs exist and are healthy before cranking. Malformed token-account data/TLV and wrong (non-canonical) accounts hard-fail.
+Permissionless crank. Verifies the committed splits preimage (Blake3) against `Channel.distribution_hash`, then pays cumulative floor deltas between `payout_watermark` and `settled` to the merchant side: each recipient gets `floor(settled * bps[i] / 10000) - floor(payout_watermark * bps[i] / 10000)` and the **payee** gets the implicit remainder delta using `10000 - sum(bps)`. From `OPEN`, zero-delta shares are skipped, residual dust remains in escrow for later cumulative deltas, and `payout_watermark` advances to `settled` as the accounted watermark. From `FINALIZED`, the final cumulative merchant payout runs before the payer receives the unspent `deposit - settled` headroom (gated by `payer_withdrawn_at == 0`); final irreducible residual dust is swept to treasury, then the escrow ATA is closed and the Channel PDA is fully closed — data resized to 0 and every lamport refunded to `rent_payer`. Voucher replay against a re-open at the same PDA seeds is blocked by the `open_slot` binding in each voucher, not by keeping the closed address alive. On a nonzero share, if the beneficiary's canonical ATA is unusable — missing/uninitialized, frozen, closed/malformed, carrying an unsupported Token-2022 extension, or with a reassigned authority — that share is redirected to the treasury, a `PayoutRedirected` event is emitted, and `payout_watermark` **still advances**, so the beneficiary **permanently forfeits** it (repairing the ATA later does not reclaim it, since future cumulative deltas only cover newly settled amounts). Operators should ensure recipient/payee ATAs exist and are healthy before cranking. Malformed token-account data/TLV and wrong (non-canonical) accounts hard-fail.
 
 **Client transaction format:** at `count == 32`, callers MUST use **version 0 transactions with an address lookup table** indexing recipient ATAs. The instruction uses 10 fixed accounts plus up to 32 recipient ATAs (42 total); legacy transactions cannot fit the static account-key budget (~32 keys including fee payer and program id).
 
@@ -167,9 +167,9 @@ Permissionless crank. Verifies the committed splits preimage (Blake3) against `C
 
 | # | Name | Signer | Writable | Description |
 |---|---|---|---|---|
-| 0 | `channel` | — | yes | Channel PDA. Self-signs CPI transfers; tombstoned on `FINALIZED`. |
-| 1 | `payer` | — | yes | Payer SOL account. Writable so escrow / PDA rent can flow back on tombstone. |
-| 2 | `channel_token_account` | — | yes | Escrow ATA owned by `channel`. Source for all transfers; closed on tombstone. |
+| 0 | `channel` | — | yes | Channel PDA. Self-signs CPI transfers; fully closed on `FINALIZED` (data → 0, lamports → `rent_payer`). |
+| 1 | `payer` | — | yes | Payer SOL account. Writable so token refund flows back to the payer wallet. |
+| 2 | `channel_token_account` | — | yes | Escrow ATA owned by `channel`. Source for all transfers; closed on `FINALIZED`. |
 | 3 | `payer_token_account` | — | yes | `ATA(payer, mint, token_program)`. Used **only** by the FINALIZED refund branch. |
 | 4 | `payee_token_account` | — | yes | `ATA(payee, mint, token_program)`. Receives the cumulative floor delta for the implicit `10000 - sum(bps)` remainder share. The transfer is skipped when the delta is zero; the account is still validated. |
 | 5 | `treasury_token_account` | — | yes | `ATA(TREASURY_OWNER, mint, token_program)`. Receives final irreducible residual dust when `distribute` runs from `FINALIZED`. The operator must hold the corresponding private key for `TREASURY_OWNER`, otherwise accumulated residuals are unspendable. |
@@ -181,7 +181,7 @@ Permissionless crank. Verifies the committed splits preimage (Blake3) against `C
 
 ## `withdrawPayer` (8)
 
-Payer-signed one-shot refund in `FINALIZED`. Does not tombstone the PDA.
+Payer-signed one-shot refund in `FINALIZED`. Does not close the PDA — `distribute` fully closes the PDA on the FINALIZED branch after all payouts complete.
 
 **Accounts**
 
@@ -222,6 +222,8 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | 7 | `InvalidChannelMint` | Provided `mint` account does not equal `Channel.mint`. |
 | 8 | `InvalidEventAuthority` | `event_authority` account does not match the program-derived event-authority PDA. |
 | 9 | `NotEnoughAccountKeys` | The instruction received fewer accounts than required. |
+| 10 | `InvalidChannelRentPayer` | Provided `rent_payer` account does not equal `Channel.rent_payer`. |
+| 11 | `ChannelSlotMismatch` | `open_slot` bound by the voucher or ix args does not equal `Channel.open_slot`. Voucher was signed for a prior channel incarnation at the same PDA seeds, or the caller passed a stale `expected_open_slot`. |
 
 ### Account validation
 
@@ -314,8 +316,8 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | 2408 | `NothingToDistribute` | `settled == payout_watermark` while channel is `OPEN` (no newly settled watermark to account). |
 | 2409 | `RecipientAccountCountMismatch` | Number of recipient ATAs in the account tail does not equal the preimage entry count. |
 | 2410 | `DistributePoolOverflow` | `settled - payout_watermark` underflowed (defensive: `payout_watermark <= settled`). |
-| 2411 | `DistributeBalanceCalculationOverflow` | Escrow/treasury arithmetic underflow or tombstone rent rebalance underflow. |
-| 2412 | `DistributePayerBalanceOverflow` | Payer lamports `+ delta` would overflow `u64` during tombstone rent refund. |
+| 2411 | `DistributeBalanceCalculationOverflow` | Escrow/treasury arithmetic underflow during the FINALIZED sweep math. |
+| 2412 | `DistributePayerBalanceOverflow` | `rent_payer` lamports `+ delta` would overflow `u64` during the PDA-close refund. |
 | 2413 | `DistributeTransferQueueOverflow` | Transfer queue capacity exceeded (defensive — distribute queues at most 35 payouts). |
 
 ## Appendix

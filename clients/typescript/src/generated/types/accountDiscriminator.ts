@@ -17,7 +17,6 @@ import {
 
 export enum AccountDiscriminator {
   Channel,
-  ClosedChannel,
 }
 
 export type AccountDiscriminatorArgs = AccountDiscriminator;

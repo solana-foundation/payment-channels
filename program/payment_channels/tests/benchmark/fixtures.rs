@@ -287,6 +287,7 @@ pub fn build_settle_pair(
 ) -> (Instruction, Instruction) {
     let voucher = VoucherArgs {
         channel_id: f.channel,
+        open_slot: 0,
         cumulative_amount,
         expires_at,
     };

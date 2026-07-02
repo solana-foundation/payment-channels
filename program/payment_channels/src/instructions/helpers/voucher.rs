@@ -47,9 +47,9 @@ pub fn verify_voucher(
 ///
 /// The Ed25519 precompile has already proven that `parsed.message` was signed
 /// by `parsed.pubkey`. That message *is* the Borsh voucher payload
-/// (`channel_id || cumulative_amount || expires_at`), so the voucher fields
-/// are read directly from it — there is no caller-supplied copy, hence no
-/// message-equality check to perform.
+/// (`channel_id || open_slot || cumulative_amount || expires_at`), so the
+/// voucher fields are read directly from it — there is no caller-supplied
+/// copy, hence no message-equality check to perform.
 fn verify_parsed(
     channel_address: &Address,
     channel: &Channel,
@@ -66,6 +66,13 @@ fn verify_parsed(
     let v_channel_id: Address = voucher.channel_id;
     if v_channel_id != *channel_address {
         return Err(PaymentChannelsError::VoucherChannelMismatch.into());
+    }
+
+    // Incarnation binding: voucher signed for a prior channel at these seeds
+    // records that channel's `open_slot`; `Clock::slot` is monotonic across
+    // reopens, so a stale voucher fails here even though `channel_id` matches.
+    if voucher.open_slot() != channel.open_slot() {
+        return Err(PaymentChannelsError::ChannelSlotMismatch.into());
     }
 
     let expires_at: i64 = voucher.expires_at();
@@ -111,9 +118,6 @@ mod tests {
     /// accidental mis-slices show up in test failures.
     const AUTH_SIGNATURE: [u8; 64] = [154u8; 64];
 
-    /// Build a [`Channel`] for fixtures: only the fields the voucher
-    /// path reads (`settled`, `deposit`, `authorized_signer`) are set;
-    /// everything else is zero.
     fn make_channel(settled: u64, deposit: u64, authorized_signer: Address) -> Channel {
         let mut ch: Channel = unsafe { core::mem::zeroed() };
         ch.set_deposit(deposit);
@@ -184,21 +188,23 @@ mod tests {
 
     // --- payload contract -------------------------------------------------
 
-    /// Pins the `channel_id || cumulative_amount || expires_at`
+    /// Pins the `channel_id || open_slot || cumulative_amount || expires_at`
     /// byte layout that the off-chain signer and the Ed25519 precompile
     /// depend on. `as_bytes` is a zero-cost reinterpretation of the
     /// struct, so this doubles as a guard against anyone reordering
     /// [`VoucherArgs`] without updating the signer contract.
     #[test]
     fn voucher_args_bytes_match_signed_payload_layout() {
+        const OPEN_SLOT_BYTES: u64 = u64::from_le_bytes([1, 2, 3, 4, 5, 6, 7, 8]);
         const CUMULATIVE: u64 = u64::from_le_bytes([119, 102, 85, 68, 51, 34, 17, 0]);
         const EXPIRES_AT: i64 = i64::from_le_bytes([248, 249, 250, 251, 252, 253, 254, 127]);
-        let args = VoucherArgs::new(CHANNEL_ID, CUMULATIVE, EXPIRES_AT);
+        let args = VoucherArgs::new(CHANNEL_ID, OPEN_SLOT_BYTES, CUMULATIVE, EXPIRES_AT);
         let bytes = args.as_bytes();
         assert_eq!(bytes.len(), VOUCHER_PAYLOAD_SIZE);
         assert_eq!(&bytes[..32], CHANNEL_ID.as_array());
-        assert_eq!(&bytes[32..40], &CUMULATIVE.to_le_bytes());
-        assert_eq!(&bytes[40..48], &EXPIRES_AT.to_le_bytes());
+        assert_eq!(&bytes[32..40], &OPEN_SLOT_BYTES.to_le_bytes());
+        assert_eq!(&bytes[40..48], &CUMULATIVE.to_le_bytes());
+        assert_eq!(&bytes[48..56], &EXPIRES_AT.to_le_bytes());
     }
 
     // --- happy paths ------------------------------------------------------
@@ -206,7 +212,7 @@ mod tests {
     #[test]
     fn ok_strict_monotonic_no_expiry() {
         let ch = make_channel(100, 1_000, AUTH);
-        let v = VoucherArgs::new(CHANNEL_ID, 200, 0);
+        let v = VoucherArgs::new(CHANNEL_ID, 0, 200, 0);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         let out = verify_parsed(&CHANNEL_ID, &ch, &parsed, 1_000_000).unwrap();
@@ -216,7 +222,7 @@ mod tests {
     #[test]
     fn ok_expiry_in_future() {
         let ch = make_channel(100, 500, AUTH);
-        let v = VoucherArgs::new(CHANNEL_ID, 500, 2_000);
+        let v = VoucherArgs::new(CHANNEL_ID, 0, 500, 2_000);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         let out = verify_parsed(&CHANNEL_ID, &ch, &parsed, 1_999).unwrap();
@@ -228,7 +234,7 @@ mod tests {
     #[test]
     fn wrong_channel_id() {
         let ch = make_channel(0, 500, AUTH);
-        let v = VoucherArgs::new(Address::new_from_array([9u8; 32]), 100, 0);
+        let v = VoucherArgs::new(Address::new_from_array([9u8; 32]), 0, 100, 0);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
@@ -240,7 +246,7 @@ mod tests {
     #[test]
     fn now_equals_expires_at() {
         let ch = make_channel(0, 500, AUTH);
-        let v = VoucherArgs::new(CHANNEL_ID, 100, 500);
+        let v = VoucherArgs::new(CHANNEL_ID, 0, 100, 500);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
@@ -252,7 +258,7 @@ mod tests {
     #[test]
     fn now_past_expires_at() {
         let ch = make_channel(0, 500, AUTH);
-        let v = VoucherArgs::new(CHANNEL_ID, 100, 500);
+        let v = VoucherArgs::new(CHANNEL_ID, 0, 100, 500);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
@@ -264,7 +270,7 @@ mod tests {
     #[test]
     fn negative_expires_at_fails_closed() {
         let ch = make_channel(0, 500, AUTH);
-        let v = VoucherArgs::new(CHANNEL_ID, 100, -1);
+        let v = VoucherArgs::new(CHANNEL_ID, 0, 100, -1);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
@@ -276,7 +282,7 @@ mod tests {
     #[test]
     fn cumulative_equals_settled() {
         let ch = make_channel(250, 500, AUTH);
-        let v = VoucherArgs::new(CHANNEL_ID, 250, 0);
+        let v = VoucherArgs::new(CHANNEL_ID, 0, 250, 0);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
@@ -288,7 +294,7 @@ mod tests {
     #[test]
     fn cumulative_below_settled() {
         let ch = make_channel(250, 500, AUTH);
-        let v = VoucherArgs::new(CHANNEL_ID, 100, 0);
+        let v = VoucherArgs::new(CHANNEL_ID, 0, 100, 0);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
@@ -300,7 +306,7 @@ mod tests {
     #[test]
     fn cumulative_zero_on_fresh_channel() {
         let ch = make_channel(0, 500, AUTH);
-        let v = VoucherArgs::new(CHANNEL_ID, 0, 0);
+        let v = VoucherArgs::new(CHANNEL_ID, 0, 0, 0);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
@@ -310,9 +316,23 @@ mod tests {
     }
 
     #[test]
+    fn open_slot_mismatch_rejects() {
+        // Channel's open_slot defaults to 0 (zeroed `make_channel`); voucher
+        // signed against a different incarnation must fail the guard.
+        let ch = make_channel(0, 500, AUTH);
+        let v = VoucherArgs::new(CHANNEL_ID, 1, 100, 0);
+        let msg = v.as_bytes();
+        let parsed = valid_parsed(msg);
+        expect_err(
+            verify_parsed(&CHANNEL_ID, &ch, &parsed, 0),
+            PaymentChannelsError::ChannelSlotMismatch,
+        );
+    }
+
+    #[test]
     fn cumulative_above_deposit() {
         let ch = make_channel(0, 500, AUTH);
-        let v = VoucherArgs::new(CHANNEL_ID, 501, 0);
+        let v = VoucherArgs::new(CHANNEL_ID, 0, 501, 0);
         let msg = v.as_bytes();
         let parsed = valid_parsed(msg);
         expect_err(
@@ -521,7 +541,7 @@ mod tests {
     #[test]
     fn precompile_pubkey_not_authorized_signer() {
         let ch = make_channel(0, 500, AUTH);
-        let v = VoucherArgs::new(CHANNEL_ID, 100, 0);
+        let v = VoucherArgs::new(CHANNEL_ID, 0, 100, 0);
         let msg = v.as_bytes();
         let parsed = ed25519_ix::Parsed {
             pubkey: OTHER_PUBKEY.as_array(),

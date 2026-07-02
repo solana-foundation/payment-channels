@@ -7,7 +7,7 @@ use crate::errors::PaymentChannelsError;
 /// Schema version stamped into [`Channel::version`](crate::Channel::version)
 /// at `open`. Bump when the PDA layout changes; [`Channel`](crate::Channel)
 /// refuses any other value on load, so migrations must be explicit.
-pub const CURRENT_CHANNEL_VERSION: u8 = 1;
+pub const CURRENT_CHANNEL_VERSION: u8 = 2;
 
 /// Byte-0 tag for this program's account shapes. Starts at 1 so
 /// zero-initialized bytes fail the [`Channel`](crate::Channel) load check
@@ -18,12 +18,6 @@ pub const CURRENT_CHANNEL_VERSION: u8 = 1;
 pub enum AccountDiscriminator {
     /// Active [`Channel`](crate::Channel) PDA.
     Channel = 1,
-    /// Tombstoned [`ClosedChannel`](crate::ClosedChannel) PDA. Distinct
-    /// discriminator so every existing `Channel::from_account_mut` load path
-    /// rejects a tombstoned account before any business logic runs, and the
-    /// system program refuses re-init at the same address (program-owned,
-    /// non-empty data).
-    ClosedChannel = 2,
 }
 
 impl TryFrom<u8> for AccountDiscriminator {
@@ -32,7 +26,6 @@ impl TryFrom<u8> for AccountDiscriminator {
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             1 => Ok(Self::Channel),
-            2 => Ok(Self::ClosedChannel),
             _ => Err(PaymentChannelsError::InvalidAccountDiscriminator.into()),
         }
     }

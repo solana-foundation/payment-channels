@@ -16,8 +16,8 @@ use crate::instructions::VOUCHER_PAYLOAD_SIZE;
 const CANONICAL_IX_DATA_LEN: usize = MESSAGE_OFFSET + VOUCHER_PAYLOAD_SIZE;
 
 /// Parsed Ed25519 precompile ix data. Sized-array refs let the caller
-/// compare against `[u8; 32]` / `[u8; 48]` fixtures without slice-length
-/// runtime checks.
+/// compare against `[u8; 32]` / `[u8; VOUCHER_PAYLOAD_SIZE]` fixtures
+/// without slice-length runtime checks.
 pub struct Parsed<'a> {
     pub pubkey: &'a [u8; PUBKEY_SERIALIZED_SIZE],
     pub message: &'a [u8; VOUCHER_PAYLOAD_SIZE],
@@ -34,7 +34,7 @@ pub struct Parsed<'a> {
 ///     crate::errors::PaymentChannelsError::MalformedEd25519Instruction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ed25519ParseError {
-    /// `data.len() != CANONICAL_IX_DATA_LEN (= 160)`.
+    /// `data.len() != CANONICAL_IX_DATA_LEN (= 168)`.
     Length,
     /// `num_signatures != 1`. N = 0 verifies nothing; N > 1 appends
     /// further offsets records whose signatures we never parse, so the
@@ -53,7 +53,7 @@ pub enum Ed25519ParseError {
     /// hardcoded slices land on different bytes than the precompile
     /// checked.
     NonCanonicalOffsets,
-    /// `message_data_size != VOUCHER_PAYLOAD_SIZE (= 48)`.
+    /// `message_data_size != VOUCHER_PAYLOAD_SIZE (= 56)`.
     MessageSize,
 }
 
@@ -61,7 +61,7 @@ pub enum Ed25519ParseError {
 /// inline layout. Validates every field of `Ed25519SignatureOffsets`.
 pub fn parse(data: &[u8]) -> Result<Parsed<'_>, Ed25519ParseError> {
     // Full canonical inline layout: `[num_sigs=1, pad=0, offsets×1, pubkey, signature, message]`.
-    // Guard — length. Pins the full 160-byte canonical layout.
+    // Guard — length. Pins the full 168-byte canonical layout.
     if data.len() != CANONICAL_IX_DATA_LEN {
         return Err(Ed25519ParseError::Length);
     }
@@ -105,7 +105,9 @@ pub fn parse(data: &[u8]) -> Result<Parsed<'_>, Ed25519ParseError> {
     // still catch the bypass (unless the signer explicitly signed the
     // wrong-position bytes), but pinning here keeps slice bounds
     // compile-time constant and narrows the off-chain signer contract
-    // to one wire encoding.
+    // to one wire encoding. (The `48` / `112` values here refer to the
+    // precompile header layout — see `consts.rs` — and are unaffected
+    // by the voucher message length.)
     if public_key_offset as usize != PUBKEY_OFFSET
         || signature_offset as usize != SIGNATURE_OFFSET
         || message_data_offset as usize != MESSAGE_OFFSET
@@ -113,8 +115,8 @@ pub fn parse(data: &[u8]) -> Result<Parsed<'_>, Ed25519ParseError> {
         return Err(Ed25519ParseError::NonCanonicalOffsets);
     }
 
-    // Guard — canonical message length (48 B: `channel_id ||
-    // cumulative_amount || expires_at`, LE).
+    // Guard — canonical message length (56 B: `channel_id ||
+    // open_slot || cumulative_amount || expires_at`, LE).
     if message_data_size as usize != VOUCHER_PAYLOAD_SIZE {
         return Err(Ed25519ParseError::MessageSize);
     }

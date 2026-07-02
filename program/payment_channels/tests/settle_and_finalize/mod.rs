@@ -22,6 +22,7 @@ pub(super) struct SettleAndFinalizeRun {
     /// bundled Ed25519 ix. These Mollusk runs wire no real precompile ix, so a
     /// non-zero value here exercises the missing-Ed25519 path, not a happy one.
     pub has_voucher: u8,
+    pub expected_open_slot: u64,
 }
 
 impl SettleAndFinalizeRun {
@@ -31,6 +32,7 @@ impl SettleAndFinalizeRun {
             is_signer: true,
             channel_blob,
             has_voucher: 0,
+            expected_open_slot: 0,
         }
     }
 
@@ -42,9 +44,11 @@ impl SettleAndFinalizeRun {
         let mollusk = Mollusk::load_program();
         let channel_pubkey = Pubkey::new_unique();
 
-        // Wire layout: [discriminator(1)] [has_voucher(1)] = 2 bytes total. The
-        // voucher itself (when applied) rides in the bundled Ed25519 ix.
-        let ix_data = vec![DISCRIMINATOR, self.has_voucher];
+        // Wire layout: [discriminator(1)] [has_voucher(1)] [expected_open_slot(8 LE)]
+        // = 10 bytes. The voucher itself (when applied) rides in the bundled
+        // Ed25519 ix; only its `open_slot` field is bound by the args here.
+        let mut ix_data = vec![DISCRIMINATOR, self.has_voucher];
+        ix_data.extend_from_slice(&self.expected_open_slot.to_le_bytes());
 
         let ix = Instruction::new_with_bytes(
             PROGRAM_ID,

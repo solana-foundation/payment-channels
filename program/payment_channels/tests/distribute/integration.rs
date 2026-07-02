@@ -67,17 +67,17 @@ fn wrong_mint_rejects() {
 }
 
 #[test]
-fn tombstoned_channel_rejects() {
-    // After FINALIZED `distribute` tombstones the PDA, the channel data
-    // shrinks to a 1-byte `ClosedChannel` payload (discriminator = 2).
-    // `Channel::load_mut` length-gates inside `unsafe load_mut::<Channel>`
-    // before any discriminator/version/status logic runs, so the program
-    // rejects with `InvalidAccountData` for any buffer whose length is
-    // not exactly `Channel::LEN` (216).
+fn closed_channel_rejects() {
+    // After FINALIZED `distribute` closes the PDA, the channel data is empty
+    // (lamports drained, `resize(0)` clears the buffer). `Channel::load_mut`
+    // length-gates inside `unsafe load_mut::<Channel>` before any
+    // discriminator/version/status logic runs, so the program rejects with
+    // `InvalidAccountData` for any buffer whose length is not exactly
+    // `Channel::LEN`.
     let payer = Pubkey::new_unique();
     let splits = one_split();
     assert_eq!(
-        DistributeRun::new(vec![2u8], payer, &splits).run(),
+        DistributeRun::new(Vec::new(), payer, &splits).run(),
         ProgramResult::Failure(ProgramError::InvalidAccountData),
     );
 }

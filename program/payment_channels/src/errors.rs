@@ -36,6 +36,8 @@ pub enum PaymentChannelsError {
     NotEnoughAccountKeys = 9,
     #[error("Account does not match channel rent_payer")]
     InvalidChannelRentPayer = 10,
+    #[error("Channel open_slot does not match the expected value")]
+    ChannelSlotMismatch = 11,
 
     // general account validations
     #[error("Channel account does not match derived PDA")]

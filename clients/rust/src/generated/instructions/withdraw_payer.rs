@@ -5,6 +5,7 @@
 //! <https://github.com/codama-idl/codama>
 //!
 
+use crate::generated::types::WithdrawPayerArgs;
 use borsh::BorshDeserialize;
 use borsh::BorshSerialize;
 
@@ -27,13 +28,17 @@ pub struct WithdrawPayer {
 }
 
 impl WithdrawPayer {
-    pub fn instruction(&self) -> solana_instruction::Instruction {
-        self.instruction_with_remaining_accounts(&[])
+    pub fn instruction(
+        &self,
+        args: WithdrawPayerInstructionArgs,
+    ) -> solana_instruction::Instruction {
+        self.instruction_with_remaining_accounts(args, &[])
     }
     #[allow(clippy::arithmetic_side_effects)]
     #[allow(clippy::vec_init_then_push)]
     fn instruction_with_remaining_accounts(
         &self,
+        args: WithdrawPayerInstructionArgs,
         remaining_accounts: &[solana_instruction::AccountMeta],
     ) -> solana_instruction::Instruction {
         let mut accounts = Vec::with_capacity(6 + remaining_accounts.len());
@@ -57,7 +62,9 @@ impl WithdrawPayer {
             false,
         ));
         accounts.extend_from_slice(remaining_accounts);
-        let data = WithdrawPayerInstructionData::new().try_to_vec().unwrap();
+        let mut data = WithdrawPayerInstructionData::new().try_to_vec().unwrap();
+        let mut args = args.try_to_vec().unwrap();
+        data.append(&mut args);
 
         solana_instruction::Instruction {
             program_id: crate::PAYMENT_CHANNELS_ID,
@@ -88,6 +95,17 @@ impl Default for WithdrawPayerInstructionData {
     }
 }
 
+#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Eq, PartialEq)]
+pub struct WithdrawPayerInstructionArgs {
+    pub withdraw_payer_args: WithdrawPayerArgs,
+}
+
+impl WithdrawPayerInstructionArgs {
+    pub(crate) fn try_to_vec(&self) -> Result<Vec<u8>, std::io::Error> {
+        borsh::to_vec(self)
+    }
+}
+
 /// Instruction builder for `WithdrawPayer`.
 ///
 /// ### Accounts:
@@ -106,6 +124,7 @@ pub struct WithdrawPayerBuilder {
     payer_token_account: Option<solana_address::Address>,
     mint: Option<solana_address::Address>,
     token_program: Option<solana_address::Address>,
+    withdraw_payer_args: Option<WithdrawPayerArgs>,
     __remaining_accounts: Vec<solana_instruction::AccountMeta>,
 }
 
@@ -149,6 +168,11 @@ impl WithdrawPayerBuilder {
         self.token_program = Some(token_program);
         self
     }
+    #[inline(always)]
+    pub fn withdraw_payer_args(&mut self, withdraw_payer_args: WithdrawPayerArgs) -> &mut Self {
+        self.withdraw_payer_args = Some(withdraw_payer_args);
+        self
+    }
     #[allow(clippy::clone_on_copy)]
     pub fn instruction(&self) -> solana_instruction::Instruction {
         let accounts = WithdrawPayer {
@@ -163,8 +187,14 @@ impl WithdrawPayerBuilder {
             mint: self.mint.expect("mint is not set"),
             token_program: self.token_program.expect("token_program is not set"),
         };
+        let args = WithdrawPayerInstructionArgs {
+            withdraw_payer_args: self
+                .withdraw_payer_args
+                .clone()
+                .expect("withdraw_payer_args is not set"),
+        };
 
-        accounts.instruction_with_remaining_accounts(&self.__remaining_accounts)
+        accounts.instruction_with_remaining_accounts(args, &self.__remaining_accounts)
     }
 }
 
@@ -199,12 +229,15 @@ pub struct WithdrawPayerCpi<'a, 'b> {
     pub mint: &'b solana_account_info::AccountInfo<'a>,
 
     pub token_program: &'b solana_account_info::AccountInfo<'a>,
+    /// The arguments for the instruction.
+    pub __args: WithdrawPayerInstructionArgs,
 }
 
 impl<'a, 'b> WithdrawPayerCpi<'a, 'b> {
     pub fn new(
         program: &'b solana_account_info::AccountInfo<'a>,
         accounts: WithdrawPayerCpiAccounts<'a, 'b>,
+        args: WithdrawPayerInstructionArgs,
     ) -> Self {
         Self {
             __program: program,
@@ -214,6 +247,7 @@ impl<'a, 'b> WithdrawPayerCpi<'a, 'b> {
             payer_token_account: accounts.payer_token_account,
             mint: accounts.mint,
             token_program: accounts.token_program,
+            __args: args,
         }
     }
     #[inline(always)]
@@ -264,7 +298,9 @@ impl<'a, 'b> WithdrawPayerCpi<'a, 'b> {
                 is_writable: remaining_account.2,
             })
         });
-        let data = WithdrawPayerInstructionData::new().try_to_vec().unwrap();
+        let mut data = WithdrawPayerInstructionData::new().try_to_vec().unwrap();
+        let mut args = self.__args.try_to_vec().unwrap();
+        data.append(&mut args);
 
         let instruction = solana_instruction::Instruction {
             program_id: crate::PAYMENT_CHANNELS_ID,
@@ -316,6 +352,7 @@ impl<'a, 'b> WithdrawPayerCpiBuilder<'a, 'b> {
             payer_token_account: None,
             mint: None,
             token_program: None,
+            withdraw_payer_args: None,
             __remaining_accounts: Vec::new(),
         });
         Self { instruction }
@@ -360,12 +397,24 @@ impl<'a, 'b> WithdrawPayerCpiBuilder<'a, 'b> {
         self
     }
     #[inline(always)]
+    pub fn withdraw_payer_args(&mut self, withdraw_payer_args: WithdrawPayerArgs) -> &mut Self {
+        self.instruction.withdraw_payer_args = Some(withdraw_payer_args);
+        self
+    }
+    #[inline(always)]
     pub fn invoke(&self) -> solana_program_error::ProgramResult {
         self.invoke_signed(&[])
     }
     #[allow(clippy::clone_on_copy)]
     #[allow(clippy::vec_init_then_push)]
     pub fn invoke_signed(&self, signers_seeds: &[&[&[u8]]]) -> solana_program_error::ProgramResult {
+        let args = WithdrawPayerInstructionArgs {
+            withdraw_payer_args: self
+                .instruction
+                .withdraw_payer_args
+                .clone()
+                .expect("withdraw_payer_args is not set"),
+        };
         let instruction = WithdrawPayerCpi {
             __program: self.instruction.__program,
 
@@ -389,6 +438,7 @@ impl<'a, 'b> WithdrawPayerCpiBuilder<'a, 'b> {
                 .instruction
                 .token_program
                 .expect("token_program is not set"),
+            __args: args,
         };
         instruction.invoke_signed_with_remaining_accounts(
             signers_seeds,
@@ -406,6 +456,7 @@ struct WithdrawPayerCpiBuilderInstruction<'a, 'b> {
     payer_token_account: Option<&'b solana_account_info::AccountInfo<'a>>,
     mint: Option<&'b solana_account_info::AccountInfo<'a>>,
     token_program: Option<&'b solana_account_info::AccountInfo<'a>>,
+    withdraw_payer_args: Option<WithdrawPayerArgs>,
     /// Additional instruction accounts `(AccountInfo, is_writable, is_signer)`.
     __remaining_accounts: Vec<(&'b solana_account_info::AccountInfo<'a>, bool, bool)>,
 }

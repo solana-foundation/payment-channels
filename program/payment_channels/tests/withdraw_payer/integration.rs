@@ -154,9 +154,36 @@ fn unknown_token_program_rejects() {
 }
 
 #[test]
-fn tombstoned_channel_rejects() {
+fn wrong_expected_open_slot_rejects() {
+    // channel blob has open_slot=0; a non-zero `expected_open_slot` trips
+    // the incarnation guard. Mint aligned so the mint-equality check doesn't
+    // short-circuit.
+    let payer = Pubkey::new_unique();
+    let mint = Pubkey::new_unique();
     assert_eq!(
-        WithdrawPayerRun::new(Pubkey::new_unique(), vec![2u8]).run(),
+        WithdrawPayerRun {
+            expected_open_slot: 1,
+            mint,
+            ..WithdrawPayerRun::new(
+                payer,
+                ChannelBuilder::new()
+                    .status(ChannelStatus::Finalized)
+                    .payer(payer)
+                    .mint(mint)
+                    .build(),
+            )
+        }
+        .run(),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::ChannelSlotMismatch as u32
+        )),
+    );
+}
+
+#[test]
+fn closed_channel_rejects() {
+    assert_eq!(
+        WithdrawPayerRun::new(Pubkey::new_unique(), Vec::new()).run(),
         ProgramResult::Failure(ProgramError::InvalidAccountData),
     );
 }

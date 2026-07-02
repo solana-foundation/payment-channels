@@ -4,7 +4,8 @@
 
 use litesvm::LiteSVM;
 use payment_channels::state::channel::ChannelStatus;
-use payment_channels_client::instructions::RequestClose;
+use payment_channels_client::instructions::{RequestClose, RequestCloseInstructionArgs};
+use payment_channels_client::types::RequestCloseArgs;
 use solana_account::Account;
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
@@ -30,12 +31,18 @@ fn seed_channel(svm: &mut LiteSVM, channel: &Pubkey, status: ChannelStatus, paye
     .expect("set_account");
 }
 
-fn build_request_close_ix(payer: &Pubkey, channel: &Pubkey) -> Instruction {
+fn build_request_close_ix(
+    payer: &Pubkey,
+    channel: &Pubkey,
+    expected_open_slot: u64,
+) -> Instruction {
     RequestClose {
         payer: *payer,
         channel: *channel,
     }
-    .instruction()
+    .instruction(RequestCloseInstructionArgs {
+        request_close_args: RequestCloseArgs { expected_open_slot },
+    })
 }
 
 #[test]
@@ -49,7 +56,7 @@ fn request_close_marks_closing_and_stamps_now() {
 
     let pre_clock_ts = svm.get_sysvar::<solana_clock::Clock>().unix_timestamp;
 
-    let ix = build_request_close_ix(&payer.pubkey(), &channel);
+    let ix = build_request_close_ix(&payer.pubkey(), &channel, 0);
     let tx = Transaction::new_signed_with_payer(
         &[ix],
         Some(&payer.pubkey()),

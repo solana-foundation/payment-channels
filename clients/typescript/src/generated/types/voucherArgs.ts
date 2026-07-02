@@ -26,12 +26,14 @@ import {
 
 export type VoucherArgs = {
   channelId: Address;
+  openSlot: bigint;
   cumulativeAmount: bigint;
   expiresAt: bigint;
 };
 
 export type VoucherArgsArgs = {
   channelId: Address;
+  openSlot: bigint;
   cumulativeAmount: bigint;
   expiresAt: bigint;
 };
@@ -39,6 +41,7 @@ export type VoucherArgsArgs = {
 export function getVoucherArgsEncoder(): FixedSizeEncoder<VoucherArgsArgs> {
   return getStructEncoder([
     ["channelId", getAddressEncoder()],
+    ["openSlot", getU64Encoder()],
     ["cumulativeAmount", getU64Encoder()],
     ["expiresAt", getI64Encoder()],
   ]);
@@ -47,6 +50,7 @@ export function getVoucherArgsEncoder(): FixedSizeEncoder<VoucherArgsArgs> {
 export function getVoucherArgsDecoder(): FixedSizeDecoder<VoucherArgs> {
   return getStructDecoder([
     ["channelId", getAddressDecoder()],
+    ["openSlot", getU64Decoder()],
     ["cumulativeAmount", getU64Decoder()],
     ["expiresAt", getI64Decoder()],
   ]);

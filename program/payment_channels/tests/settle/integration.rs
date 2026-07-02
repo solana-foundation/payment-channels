@@ -40,14 +40,14 @@ fn closing_status_rejects() {
 }
 
 #[test]
-fn tombstoned_channel_rejects() {
-    // After FINALIZED `distribute` tombstones the PDA, the channel data
-    // shrinks to a 1-byte `ClosedChannel` payload (discriminator = 2).
-    // `Channel::load_mut` length-gates inside `unsafe load_mut::<Channel>`
-    // before any discriminator/version/status logic runs, so settle
-    // rejects with `InvalidAccountData`.
+fn closed_channel_rejects() {
+    // After FINALIZED `distribute` closes the PDA, the channel data is empty
+    // (lamports drained, `resize(0)` clears the buffer). `Channel::load_mut`
+    // length-gates inside `unsafe load_mut::<Channel>` before any
+    // discriminator/version/status logic runs, so settle rejects with
+    // `InvalidAccountData`.
     assert_eq!(
-        SettleRun::new(vec![2u8]).run(),
+        SettleRun::new(Vec::new()).run(),
         ProgramResult::Failure(ProgramError::InvalidAccountData),
     );
 }

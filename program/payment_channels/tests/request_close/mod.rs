@@ -2,7 +2,8 @@ mod e2e;
 mod integration;
 
 use mollusk_svm::{Mollusk, result::InstructionResult, result::ProgramResult};
-use payment_channels::instructions::request_close::DISCRIMINATOR;
+use payment_channels::instructions::request_close::{DISCRIMINATOR, RequestCloseArgs};
+use payment_channels::state::Transmutable;
 use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
@@ -19,6 +20,7 @@ pub(super) struct RequestCloseRun {
     /// Whether `payer` is marked as a signer in the account metas.
     pub is_signer: bool,
     pub channel_blob: Vec<u8>,
+    pub expected_open_slot: u64,
     /// Appended after the fixed account metas. The handler's exact-slice
     /// destructure must reject any non-empty value.
     pub extra_accounts: Vec<AccountMeta>,
@@ -30,6 +32,7 @@ impl RequestCloseRun {
             payer,
             is_signer: true,
             channel_blob,
+            expected_open_slot: 0,
             extra_accounts: Vec::new(),
         }
     }
@@ -47,7 +50,14 @@ impl RequestCloseRun {
             AccountMeta::new(channel_pubkey, false),
         ];
         metas.extend(self.extra_accounts.iter().cloned());
-        let ix = Instruction::new_with_bytes(PROGRAM_ID, &[DISCRIMINATOR], metas);
+        let mut ix_data = vec![DISCRIMINATOR];
+        ix_data.extend_from_slice(
+            RequestCloseArgs {
+                expected_open_slot: self.expected_open_slot.to_le_bytes(),
+            }
+            .as_bytes(),
+        );
+        let ix = Instruction::new_with_bytes(PROGRAM_ID, &ix_data, metas);
 
         let channel_account = Account {
             lamports: 10_000_000,

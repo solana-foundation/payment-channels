@@ -4,7 +4,10 @@ use alloc::vec::Vec;
 use codama::CodamaType;
 use core::mem::size_of;
 use pinocchio::{
-    AccountView, Address, ProgramResult, cpi::Signer, error::ProgramError, sysvars::rent::Rent,
+    AccountView, Address, ProgramResult,
+    cpi::Signer,
+    error::ProgramError,
+    sysvars::{Sysvar, clock::Clock, rent::Rent},
 };
 use pinocchio_associated_token_account::instructions::CreateIdempotent;
 use pinocchio_system::instructions::{Allocate, Assign, Transfer as SystemTransfer};
@@ -296,7 +299,7 @@ pub fn process(
     let signers = [Signer::from(&seeds)];
 
     // Prefund-tolerant PDA creation: top up the rent shortfall, then signed
-    // Allocate + Assign. Surplus lamports refund to payer at tombstone.
+    // Allocate + Assign. Surplus lamports refund to rent_payer on close.
     let min_rent = Rent::from_account_view(accs.rent)?.try_minimum_balance(Channel::LEN)?;
     let pending_balance = min_rent.saturating_sub(channel_ctx.channel.lamports());
     if pending_balance > 0 {
@@ -343,10 +346,17 @@ pub fn process(
     }
     .invoke()?;
 
+    // Clock::slot at open. Baked into `Channel::open_slot` and into every
+    // voucher's signed payload so a voucher signed for a previous incarnation
+    // of a channel at the same PDA seeds cannot replay against a later
+    // re-open (see the `settle` / `settle_and_finalize` guard).
+    let open_slot = Clock::get()?.slot;
+
     Channel::init_at(
         &mut channel_ctx.channel.try_borrow_mut()?,
         bump,
         args.salt(),
+        open_slot,
         deposit,
         args.grace_period(),
         distribution_hash,
@@ -359,6 +369,7 @@ pub fn process(
 
     let event = Opened {
         channel: *channel_ctx.channel.address(),
+        open_slot,
     };
     let bytes = event.to_bytes_fixed::<{ Opened::WIRE_LEN }>();
     emit_event(

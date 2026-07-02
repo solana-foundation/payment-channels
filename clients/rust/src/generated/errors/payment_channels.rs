@@ -43,6 +43,9 @@ pub enum PaymentChannelsError {
     /// 10 - Account does not match channel rent_payer
     #[error("Account does not match channel rent_payer")]
     InvalidChannelRentPayer = 0xA,
+    /// 11 - Channel open_slot does not match the expected value
+    #[error("Channel open_slot does not match the expected value")]
+    ChannelSlotMismatch = 0xB,
     /// 50 - Channel account does not match derived PDA
     #[error("Channel account does not match derived PDA")]
     ChannelAccountMismatch = 0x32,

@@ -62,6 +62,15 @@ pub fn set_clock(svm: &mut LiteSVM, unix_timestamp: i64) {
     svm.set_sysvar::<Clock>(&clock);
 }
 
+/// Overwrites `Clock::slot`. LiteSVM leaves the slot at 0 by default; tests
+/// that need to observe `open_slot` divergence across channel incarnations
+/// advance it explicitly.
+pub fn set_slot(svm: &mut LiteSVM, slot: u64) {
+    let mut clock = svm.get_sysvar::<Clock>();
+    clock.slot = slot;
+    svm.set_sysvar::<Clock>(&clock);
+}
+
 /// Opens a payment channel with a single 100% distribution recipient and
 /// returns `(channel_pda, channel_ata)`.
 #[allow(clippy::too_many_arguments)]

@@ -11,4 +11,5 @@ use borsh::BorshSerialize;
 #[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Eq, PartialEq)]
 pub struct SettleAndFinalizeArgs {
     pub has_voucher: u8,
+    pub expected_open_slot: u64,
 }

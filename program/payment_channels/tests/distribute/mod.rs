@@ -10,7 +10,6 @@ mod e2e;
 mod integration;
 
 use mollusk_svm::{Mollusk, result::ProgramResult};
-use payment_channels::state::Channel;
 use payment_channels_client::instructions::{Distribute, DistributeInstructionArgs};
 use payment_channels_client::types::{DistributeArgs, DistributionEntry};
 use solana_account::Account;
@@ -136,11 +135,9 @@ impl DistributeRun {
 
         let channel_account = Account {
             lamports: 10_000_000,
-            data: if self.channel_blob.is_empty() {
-                vec![0u8; Channel::LEN]
-            } else {
-                self.channel_blob
-            },
+            // Empty `Vec` passes through verbatim so tests can exercise the
+            // closed-channel (`InvalidAccountData`) length gate.
+            data: self.channel_blob,
             owner: PROGRAM_ID,
             executable: false,
             rent_epoch: 0,

@@ -53,6 +53,7 @@ export type Channel = {
   bump: number;
   status: number;
   salt: bigint;
+  openSlot: bigint;
   deposit: bigint;
   settlement: SettlementWatermarks;
   closureStartedAt: bigint;
@@ -72,6 +73,7 @@ export type ChannelArgs = {
   bump: number;
   status: number;
   salt: bigint;
+  openSlot: bigint;
   deposit: bigint;
   settlement: SettlementWatermarksArgs;
   closureStartedAt: bigint;
@@ -93,6 +95,7 @@ export function getChannelEncoder(): FixedSizeEncoder<ChannelArgs> {
     ["bump", getU8Encoder()],
     ["status", getU8Encoder()],
     ["salt", getU64Encoder()],
+    ["openSlot", getU64Encoder()],
     ["deposit", getU64Encoder()],
     ["settlement", getSettlementWatermarksEncoder()],
     ["closureStartedAt", getI64Encoder()],
@@ -115,6 +118,7 @@ export function getChannelDecoder(): FixedSizeDecoder<Channel> {
     ["bump", getU8Decoder()],
     ["status", getU8Decoder()],
     ["salt", getU64Decoder()],
+    ["openSlot", getU64Decoder()],
     ["deposit", getU64Decoder()],
     ["settlement", getSettlementWatermarksDecoder()],
     ["closureStartedAt", getI64Decoder()],

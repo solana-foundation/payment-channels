@@ -33,6 +33,12 @@ import {
 } from "@solana/program-client-core";
 import { getU8Decoder, getU8Encoder } from "../../safe-codecs.js";
 import { PAYMENT_CHANNELS_PROGRAM_ADDRESS } from "../programs";
+import {
+  getRequestCloseArgsDecoder,
+  getRequestCloseArgsEncoder,
+  type RequestCloseArgs,
+  type RequestCloseArgsArgs,
+} from "../types";
 
 export const REQUEST_CLOSE_DISCRIMINATOR = 5;
 
@@ -60,19 +66,30 @@ export type RequestCloseInstruction<
     ]
   >;
 
-export type RequestCloseInstructionData = { discriminator: number };
+export type RequestCloseInstructionData = {
+  discriminator: number;
+  requestCloseArgs: RequestCloseArgs;
+};
 
-export type RequestCloseInstructionDataArgs = {};
+export type RequestCloseInstructionDataArgs = {
+  requestCloseArgs: RequestCloseArgsArgs;
+};
 
 export function getRequestCloseInstructionDataEncoder(): FixedSizeEncoder<RequestCloseInstructionDataArgs> {
   return transformEncoder(
-    getStructEncoder([["discriminator", getU8Encoder()]]),
+    getStructEncoder([
+      ["discriminator", getU8Encoder()],
+      ["requestCloseArgs", getRequestCloseArgsEncoder()],
+    ]),
     (value) => ({ ...value, discriminator: REQUEST_CLOSE_DISCRIMINATOR }),
   );
 }
 
 export function getRequestCloseInstructionDataDecoder(): FixedSizeDecoder<RequestCloseInstructionData> {
-  return getStructDecoder([["discriminator", getU8Decoder()]]);
+  return getStructDecoder([
+    ["discriminator", getU8Decoder()],
+    ["requestCloseArgs", getRequestCloseArgsDecoder()],
+  ]);
 }
 
 export function getRequestCloseInstructionDataCodec(): FixedSizeCodec<
@@ -91,6 +108,7 @@ export type RequestCloseInput<
 > = {
   payer: TransactionSigner<TAccountPayer>;
   channel: Address<TAccountChannel>;
+  requestCloseArgs: RequestCloseInstructionDataArgs["requestCloseArgs"];
 };
 
 export function getRequestCloseInstruction<
@@ -115,13 +133,18 @@ export function getRequestCloseInstruction<
     ResolvedInstructionAccount
   >;
 
+  // Original args.
+  const args = { ...input };
+
   const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
   return Object.freeze({
     accounts: [
       getAccountMeta("payer", accounts.payer),
       getAccountMeta("channel", accounts.channel),
     ],
-    data: getRequestCloseInstructionDataEncoder().encode({}),
+    data: getRequestCloseInstructionDataEncoder().encode(
+      args as RequestCloseInstructionDataArgs,
+    ),
     programAddress,
   } as RequestCloseInstruction<
     TProgramAddress,

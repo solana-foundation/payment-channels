@@ -10,7 +10,7 @@ This ADR specifies the channel lifecycle, instruction set, and on-chain PDA layo
 
 The program implements unidirectional payment channels. Channels are PDAs holding escrowed tokens. Payer-signed off-chain vouchers carry a cumulative amount committed to a `settled` watermark. The split config (a list of `(recipient, bps)` entries with `0 ≤ sum(bps) ≤ 10000`) is passed to `open`. The program stores the 32-byte Blake3 digest in `Channel.distribution_hash`. Splits are recoverable from the `open` instruction data. Token movement occurs at closure via two paths:
 
-- **Happy path (`settleAndFinalize` + `distribute`)**: Merchant commits the final voucher (transitions to `FINALIZED`) and runs `distribute` with the splits preimage. The program verifies the Blake3 hash, pays cumulative floor deltas between `payout_watermark` and `settled` across recipients and the payee's implicit remainder share, sweeps final irreducible residual dust to the treasury ATA, refunds `deposit - settled` to the payer, and tombstones the PDA. These instructions SHOULD be bundled.
+- **Happy path (`settleAndFinalize` + `distribute`)**: Merchant commits the final voucher (transitions to `FINALIZED`) and runs `distribute` with the splits preimage. The program verifies the Blake3 hash, pays cumulative floor deltas between `payout_watermark` and `settled` across recipients and the payee's implicit remainder share, sweeps final irreducible residual dust to the treasury ATA, refunds `deposit - settled` to the payer, and fully closes the Channel PDA — data resized to 0, every lamport refunded to `rent_payer`. These instructions SHOULD be bundled.
 - **Unhappy path (post-grace permissionless crank)**: If the merchant fails to submit a voucher after `requestClose` starts the grace period, anyone can call `finalize` post-grace to transition to `FINALIZED`. Anyone can then call `distribute` using the publicly recoverable splits preimage. The payer can also pull their refund early during `FINALIZED` via `withdrawPayer`.
 
 Instructions determined by on-chain state are permissionless cranks. Authority is encoded in the channel state, not the signer.
@@ -36,15 +36,14 @@ the status byte is interpreted.
 ```rust
 #[repr(u8)]
 pub enum AccountDiscriminator {
-    Channel = 1,                    // starts at 1 so zero-init accounts fail load
-    ClosedChannel = 2,              // one-byte tombstone after finalized distribution
+    Channel = 1, // starts at 1 so zero-init accounts fail load
 }
 ```
 
 ### Channel PDA
 
 ```rust
-/// Active channel account. 216 bytes.
+/// Active channel account. 256 bytes.
 #[repr(C)]
 pub struct Channel {
     pub discriminator:      u8,       // [  0..1  )
@@ -52,22 +51,24 @@ pub struct Channel {
     pub bump:               u8,       // [  2..3  )  canonical bump
     pub status:             u8,       // [  3..4  )
     pub salt:               u64,      // [  4..12 )  PDA disambiguator; stored so `distribute` / `withdrawPayer` can re-derive seeds and self-sign without off-chain data
-    pub deposit:            u64,      // [ 12..20 )  escrow amount (mutated by `topUp`)
-    pub settlement:         SettlementWatermarks, // [ 20..36 )
-    pub closure_started_at: i64,      // [ 36..44 )  unix ts; set by `requestClose`, gates `finalize`
-    pub payer_withdrawn_at: i64,      // [ 44..52 )  unix ts; 0 = not yet withdrawn
-    pub grace_period:       u32,      // [ 52..56 )  seconds; set at `open`; must be non-zero
-    pub distribution_hash:  [u8; 32], // [ 56..88 )  Blake3 digest of the canonical splits preimage, computed on-chain at `open`
-    pub payer:              Address,  // [ 88..120)  refund destination + payer-authority signer
-    pub payee:              Address,  // [120..152)  PDA seed binding + implicit-remainder destination on `distribute`
-    pub authorized_signer:  Address,  // [152..184)  voucher signer; equals `payer` when no delegate bound
-    pub mint:               Address,  // [184..216)
+    pub open_slot:          u64,      // [ 12..20 )  Clock::slot at `open`; every voucher's signed payload binds to this so a voucher signed for a prior incarnation cannot replay against a later re-open at the same seeds
+    pub deposit:            u64,      // [ 20..28 )  escrow amount (mutated by `topUp`)
+    pub settlement:         SettlementWatermarks, // [ 28..44 )
+    pub closure_started_at: i64,      // [ 44..52 )  unix ts; set by `requestClose`, gates `finalize`
+    pub payer_withdrawn_at: i64,      // [ 52..60 )  unix ts; 0 = not yet withdrawn
+    pub grace_period:       u32,      // [ 60..64 )  seconds; set at `open`; must be non-zero
+    pub distribution_hash:  [u8; 32], // [ 64..96 )  SHA-256 digest of the canonical splits preimage, computed on-chain at `open`
+    pub payer:              Address,  // [ 96..128)  refund destination + payer-authority signer
+    pub payee:              Address,  // [128..160)  PDA seed binding + implicit-remainder destination on `distribute`
+    pub authorized_signer:  Address,  // [160..192)  voucher signer; equals `payer` when no delegate bound
+    pub mint:               Address,  // [192..224)
+    pub rent_payer:         Address,  // [224..256)  receives all channel + escrow rent on FINALIZED close
 }
 
 #[repr(C)]
 pub struct SettlementWatermarks {
-    pub settled:            u64,      // [ 20..28 )  cumulative authorized watermark
-    pub payout_watermark:   u64,      // [ 28..36 )  accounted distribution watermark; payout_watermark ≤ settled
+    pub settled:            u64,      // [ 28..36 )  cumulative authorized watermark
+    pub payout_watermark:   u64,      // [ 36..44 )  accounted distribution watermark; payout_watermark ≤ settled
 }
 ```
 
@@ -75,7 +76,7 @@ Multi-byte fields are stored as align-1 `[u8; N]` byte arrays in the actual stru
 
 ### Accounting authority
 
-`Channel` state — `deposit`, `settlement.settled`, `settlement.payout_watermark`, `payer_withdrawn_at` — is authoritative for pending settlement amounts. The escrow ATA balance and the channel PDA's lamports can exceed those values: third parties can transfer tokens to the escrow ATA address (either before `open` via a precreated ATA or directly afterward), and lamports can be transferred to the PDA address before `open`. The program accepts these states (`open` is prefund-tolerant) but does not record them in `Channel`. Surplus tokens are swept to treasury at `finalize` via `distribute`'s `escrow_at_entry − scheduled_outflow` residual; surplus PDA lamports refund to the payer at tombstone via the rent rebalance. Off-chain consumers MUST derive pending value from channel state, never from raw account balances.
+`Channel` state — `deposit`, `settlement.settled`, `settlement.payout_watermark`, `payer_withdrawn_at` — is authoritative for pending settlement amounts. The escrow ATA balance and the channel PDA's lamports can exceed those values: third parties can transfer tokens to the escrow ATA address (either before `open` via a precreated ATA or directly afterward), and lamports can be transferred to the PDA address before `open`. The program accepts these states (`open` is prefund-tolerant) but does not record them in `Channel`. Surplus tokens are swept to treasury at `finalize` via `distribute`'s `escrow_at_entry − scheduled_outflow` residual; surplus PDA lamports refund to `rent_payer` when `distribute` closes the PDA on the FINALIZED branch. Off-chain consumers MUST derive pending value from channel state, never from raw account balances.
 
 ### PDA derivation
 
@@ -100,6 +101,7 @@ Carried inside the MPP `Authorization: Payment <base64url-JSON>` HTTP header. Cl
 ```rust
 pub struct Voucher {
     pub channel_id:        Pubkey,        // JSON: base58 string
+    pub open_slot:         u64,           // JSON: decimal ASCII string; equals Channel.open_slot at settle time
     pub cumulative_amount: u64,           // JSON: decimal ASCII string (base units)
     pub expires_at:        i64,           // JSON: ISO 8601 string when != 0, omitted when 0
 }
@@ -125,16 +127,17 @@ Only the inner `Voucher` bytes ride on-chain — `signer` and `signature` come f
 #[repr(C)]
 pub struct VoucherArgs {
     pub channel_id:        Pubkey,        // 32 bytes
+    pub open_slot:         u64,           //  8 bytes, LE
     pub cumulative_amount: u64,           //  8 bytes, LE
     pub expires_at:        i64,           //  8 bytes, LE
 }
 ```
 
-Total 48 bytes, stored align-1 (`[u8; 8]` arrays for the two ints). Field order matches `Borsh({ channel_id, cumulative_amount, expires_at })`, so the struct's raw bytes ARE the Ed25519-signed payload — no repack between `VoucherArgs` and the precompile message.
+Total 56 bytes, stored align-1 (`[u8; 8]` arrays for the three ints). Field order matches `Borsh({ channel_id, open_slot, cumulative_amount, expires_at })`, so the struct's raw bytes ARE the Ed25519-signed payload — no repack between `VoucherArgs` and the precompile message.
 
 **Verification.** The caller bundles an Ed25519 native-program ix immediately before each voucher-bearing program ix in the same transaction. The program reads the verified message bytes from that ix via the Instructions sysvar and asserts they equal `VoucherArgs::as_bytes()`. The pubkey embedded in the precompile ix MUST equal `Channel.authorized_signer` (which equals `payer` if no delegate was bound at `open`). `open` rejects `authorized_signer` values that are not valid Ed25519 public-key points.
 
-**Replay protection.** `channel_id` (a PDA, hence program- and seed-specific) + strictly monotonic `cumulative_amount > settled` + optional `expires_at`. No explicit nonce. This strict watermark rule applies to `settle` and to `settleAndFinalize` when a voucher is supplied. A supplied `settleAndFinalize` voucher with `cumulative_amount <= settled` is invalid and MUST cause the `settleAndFinalize` instruction to reject; if no additional settlement is needed, call `settleAndFinalize` without a voucher to finalize the current `settled` watermark.
+**Replay protection.** `channel_id` (a PDA, hence program- and seed-specific) + `open_slot` (bound to a specific channel incarnation; strictly monotonic across reopens at the same seeds because `open` stamps `Clock::slot`) + strictly monotonic `cumulative_amount > settled` + optional `expires_at`. No explicit nonce. This strict watermark rule applies to `settle` and to `settleAndFinalize` when a voucher is supplied. A supplied `settleAndFinalize` voucher with `cumulative_amount <= settled` is invalid and MUST cause the `settleAndFinalize` instruction to reject; if no additional settlement is needed, call `settleAndFinalize` without a voucher to finalize the current `settled` watermark. A voucher whose `open_slot` disagrees with `Channel.open_slot` is rejected with `ChannelSlotMismatch` — closes replay against a channel later re-opened at the same PDA seeds.
 
 **Cluster scope.** Vouchers are not bound to a cluster. A voucher could in principle be replayed against an identically-addressed channel on another cluster — which requires the same program, mint, salt, payer, and authorized_signer at identical addresses on two clusters plus an operator accepting it cross-cluster. This residual replay is an accepted operational risk (no parallel clusters in use; SVM has no EVM-style cross-chain vector), mitigated off-chain by pinning each server and channel to one cluster — see ADR-002, Server Implementation Requirements.
 
@@ -142,22 +145,22 @@ Total 48 bytes, stored align-1 (`[u8; 8]` arrays for the two ints). Field order 
 
 ![Channel state machine](./fsm.png)
 
-`CLOSED` is a visual convergence point, not a `ChannelStatus` value. The transition is atomic with the tombstone realloc.
+`CLOSED` is a visual convergence point, not a `ChannelStatus` value. The transition is atomic with the PDA close (data resized to 0, lamports drained to `rent_payer`).
 
 ## Transition Guards
 
 | Instruction | From → To | Guard |
 |---|---|---|
-| `open` | `NONEXISTENT → OPEN` | payer signer; `authorized_signer` is a valid Ed25519 public key; channel PDA matches seeds and is uninitialized; `deposit > 0`; `grace_period > 0`; `payer != payee`; `payee` may be on-curve or a program-derived address (PDA); `count ≤ MAX_DISTRIBUTION_RECIPIENTS`; exact preimage length; `bps[i] > 0 ∀ i ∈ [0, count)`; `Σ bps[0..count] ≤ 10000`; recipients unique; no recipient equals the derived channel PDA |
-| `settle` | `OPEN → OPEN` | channel is `OPEN`; preceding Ed25519 ix exists; voucher channel id matches the channel PDA; voucher signer equals `authorized_signer`; voucher fresh†; `settled < voucher.cumulative ≤ deposit` |
-| `topUp` | `OPEN → OPEN` | payer signer equals channel `payer`; `amount > 0`; channel is `OPEN`; mint/source/escrow token accounts match channel |
-| `settleAndFinalize` | `OPEN → FINALIZED` | merchant signer equals channel `payee`; voucher optional (if present: preceding Ed25519 ix, signer equals `authorized_signer`, voucher fresh†, `settled < voucher.cumulative ≤ deposit`) |
-| `requestClose` | `OPEN → CLOSING` | payer signer equals channel `payer`; channel is `OPEN`; sets `closureStartedAt = now` |
-| `settleAndFinalize` | `CLOSING → FINALIZED` | merchant signer equals channel `payee`; `now < closureStartedAt + GRACE`; voucher optional (if present: preceding Ed25519 ix, signer equals `authorized_signer`, voucher fresh†, `settled < voucher.cumulative ≤ deposit`) |
+| `open` | `NONEXISTENT → OPEN` | payer signer; `authorized_signer` is a valid Ed25519 public key; channel PDA matches seeds and is uninitialized; `deposit > 0`; `grace_period > 0`; `payer != payee`; `payee` may be on-curve or a program-derived address (PDA); `count ≤ MAX_DISTRIBUTION_RECIPIENTS`; exact preimage length; `bps[i] > 0 ∀ i ∈ [0, count)`; `Σ bps[0..count] ≤ 10000`; recipients unique; no recipient equals the derived channel PDA; records `open_slot = Clock::slot` |
+| `settle` | `OPEN → OPEN` | channel is `OPEN`; preceding Ed25519 ix exists; voucher channel id matches the channel PDA; voucher signer equals `authorized_signer`; voucher fresh†; voucher `open_slot` equals `Channel.open_slot`; `settled < voucher.cumulative ≤ deposit` |
+| `topUp` | `OPEN → OPEN` | payer signer equals channel `payer`; `amount > 0`; channel is `OPEN`; mint/source/escrow token accounts match channel; `args.expected_open_slot` equals `Channel.open_slot` |
+| `settleAndFinalize` | `OPEN → FINALIZED` | merchant signer equals channel `payee`; `args.expected_open_slot` equals `Channel.open_slot`; voucher optional (if present: preceding Ed25519 ix, signer equals `authorized_signer`, voucher fresh†, voucher `open_slot` equals `Channel.open_slot`, `settled < voucher.cumulative ≤ deposit`) |
+| `requestClose` | `OPEN → CLOSING` | payer signer equals channel `payer`; channel is `OPEN`; `args.expected_open_slot` equals `Channel.open_slot`; sets `closureStartedAt = now` |
+| `settleAndFinalize` | `CLOSING → FINALIZED` | merchant signer equals channel `payee`; `now < closureStartedAt + GRACE`; `args.expected_open_slot` equals `Channel.open_slot`; voucher optional (if present: preceding Ed25519 ix, signer equals `authorized_signer`, voucher fresh†, voucher `open_slot` equals `Channel.open_slot`, `settled < voucher.cumulative ≤ deposit`) |
 | `finalize` | `CLOSING → FINALIZED` | channel is `CLOSING`; `now ≥ closureStartedAt + GRACE` |
 | `distribute` | `OPEN → OPEN` | channel is `OPEN`; parsed preimage hash matches `distribution_hash`; recipient account tail length/order matches preimage; `settled > payout_watermark`; pays cumulative floor deltas and advances `payout_watermark` to `settled` |
-| `distribute` | `FINALIZED → CLOSED` | channel is `FINALIZED`; parsed preimage hash matches `distribution_hash`; recipient account tail length/order matches preimage; pays cumulative floor deltas for any unaccounted settled watermark, performs any pending payer refund, sweeps final irreducible residual dust to treasury, closes escrow, and tombstones the PDA |
-| `withdrawPayer` | `FINALIZED → FINALIZED` | payer signer equals channel `payer`; channel is `FINALIZED`; `payerWithdrawnAt == 0`; mint/escrow/refund ATAs match channel |
+| `distribute` | `FINALIZED → CLOSED` | channel is `FINALIZED`; parsed preimage hash matches `distribution_hash`; recipient account tail length/order matches preimage; pays cumulative floor deltas for any unaccounted settled watermark, performs any pending payer refund, sweeps final irreducible residual dust to treasury, closes escrow, and fully closes the Channel PDA (data resized to 0, all lamports refunded to `rent_payer`) |
+| `withdrawPayer` | `FINALIZED → FINALIZED` | payer signer equals channel `payer`; channel is `FINALIZED`; `payerWithdrawnAt == 0`; mint/escrow/refund ATAs match channel; `args.expected_open_slot` equals `Channel.open_slot` |
 
 † **voucher fresh** = `voucher.expires_at == 0` OR `now < voucher.expires_at`. Expired vouchers MUST be rejected to prevent merchants from settling stale authorizations after the payer's TTL has passed.
 
@@ -239,8 +242,3 @@ This is intentional. Hard-rejecting any mint with a live freeze authority would 
 
 The same reasoning applies, less acutely, to the mint authority and to any Token-2022 update authority for allow-listed extensions: the program does not audit these at `open`, and merchants should treat the mint as a trust dependency of the channel, not a parameter the program defends against.
 
-## TBD
-
-### Replace tombstone with `init_id` generation marker
-
-Fully close the PDA at end-of-life and add an `init_id: i64` field to `Channel`, set from `Clock::slot` at `open`. Vouchers bind `channelId = (pda_address, init_id)`. Re-opening the same PDA produces a new `init_id`, invalidating old vouchers.

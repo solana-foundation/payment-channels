@@ -12,6 +12,7 @@ use solana_address::Address;
 #[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Eq, PartialEq)]
 pub struct VoucherArgs {
     pub channel_id: Address,
+    pub open_slot: u64,
     pub cumulative_amount: u64,
     pub expires_at: i64,
 }

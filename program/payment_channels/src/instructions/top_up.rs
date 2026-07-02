@@ -27,6 +27,10 @@ pub struct TopUpArgs {
     /// Base-unit amount to pull from the payer's token account into escrow.
     #[cfg_attr(feature = "idl", codama(type = number(u64)))]
     pub amount: [u8; 8],
+    /// Must equal [`Channel::open_slot`](crate::Channel::open_slot). Scopes
+    /// this top-up to the intended channel incarnation.
+    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    pub expected_open_slot: [u8; 8],
 }
 
 impl TopUpArgs {
@@ -35,6 +39,11 @@ impl TopUpArgs {
     #[inline(always)]
     pub fn amount(&self) -> u64 {
         u64::from_le_bytes(self.amount)
+    }
+
+    #[inline(always)]
+    pub fn expected_open_slot(&self) -> u64 {
+        u64::from_le_bytes(self.expected_open_slot)
     }
 
     pub fn load(data: &[u8]) -> Result<&Self, ProgramError> {
@@ -113,6 +122,9 @@ pub fn process(
         }
         if accs.mint.address() != &ch.mint {
             return Err(PaymentChannelsError::InvalidChannelMint.into());
+        }
+        if args.expected_open_slot() != ch.open_slot() {
+            return Err(PaymentChannelsError::ChannelSlotMismatch.into());
         }
     }
 

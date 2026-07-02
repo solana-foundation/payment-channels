@@ -8,11 +8,13 @@
 #![allow(clippy::result_large_err)]
 
 use payment_channels_client::instructions::{
-    Distribute, DistributeInstructionArgs, Finalize, RequestClose, SettleAndFinalize,
-    SettleAndFinalizeInstructionArgs, TopUp, TopUpInstructionArgs, WithdrawPayer,
+    Distribute, DistributeInstructionArgs, Finalize, RequestClose, RequestCloseInstructionArgs,
+    SettleAndFinalize, SettleAndFinalizeInstructionArgs, TopUp, TopUpInstructionArgs,
+    WithdrawPayer, WithdrawPayerInstructionArgs,
 };
 use payment_channels_client::types::{
-    DistributeArgs, DistributionEntry, SettleAndFinalizeArgs, VoucherArgs,
+    DistributeArgs, DistributionEntry, RequestCloseArgs, SettleAndFinalizeArgs, VoucherArgs,
+    WithdrawPayerArgs,
 };
 use solana_clock::Clock;
 use solana_instruction::{AccountMeta, Instruction};
@@ -29,7 +31,7 @@ use super::fixtures::{
 use super::record;
 use crate::common::{
     INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, SPL_TOKEN, TOKEN_2022, compute_budget_ix,
-    event_authority, mutate_channel, set_clock,
+    event_authority, mutate_channel, read_channel, set_clock,
     voucher::{build_ed25519_ix, voucher_payload},
 };
 
@@ -199,6 +201,7 @@ fn run_top_up(token_program: solana_pubkey::Pubkey, label: &str) {
     .instruction(TopUpInstructionArgs {
         top_up_args: payment_channels_client::types::TopUpArgs {
             amount: top_up_amount,
+            expected_open_slot: read_channel(&svm, &f.channel, |ch| ch.open_slot()),
         },
     });
     let tx = build_focal_tx(&svm, &f.payer, &[], &[ix]);
@@ -230,11 +233,14 @@ fn request_close() {
     let mut svm = LiteSVM::load_program();
     let f = fixtures::prepare_channel(&mut svm, 1, SPL_TOKEN);
     fixtures::open_setup(&mut svm, &f, DEFAULT_DEPOSIT);
+    let expected_open_slot = read_channel(&svm, &f.channel, |ch| ch.open_slot());
     let ix = RequestClose {
         payer: f.payer.pubkey(),
         channel: f.channel,
     }
-    .instruction();
+    .instruction(RequestCloseInstructionArgs {
+        request_close_args: RequestCloseArgs { expected_open_slot },
+    });
     let tx = build_focal_tx(&svm, &f.payer, &[], &[ix]);
     record(&mut svm, tx, "request_close").expect("request_close ok");
 }
@@ -282,8 +288,10 @@ fn run_settle_and_finalize(from_closing: bool, with_voucher: bool, label: &str) 
         // mid-grace path is exercised.
         set_clock(&mut svm, closure_at + 10);
     }
+    let expected_open_slot = read_channel(&svm, &f.channel, |ch| ch.open_slot());
     let voucher = VoucherArgs {
         channel_id: f.channel,
+        open_slot: expected_open_slot,
         cumulative_amount: DEFAULT_SETTLED,
         expires_at: 0,
     };
@@ -304,6 +312,7 @@ fn run_settle_and_finalize(from_closing: bool, with_voucher: bool, label: &str) 
     .instruction(SettleAndFinalizeInstructionArgs {
         settle_and_finalize_args: SettleAndFinalizeArgs {
             has_voucher: if with_voucher { 1 } else { 0 },
+            expected_open_slot,
         },
     });
     let ixs: Vec<_> = ed_ix.into_iter().chain(core::iter::once(saf_ix)).collect();
@@ -404,7 +413,7 @@ fn distribute_setup_finalized(
 ) -> (LiteSVM, Fixture, fixtures::DistributeAccounts) {
     let (mut svm, f, accts) = distribute_setup_open(num_recipients, token_program);
     // Mutate to FINALIZED so the focal tx exercises the
-    // treasury-sweep + payer-refund + tombstone branch.
+    // treasury-sweep + payer-refund + close branch.
     mutate_channel(&mut svm, &f.channel, |ch| {
         ch.status = fixtures::status::FINALIZED
     });
@@ -446,17 +455,18 @@ fn distribute_n16_t22_open() {
     run_distribute(&f, &mut svm, &accts, "distribute[n=16,tok=t22,open]");
 }
 
-/// `distribute` from FINALIZED at 1 recipient, SPL. Adds the tombstone
-/// branch on top of the OPEN baseline: residual sweep to treasury, payer
-/// refund of `deposit - settled`, channel-PDA shrink-to-tombstone.
+/// `distribute` from FINALIZED at 1 recipient, SPL. Adds the FINALIZED
+/// close branch on top of the OPEN baseline: residual sweep to treasury,
+/// payer refund of `deposit - settled`, and the channel PDA close
+/// (data → 0, lamports → `rent_payer`).
 #[test]
 fn distribute_n01_spl_fin() {
     let (mut svm, f, accts) = distribute_setup_finalized(1, SPL_TOKEN);
     run_distribute(&f, &mut svm, &accts, "distribute[n=01,tok=spl,fin]");
 }
 
-/// `distribute` from FINALIZED at 16 recipients, SPL. Tombstone branch
-/// stacked on the high-end recipient-loop cost.
+/// `distribute` from FINALIZED at 16 recipients, SPL. FINALIZED close
+/// branch stacked on the high-end recipient-loop cost.
 #[test]
 fn distribute_n16_spl_fin() {
     let (mut svm, f, accts) = distribute_setup_finalized(16, SPL_TOKEN);
@@ -532,8 +542,8 @@ fn distribute_n32_t22_open() {
     run_distribute_alt(&f, &mut svm, &accts, "distribute[n=32,tok=t22,open]");
 }
 
-/// `distribute` at 32 recipients on SPL, FINALIZED, via ALT. Tombstone
-/// branch stacked on the protocol-max recipient-loop cost.
+/// `distribute` at 32 recipients on SPL, FINALIZED, via ALT. FINALIZED
+/// close branch stacked on the protocol-max recipient-loop cost.
 #[test]
 fn distribute_n32_spl_fin() {
     let (mut svm, f, accts) = distribute_setup_finalized(32, SPL_TOKEN);
@@ -542,7 +552,7 @@ fn distribute_n32_spl_fin() {
 
 /// `distribute` at 32 recipients on Token-2022, FINALIZED, via ALT. The
 /// worst-case scenario — protocol-max recipient loop on the heavier token
-/// program plus the tombstone branch (treasury sweep + payer refund +
+/// program plus the close branch (treasury sweep + payer refund +
 /// channel PDA shrink).
 #[test]
 fn distribute_n32_t22_fin() {
@@ -566,6 +576,7 @@ fn run_withdraw_payer(token_program: solana_pubkey::Pubkey, label: &str) {
     clock.unix_timestamp = 1_000_000;
     svm.set_sysvar::<Clock>(&clock);
 
+    let expected_open_slot = read_channel(&svm, &f.channel, |ch| ch.open_slot());
     let ix = WithdrawPayer {
         payer: f.payer.pubkey(),
         channel: f.channel,
@@ -574,7 +585,9 @@ fn run_withdraw_payer(token_program: solana_pubkey::Pubkey, label: &str) {
         mint: f.mint,
         token_program,
     }
-    .instruction();
+    .instruction(WithdrawPayerInstructionArgs {
+        withdraw_payer_args: WithdrawPayerArgs { expected_open_slot },
+    });
     let tx = build_focal_tx(&svm, &f.payer, &[], &[ix]);
     record(&mut svm, tx, label).expect("withdraw_payer ok");
 }

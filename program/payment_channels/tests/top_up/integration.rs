@@ -139,14 +139,43 @@ fn wrong_mint_rejects() {
 }
 
 #[test]
-fn tombstoned_channel_rejects() {
-    // After FINALIZED `distribute` tombstones the PDA, the channel data
-    // shrinks to a 1-byte `ClosedChannel` payload (discriminator = 2).
-    // `Channel::load_mut` length-gates inside `unsafe load_mut::<Channel>`
-    // before any discriminator/version/status logic runs, so top_up
-    // rejects with `InvalidAccountData`.
+fn wrong_expected_open_slot_rejects() {
+    // ChannelBuilder leaves `open_slot` at zero; passing a non-zero value
+    // for `expected_open_slot` trips the incarnation guard. The mint is
+    // aligned so the earlier mint-equality check doesn't short-circuit.
+    let payer = Pubkey::new_unique();
+    let mint = Pubkey::new_unique();
     assert_eq!(
-        TopUpRun::new(Pubkey::new_unique(), vec![2u8], 1).run(),
+        TopUpRun {
+            expected_open_slot: 1,
+            mint,
+            ..TopUpRun::new(
+                payer,
+                ChannelBuilder::new()
+                    .status(ChannelStatus::Open)
+                    .deposit(DEPOSIT)
+                    .payer(payer)
+                    .mint(mint)
+                    .build(),
+                DEPOSIT,
+            )
+        }
+        .run(),
+        ProgramResult::Failure(ProgramError::Custom(
+            PaymentChannelsError::ChannelSlotMismatch as u32
+        )),
+    );
+}
+
+#[test]
+fn closed_channel_rejects() {
+    // After FINALIZED `distribute` closes the PDA, the channel data is empty
+    // (lamports drained, `resize(0)` clears the buffer). `Channel::load_mut`
+    // length-gates inside `unsafe load_mut::<Channel>` before any
+    // discriminator/version/status logic runs, so top_up rejects with
+    // `InvalidAccountData`.
+    assert_eq!(
+        TopUpRun::new(Pubkey::new_unique(), Vec::new(), 1).run(),
         ProgramResult::Failure(ProgramError::InvalidAccountData),
     );
 }

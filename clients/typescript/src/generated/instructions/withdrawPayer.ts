@@ -34,6 +34,12 @@ import {
 } from "@solana/program-client-core";
 import { getU8Decoder, getU8Encoder } from "../../safe-codecs.js";
 import { PAYMENT_CHANNELS_PROGRAM_ADDRESS } from "../programs";
+import {
+  getWithdrawPayerArgsDecoder,
+  getWithdrawPayerArgsEncoder,
+  type WithdrawPayerArgs,
+  type WithdrawPayerArgsArgs,
+} from "../types";
 
 export const WITHDRAW_PAYER_DISCRIMINATOR = 8;
 
@@ -77,19 +83,30 @@ export type WithdrawPayerInstruction<
     ]
   >;
 
-export type WithdrawPayerInstructionData = { discriminator: number };
+export type WithdrawPayerInstructionData = {
+  discriminator: number;
+  withdrawPayerArgs: WithdrawPayerArgs;
+};
 
-export type WithdrawPayerInstructionDataArgs = {};
+export type WithdrawPayerInstructionDataArgs = {
+  withdrawPayerArgs: WithdrawPayerArgsArgs;
+};
 
 export function getWithdrawPayerInstructionDataEncoder(): FixedSizeEncoder<WithdrawPayerInstructionDataArgs> {
   return transformEncoder(
-    getStructEncoder([["discriminator", getU8Encoder()]]),
+    getStructEncoder([
+      ["discriminator", getU8Encoder()],
+      ["withdrawPayerArgs", getWithdrawPayerArgsEncoder()],
+    ]),
     (value) => ({ ...value, discriminator: WITHDRAW_PAYER_DISCRIMINATOR }),
   );
 }
 
 export function getWithdrawPayerInstructionDataDecoder(): FixedSizeDecoder<WithdrawPayerInstructionData> {
-  return getStructDecoder([["discriminator", getU8Decoder()]]);
+  return getStructDecoder([
+    ["discriminator", getU8Decoder()],
+    ["withdrawPayerArgs", getWithdrawPayerArgsDecoder()],
+  ]);
 }
 
 export function getWithdrawPayerInstructionDataCodec(): FixedSizeCodec<
@@ -116,6 +133,7 @@ export type WithdrawPayerInput<
   payerTokenAccount: Address<TAccountPayerTokenAccount>;
   mint: Address<TAccountMint>;
   tokenProgram: Address<TAccountTokenProgram>;
+  withdrawPayerArgs: WithdrawPayerInstructionDataArgs["withdrawPayerArgs"];
 };
 
 export function getWithdrawPayerInstruction<
@@ -169,6 +187,9 @@ export function getWithdrawPayerInstruction<
     ResolvedInstructionAccount
   >;
 
+  // Original args.
+  const args = { ...input };
+
   const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
   return Object.freeze({
     accounts: [
@@ -179,7 +200,9 @@ export function getWithdrawPayerInstruction<
       getAccountMeta("mint", accounts.mint),
       getAccountMeta("tokenProgram", accounts.tokenProgram),
     ],
-    data: getWithdrawPayerInstructionDataEncoder().encode({}),
+    data: getWithdrawPayerInstructionDataEncoder().encode(
+      args as WithdrawPayerInstructionDataArgs,
+    ),
     programAddress,
   } as WithdrawPayerInstruction<
     TProgramAddress,

@@ -19,6 +19,7 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
     expect(() =>
       encoder.encode({
         channelId: SYSTEM_ADDR,
+        openSlot: 0n,
         cumulativeAmount: 9007199254740993 as unknown as bigint,
         expiresAt: 0n,
       }),
@@ -34,22 +35,25 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
     const encoder = getVoucherArgsEncoder();
     const a = encoder.encode({
       channelId: SYSTEM_ADDR,
+      openSlot: 0n,
       cumulativeAmount: 2n ** 53n,
       expiresAt: 0n,
     });
     const b = encoder.encode({
       channelId: SYSTEM_ADDR,
+      openSlot: 0n,
       cumulativeAmount: 2n ** 53n + 1n,
       expiresAt: 0n,
     });
-    expect(a.length).toBe(48);
-    expect(b.length).toBe(48);
+    expect(a.length).toBe(56);
+    expect(b.length).toBe(56);
     expect(Buffer.from(a).equals(Buffer.from(b))).toBe(false);
   });
 
   it('round-trips bigint cumulativeAmount through encoder/decoder as bigint', () => {
     const bytes = getVoucherArgsEncoder().encode({
       channelId: SYSTEM_ADDR,
+      openSlot: 0n,
       cumulativeAmount: 100n,
       expiresAt: 0n,
     });
@@ -63,11 +67,13 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
     const encoder = getVoucherArgsEncoder();
     const fromNumber = encoder.encode({
       channelId: SYSTEM_ADDR,
+      openSlot: 0n,
       cumulativeAmount: 100 as unknown as bigint,
       expiresAt: 0n,
     });
     const fromBigint = encoder.encode({
       channelId: SYSTEM_ADDR,
+      openSlot: 0n,
       cumulativeAmount: 100n,
       expiresAt: 0n,
     });
@@ -80,6 +86,7 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
     expect(() =>
       encoder.encode({
         channelId: SYSTEM_ADDR,
+        openSlot: 0n,
         cumulativeAmount: 0n,
         expiresAt: -1n,
       }),
@@ -88,6 +95,7 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
     expect(() =>
       encoder.encode({
         channelId: SYSTEM_ADDR,
+        openSlot: 0n,
         cumulativeAmount: 0n,
         expiresAt: 2n ** 63n,
       }),
@@ -150,9 +158,12 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
 
   it('rejects unsafe-integer TopUpArgs.amount', () => {
     const encoder = getTopUpArgsEncoder();
-    expect(() => encoder.encode({ amount: 9007199254740993 as unknown as bigint })).toThrow(
-      TypeError,
-    );
+    expect(() =>
+      encoder.encode({
+        amount: 9007199254740993 as unknown as bigint,
+        expectedOpenSlot: 0n,
+      }),
+    ).toThrow(TypeError);
   });
 
   // (The former SettleAndFinalizeArgs voucher-embedding tests were removed:

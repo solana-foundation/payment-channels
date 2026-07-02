@@ -10,8 +10,8 @@ mod e2e;
 mod integration;
 
 use mollusk_svm::{Mollusk, result::ProgramResult};
-use payment_channels::instructions::withdraw_payer::DISCRIMINATOR;
-use payment_channels::state::Channel;
+use payment_channels::instructions::withdraw_payer::{DISCRIMINATOR, WithdrawPayerArgs};
+use payment_channels::state::Transmutable;
 use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
@@ -26,11 +26,16 @@ pub(super) struct WithdrawPayerRun {
     pub payer: Pubkey,
     /// Whether `payer` is marked as a signer in the account metas.
     pub is_signer: bool,
+    /// Raw channel account data. An empty `Vec` is passed through verbatim so
+    /// tests can exercise the closed-channel (`InvalidAccountData`) length
+    /// gate; use `ChannelBuilder` to produce a well-formed blob for the other
+    /// paths.
     pub channel_blob: Vec<u8>,
     pub channel_ata: Pubkey,
     pub payer_ata: Pubkey,
     pub mint: Pubkey,
     pub token_program: Pubkey,
+    pub expected_open_slot: u64,
 }
 
 impl WithdrawPayerRun {
@@ -43,6 +48,7 @@ impl WithdrawPayerRun {
             payer_ata: Pubkey::new_unique(),
             mint: Pubkey::new_unique(),
             token_program: SPL_TOKEN,
+            expected_open_slot: 0,
         }
     }
 
@@ -50,9 +56,17 @@ impl WithdrawPayerRun {
         let mollusk = Mollusk::load_program();
         let channel_pubkey = Pubkey::new_unique();
 
+        let mut ix_data = vec![DISCRIMINATOR];
+        ix_data.extend_from_slice(
+            WithdrawPayerArgs {
+                expected_open_slot: self.expected_open_slot.to_le_bytes(),
+            }
+            .as_bytes(),
+        );
+
         let ix = Instruction::new_with_bytes(
             PROGRAM_ID,
-            &[DISCRIMINATOR],
+            &ix_data,
             vec![
                 AccountMeta::new_readonly(self.payer, self.is_signer),
                 AccountMeta::new(channel_pubkey, false),
@@ -65,11 +79,7 @@ impl WithdrawPayerRun {
 
         let channel_account = Account {
             lamports: 10_000_000,
-            data: if self.channel_blob.is_empty() {
-                vec![0u8; Channel::LEN]
-            } else {
-                self.channel_blob
-            },
+            data: self.channel_blob,
             owner: PROGRAM_ID,
             executable: false,
             rent_epoch: 0,

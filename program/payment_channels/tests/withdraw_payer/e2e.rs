@@ -4,7 +4,8 @@
 
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
-use payment_channels_client::instructions::WithdrawPayer;
+use payment_channels_client::instructions::{WithdrawPayer, WithdrawPayerInstructionArgs};
+use payment_channels_client::types::WithdrawPayerArgs;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
@@ -23,6 +24,7 @@ fn send_withdraw_payer(
     payer_ata: &Pubkey,
     mint: &Pubkey,
 ) -> Result<litesvm::types::TransactionMetadata, litesvm::types::FailedTransactionMetadata> {
+    let expected_open_slot = read_channel(svm, channel, |ch| ch.open_slot());
     let ix = WithdrawPayer {
         payer: payer.pubkey(),
         channel: *channel,
@@ -31,7 +33,9 @@ fn send_withdraw_payer(
         mint: *mint,
         token_program: SPL_TOKEN,
     }
-    .instruction();
+    .instruction(WithdrawPayerInstructionArgs {
+        withdraw_payer_args: WithdrawPayerArgs { expected_open_slot },
+    });
     let tx = Transaction::new_signed_with_payer(
         &[ix],
         Some(&payer.pubkey()),
