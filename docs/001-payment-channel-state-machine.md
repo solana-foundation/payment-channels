@@ -8,9 +8,9 @@ This ADR specifies the channel lifecycle, instruction set, and on-chain PDA layo
 
 ## Decision
 
-The program implements unidirectional payment channels. Channels are PDAs holding escrowed tokens. Payer-signed off-chain vouchers carry a cumulative amount committed to a `settled` watermark. The split config (a list of `(recipient, bps)` entries with `0 ≤ sum(bps) ≤ 10000`) is passed to `open`. The program stores the 32-byte Blake3 digest in `Channel.distribution_hash`. Splits are recoverable from the `open` instruction data. Token movement occurs at closure via two paths:
+The program implements unidirectional payment channels. Channels are PDAs holding escrowed tokens. Payer-signed off-chain vouchers carry a cumulative amount committed to a `settled` watermark. The split config (a list of `(recipient, bps)` entries with `0 ≤ sum(bps) ≤ 10000`) is passed to `open`. The program stores the 32-byte SHA-256 digest in `Channel.distribution_hash`. Splits are recoverable from the `open` instruction data. Token movement occurs at closure via two paths:
 
-- **Happy path (`settleAndSeal` + `distribute`)**: Merchant commits the final voucher (transitions to `SEALED`) and runs `distribute` with the splits preimage — these SHOULD be bundled. The program verifies the Blake3 hash, pays cumulative floor deltas between `payout_watermark` and `settled` across recipients and the payee's implicit remainder share, sweeps final irreducible residual dust to the treasury ATA, refunds `deposit - settled` to the payer, and closes the escrow ATA — all immediately; no token movement is ever slot-gated. The channel PDA itself is fully deallocated in the same instruction when `clock.slot > open_slot + OPEN_SLOT_WINDOW` has already passed, otherwise it flips to `DISTRIBUTED` and a later permissionless `reclaim` returns its rent to `rent_payer` once the window elapses.
+- **Happy path (`settleAndSeal` + `distribute`)**: Merchant commits the final voucher (transitions to `SEALED`) and runs `distribute` with the splits preimage — these SHOULD be bundled. The program verifies the SHA-256 hash, pays cumulative floor deltas between `payout_watermark` and `settled` across recipients and the payee's implicit remainder share, sweeps final irreducible residual dust to the treasury ATA, refunds `deposit - settled` to the payer, and closes the escrow ATA — all immediately; no token movement is ever slot-gated. The channel PDA itself is fully deallocated in the same instruction when `clock.slot > open_slot + OPEN_SLOT_WINDOW` has already passed, otherwise it flips to `DISTRIBUTED` and a later permissionless `reclaim` returns its rent to `rent_payer` once the window elapses.
 - **Unhappy path (post-grace permissionless crank)**: If the merchant fails to submit a voucher after `requestClose` starts the grace period, anyone can call `seal` post-grace to transition to `SEALED`. Anyone can then call `distribute` using the publicly recoverable splits preimage. The payer can also pull their refund early during `SEALED` via `withdrawPayer`.
 
 Instructions determined by on-chain state are permissionless cranks. Authority is encoded in the channel state, not the signer.
@@ -58,7 +58,7 @@ pub struct Channel {
     pub closure_started_at: i64,      // [ 36..44 )  unix ts; set by `requestClose`, gates `seal`
     pub payer_withdrawn_at: i64,      // [ 44..52 )  unix ts; 0 = not yet withdrawn
     pub grace_period:       u32,      // [ 52..56 )  seconds; set at `open`; must be non-zero
-    pub distribution_hash:  [u8; 32], // [ 56..88 )  Blake3 digest of the canonical splits preimage, computed on-chain at `open`
+    pub distribution_hash:  [u8; 32], // [ 56..88 )  SHA-256 digest of the canonical splits preimage, computed on-chain at `open`
     pub payer:              Address,  // [ 88..120)  refund destination + payer-authority signer
     pub payee:              Address,  // [120..152)  PDA seed binding + implicit-remainder destination on `distribute`
     pub authorized_signer:  Address,  // [152..184)  voucher signer; equals `payer` when no delegate bound
@@ -187,7 +187,7 @@ count (u32 LE) || [ recipient (32 bytes) || bps (u16 LE) ] × count
 
 - Only active entries are encoded and hashed (variable length, no zero-padding); `count == 0` is legal and collapses to a vanilla two-party channel where the payee receives 100% of the pool.
 - `bps` is a `u16` basis-point share (1..=10000) in the generated IDL/clients. Every active entry MUST have `bps > 0`; `open` and `distribute` reject zero-share entries. A single entry of `10000` is legal (recipient takes 100% of pool, payee carve-out is zero).
-- `0 ≤ Σ bps[0..count] ≤ 10000` and duplicate-recipient rejection are checked when the preimage is parsed. `distribute` additionally verifies that the submitted preimage's Blake3 digest matches the immutable hash commitment before using the bps values for payout math.
+- `0 ≤ Σ bps[0..count] ≤ 10000` and duplicate-recipient rejection are checked when the preimage is parsed. `distribute` additionally verifies that the submitted preimage's SHA-256 digest matches the immutable hash commitment before using the bps values for payout math.
 - Recipient `i` receives `floor(settled * bps[i] / 10000) - floor(payout_watermark * bps[i] / 10000)`.
 - The payee receives the implicit remainder delta `floor(settled * (10000 - Σ bps) / 10000) - floor(payout_watermark * (10000 - Σ bps) / 10000)`.
 - During `OPEN`, residual dust from floor math remains in escrow while `payout_watermark` advances to `settled` as an accounted watermark. Later distributions compute cumulative floor deltas from that watermark, so previously residual value remains claimable when a share's cumulative entitlement crosses the next whole token.

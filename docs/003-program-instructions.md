@@ -27,7 +27,7 @@ The **Signer** column lists transaction-level signers where applicable; `Ed25519
 
 ## `open` (1)
 
-Payer-signed initializer. Creates the active channel PDA, creates its escrow ATA, transfers `deposit` from the payer token account, stores the exact Blake3 hash of the distribution preimage, and emits `Opened`. The `authorized_signer` account must be a valid Ed25519 public key, but it does not need to sign `open`. The `payee` account is not curve-checked and may be a program-derived address (PDA) beneficiary.
+Payer-signed initializer. Creates the active channel PDA, creates its escrow ATA, transfers `deposit` from the payer token account, stores the exact SHA-256 hash of the distribution preimage, and emits `Opened`. The `authorized_signer` account must be a valid Ed25519 public key, but it does not need to sign `open`. The `payee` account is not curve-checked and may be a program-derived address (PDA) beneficiary.
 
 Both creates are **prefund-tolerant**: lamports already sitting on the channel PDA (the PDA is allocated with `Allocate` + `Assign` after topping up only the rent shortfall) and a pre-existing canonical escrow ATA (idempotent CPI) are accepted. This also means a lamport donation to a previously-closed channel address cannot block a legitimate reopen. Surplus PDA lamports flow to `rent_payer` at close; tokens already on the escrow ATA are swept to treasury at `seal` via the existing residual logic. See [Accounting authority](./001-payment-channel-state-machine.md#accounting-authority).
 
@@ -49,7 +49,7 @@ salt(u64 LE) || deposit(u64 LE) || grace_period(u32 LE) || open_slot(u64 LE) || 
 | `deposit` | `u64` | Initial escrow amount. Must be non-zero. |
 | `grace_period` | `u32` | Seconds that must elapse after `requestClose` before permissionless `seal`. Must be non-zero. |
 | `open_slot` | `u64` | Client-supplied per-incarnation epoch; a PDA seed, so it is also a derivation input for the channel address. Validated on-chain: `open_slot ≤ clock.slot` and `clock.slot − open_slot ≤ OPEN_SLOT_WINDOW` (150). A back-dated value shortens the terminal-close delay at the cost of a narrower landing window; the current slot maximizes landing safety. |
-| `recipients` | `Vec<DistributionEntry>` | Distribution preimage. Parsed as `count(u32 LE) || entries`; stored only as `blake3(preimage)` in the channel. |
+| `recipients` | `Vec<DistributionEntry>` | Distribution preimage. Parsed as `count(u32 LE) || entries`; stored only as `sha256(preimage)` in the channel. |
 
 **Accounts**
 
@@ -151,7 +151,7 @@ Permissionless post-grace crank.
 
 ## `distribute` (7)
 
-Permissionless crank. Verifies the committed splits preimage (Blake3) against `Channel.distribution_hash`, then pays cumulative floor deltas between `payout_watermark` and `settled` to the merchant side: each recipient gets `floor(settled * bps[i] / 10000) - floor(payout_watermark * bps[i] / 10000)` and the **payee** gets the implicit remainder delta using `10000 - sum(bps)`. From `OPEN`, zero-delta shares are skipped, residual dust remains in escrow for later cumulative deltas, and `payout_watermark` advances to `settled` as the accounted watermark. From `SEALED`, the final cumulative merchant payout runs before the payer receives the unspent `deposit - settled` headroom (gated by `payer_withdrawn_at == 0`); final irreducible residual dust is swept to treasury and the escrow ATA is closed — all immediately, with no slot gate on any token movement. The Channel PDA itself is then fully deallocated in the same instruction (every lamport to `rent_payer`) if `clock.slot > open_slot + OPEN_SLOT_WINDOW` has already passed; otherwise the channel is marked `DISTRIBUTED` — inert to every instruction — and its rent is recovered later by the permissionless `reclaim` (9). On a nonzero share, if the beneficiary's canonical ATA is unusable — missing/uninitialized, frozen, closed/malformed, carrying an unsupported Token-2022 extension, or with a reassigned authority — that share is redirected to the treasury, a `PayoutRedirected` event is emitted, and `payout_watermark` **still advances**, so the beneficiary **permanently forfeits** it (repairing the ATA later does not reclaim it, since future cumulative deltas only cover newly settled amounts). Operators should ensure recipient/payee ATAs exist and are healthy before cranking. Malformed token-account data/TLV and wrong (non-canonical) accounts hard-fail.
+Permissionless crank. Verifies the committed splits preimage (SHA-256) against `Channel.distribution_hash`, then pays cumulative floor deltas between `payout_watermark` and `settled` to the merchant side: each recipient gets `floor(settled * bps[i] / 10000) - floor(payout_watermark * bps[i] / 10000)` and the **payee** gets the implicit remainder delta using `10000 - sum(bps)`. From `OPEN`, zero-delta shares are skipped, residual dust remains in escrow for later cumulative deltas, and `payout_watermark` advances to `settled` as the accounted watermark. From `SEALED`, the final cumulative merchant payout runs before the payer receives the unspent `deposit - settled` headroom (gated by `payer_withdrawn_at == 0`); final irreducible residual dust is swept to treasury and the escrow ATA is closed — all immediately, with no slot gate on any token movement. The Channel PDA itself is then fully deallocated in the same instruction (every lamport to `rent_payer`) if `clock.slot > open_slot + OPEN_SLOT_WINDOW` has already passed; otherwise the channel is marked `DISTRIBUTED` — inert to every instruction — and its rent is recovered later by the permissionless `reclaim` (9). On a nonzero share, if the beneficiary's canonical ATA is unusable — missing/uninitialized, frozen, closed/malformed, carrying an unsupported Token-2022 extension, or with a reassigned authority — that share is redirected to the treasury, a `PayoutRedirected` event is emitted, and `payout_watermark` **still advances**, so the beneficiary **permanently forfeits** it (repairing the ATA later does not reclaim it, since future cumulative deltas only cover newly settled amounts). Operators should ensure recipient/payee ATAs exist and are healthy before cranking. Malformed token-account data/TLV and wrong (non-canonical) accounts hard-fail.
 
 **Client transaction format:** at `count == 32`, callers MUST use **version 0 transactions with an address lookup table** indexing recipient ATAs. The instruction uses 11 fixed accounts plus up to 32 recipient ATAs (43 total); legacy transactions cannot fit the static account-key budget (~32 keys including fee payer and program id).
 
@@ -163,7 +163,7 @@ Permissionless crank. Verifies the committed splits preimage (Blake3) against `C
 
 | Name | Type | Description |
 |---|---|---|
-| `recipients` | `Vec<DistributionEntry>` | Splits preimage (`count(u32 LE) || [recipient(32) || bps(u16 LE)] × count`). Rehashed on-chain; Blake3 digest must equal `Channel.distribution_hash`. |
+| `recipients` | `Vec<DistributionEntry>` | Splits preimage (`count(u32 LE) || [recipient(32) || bps(u16 LE)] × count`). Rehashed on-chain; SHA-256 digest must equal `Channel.distribution_hash`. |
 
 **Accounts**
 
@@ -327,7 +327,7 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | 2404 | `RecipientAccountMismatch` | A recipient ATA is not `ATA(recipient, token_program, mint)`. |
 | 2405 | `InvalidRecipientTokenAccount` | A recipient ATA fails state/owner/mint validation. |
 | 2406 | `InvalidRecipientTokenExtensions` | A recipient ATA carries a Token-2022 extension outside the allow-list. |
-| 2407 | `InvalidDistributionHash` | Blake3 of the revealed preimage does not equal `Channel.distribution_hash`. |
+| 2407 | `InvalidDistributionHash` | SHA-256 of the revealed preimage does not equal `Channel.distribution_hash`. |
 | 2408 | `NothingToDistribute` | `settled == payout_watermark` while channel is `OPEN` (no newly settled watermark to account). |
 | 2409 | `RecipientAccountCountMismatch` | Number of recipient ATAs in the account tail does not equal the preimage entry count. |
 | 2410 | `DistributePoolOverflow` | `settled - payout_watermark` underflowed (defensive: `payout_watermark <= settled`). |
