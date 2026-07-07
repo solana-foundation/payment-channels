@@ -50,7 +50,7 @@ salt(u64 LE) || deposit(u64 LE) || grace_period(u32 LE) || open_slot(u64 LE) || 
 | `salt` | `u64` | PDA disambiguator for concurrent channels with the same payer/payee/mint/signer tuple. |
 | `deposit` | `u64` | Initial escrow amount. Must be non-zero. |
 | `grace_period` | `u32` | Seconds that must elapse after `requestClose` before permissionless `seal`. Must be non-zero. |
-| `open_slot` | `u64` | Client-supplied per-incarnation epoch; a PDA seed, so it is also a derivation input for the channel address. Validated on-chain: `open_slot ≤ clock.slot` and `clock.slot − open_slot ≤ OPEN_SLOT_WINDOW` (150). The `open` transaction must therefore be **signed and landed within ~60 s** of choosing the slot — slower signing flows (hardware wallets, multisigs, cold storage) miss the window and must re-derive with a fresh `open_slot` (a new channel address) and re-sign. Back-dating shortens the rent-reclaim delay at the cost of a narrower landing window; the current slot maximizes landing safety. Only `open` carries this deadline. |
+| `open_slot` | `u64` | Client-supplied per-incarnation epoch; a PDA seed, so it is also a derivation input for the channel address. Validated on-chain: `open_slot ≤ clock.slot` and `clock.slot − open_slot ≤ OPEN_SLOT_WINDOW` (1,500 slots — ~10 min at 400 ms slots). The `open` transaction must be signed and landed within that window of choosing the slot (standard transactions are bounded tighter by blockhash validity; durable-nonce transactions get the full window). A flow that misses it must re-derive with a fresh `open_slot` (a new channel address) and re-sign. Back-dating shortens the rent-reclaim delay at the cost of a narrower landing window; the current slot maximizes landing safety. Only `open` carries this deadline. |
 | `recipients` | `Vec<DistributionEntry>` | Distribution preimage. Parsed as `count(u32 LE) || entries`; stored only as `sha256(preimage)` in the channel. |
 
 **Accounts**
@@ -238,6 +238,7 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | 7 | `InvalidChannelMint` | Provided `mint` account does not equal `Channel.mint`. |
 | 8 | `InvalidEventAuthority` | `event_authority` account does not match the program-derived event-authority PDA. |
 | 9 | `NotEnoughAccountKeys` | The instruction received fewer accounts than required. |
+| 10 | `InvalidChannelRentPayer` | Provided `rent_payer` account does not equal `Channel.rent_payer` (checked by `distribute` and `reclaim`). |
 
 ### Account validation
 
@@ -336,7 +337,15 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | 2411 | `DistributeBalanceCalculationOverflow` | Escrow/treasury arithmetic underflow. |
 | 2412 | `RentPayerBalanceOverflow` | Rent-payer lamports `+ delta` would overflow `u64` while deallocating the channel PDA (shared by `distribute`'s fast path and `reclaim`). |
 | 2413 | `DistributeTransferQueueOverflow` | Transfer queue capacity exceeded (defensive — distribute queues at most 35 payouts). |
-| 2414 | `ChannelCloseTooEarly` | `reclaim` attempted at `clock.slot ≤ open_slot + OPEN_SLOT_WINDOW`; retry once the window elapses. Never emitted by `distribute` (its fast path simply defers deallocation to `reclaim`). |
+
+### `reclaim` (instruction 9)
+
+| Code | Variant | Meaning |
+|---|---|---|
+| 2 | `InvalidChannelStatus` | Channel is not `DISTRIBUTED` (only fully-drained channels can be reclaimed). |
+| 10 | `InvalidChannelRentPayer` | Provided `rent_payer` account does not equal `Channel.rent_payer`. |
+| 2412 | `RentPayerBalanceOverflow` | Shared with `distribute`'s fast path (see above). |
+| 2414 | `ChannelCloseTooEarly` | Reclaim attempted at `clock.slot ≤ open_slot + OPEN_SLOT_WINDOW`; retry once the window elapses. Never emitted by `distribute` (its fast path simply defers deallocation to `reclaim`). |
 
 ## Appendix
 

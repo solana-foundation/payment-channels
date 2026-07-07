@@ -476,8 +476,8 @@ fn open_slot_one_past_window_rejected() {
     );
 }
 
-/// Drives one `open` at a warped clock (slot 200 > OPEN_SLOT_WINDOW + 1, so
-/// every boundary case is a representable u64) with `open_slot` picked by
+/// Drives one `open` at a warped clock (OPEN_SLOT_WINDOW + 50, so every
+/// boundary case is a representable u64) with `open_slot` picked by
 /// `pick(now)`, then asserts acceptance (epoch persisted in the channel
 /// tail) or rejection (no channel account, deposit untouched).
 fn open_slot_boundary_case(
@@ -490,7 +490,7 @@ fn open_slot_boundary_case(
     let authorized_signer = Keypair::new().pubkey();
     let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
 
-    let now: u64 = 200;
+    let now: u64 = OPEN_SLOT_WINDOW + 50;
     svm.warp_to_slot(now);
     let open_slot = pick(now);
     // `open_slot` is a channel seed, so the boundary value under test picks
