@@ -7,4 +7,3 @@
  */
 
 export * from "./channel";
-export * from "./closedChannel";

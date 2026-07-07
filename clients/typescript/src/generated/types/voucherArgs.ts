@@ -10,6 +10,8 @@ import {
   combineCodec,
   getAddressDecoder,
   getAddressEncoder,
+  getArrayDecoder,
+  getArrayEncoder,
   getStructDecoder,
   getStructEncoder,
   type Address,
@@ -22,15 +24,19 @@ import {
   getI64Encoder,
   getU64Decoder,
   getU64Encoder,
+  getU8Decoder,
+  getU8Encoder,
 } from "../../safe-codecs.js";
 
 export type VoucherArgs = {
+  magic: Array<number>;
   channelId: Address;
   cumulativeAmount: bigint;
   expiresAt: bigint;
 };
 
 export type VoucherArgsArgs = {
+  magic: Array<number>;
   channelId: Address;
   cumulativeAmount: bigint;
   expiresAt: bigint;
@@ -38,6 +44,7 @@ export type VoucherArgsArgs = {
 
 export function getVoucherArgsEncoder(): FixedSizeEncoder<VoucherArgsArgs> {
   return getStructEncoder([
+    ["magic", getArrayEncoder(getU8Encoder(), { size: 2 })],
     ["channelId", getAddressEncoder()],
     ["cumulativeAmount", getU64Encoder()],
     ["expiresAt", getI64Encoder()],
@@ -46,6 +53,7 @@ export function getVoucherArgsEncoder(): FixedSizeEncoder<VoucherArgsArgs> {
 
 export function getVoucherArgsDecoder(): FixedSizeDecoder<VoucherArgs> {
   return getStructDecoder([
+    ["magic", getArrayDecoder(getU8Decoder(), { size: 2 })],
     ["channelId", getAddressDecoder()],
     ["cumulativeAmount", getU64Decoder()],
     ["expiresAt", getI64Decoder()],

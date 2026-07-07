@@ -31,13 +31,13 @@ import {
 import { getU8Decoder, getU8Encoder } from "../../safe-codecs.js";
 import { PAYMENT_CHANNELS_PROGRAM_ADDRESS } from "../programs";
 
-export const FINALIZE_DISCRIMINATOR = 6;
+export const SEAL_DISCRIMINATOR = 6;
 
-export function getFinalizeDiscriminatorBytes(): ReadonlyUint8Array {
-  return getU8Encoder().encode(FINALIZE_DISCRIMINATOR);
+export function getSealDiscriminatorBytes(): ReadonlyUint8Array {
+  return getU8Encoder().encode(SEAL_DISCRIMINATOR);
 }
 
-export type FinalizeInstruction<
+export type SealInstruction<
   TProgram extends string = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
   TAccountChannel extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
@@ -52,42 +52,42 @@ export type FinalizeInstruction<
     ]
   >;
 
-export type FinalizeInstructionData = { discriminator: number };
+export type SealInstructionData = { discriminator: number };
 
-export type FinalizeInstructionDataArgs = {};
+export type SealInstructionDataArgs = {};
 
-export function getFinalizeInstructionDataEncoder(): FixedSizeEncoder<FinalizeInstructionDataArgs> {
+export function getSealInstructionDataEncoder(): FixedSizeEncoder<SealInstructionDataArgs> {
   return transformEncoder(
     getStructEncoder([["discriminator", getU8Encoder()]]),
-    (value) => ({ ...value, discriminator: FINALIZE_DISCRIMINATOR }),
+    (value) => ({ ...value, discriminator: SEAL_DISCRIMINATOR }),
   );
 }
 
-export function getFinalizeInstructionDataDecoder(): FixedSizeDecoder<FinalizeInstructionData> {
+export function getSealInstructionDataDecoder(): FixedSizeDecoder<SealInstructionData> {
   return getStructDecoder([["discriminator", getU8Decoder()]]);
 }
 
-export function getFinalizeInstructionDataCodec(): FixedSizeCodec<
-  FinalizeInstructionDataArgs,
-  FinalizeInstructionData
+export function getSealInstructionDataCodec(): FixedSizeCodec<
+  SealInstructionDataArgs,
+  SealInstructionData
 > {
   return combineCodec(
-    getFinalizeInstructionDataEncoder(),
-    getFinalizeInstructionDataDecoder(),
+    getSealInstructionDataEncoder(),
+    getSealInstructionDataDecoder(),
   );
 }
 
-export type FinalizeInput<TAccountChannel extends string = string> = {
+export type SealInput<TAccountChannel extends string = string> = {
   channel: Address<TAccountChannel>;
 };
 
-export function getFinalizeInstruction<
+export function getSealInstruction<
   TAccountChannel extends string,
   TProgramAddress extends Address = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
 >(
-  input: FinalizeInput<TAccountChannel>,
+  input: SealInput<TAccountChannel>,
   config?: { programAddress?: TProgramAddress },
-): FinalizeInstruction<TProgramAddress, TAccountChannel> {
+): SealInstruction<TProgramAddress, TAccountChannel> {
   // Program address.
   const programAddress =
     config?.programAddress ?? PAYMENT_CHANNELS_PROGRAM_ADDRESS;
@@ -104,12 +104,12 @@ export function getFinalizeInstruction<
   const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
   return Object.freeze({
     accounts: [getAccountMeta("channel", accounts.channel)],
-    data: getFinalizeInstructionDataEncoder().encode({}),
+    data: getSealInstructionDataEncoder().encode({}),
     programAddress,
-  } as FinalizeInstruction<TProgramAddress, TAccountChannel>);
+  } as SealInstruction<TProgramAddress, TAccountChannel>);
 }
 
-export type ParsedFinalizeInstruction<
+export type ParsedSealInstruction<
   TProgram extends string = typeof PAYMENT_CHANNELS_PROGRAM_ADDRESS,
   TAccountMetas extends readonly AccountMeta[] = readonly AccountMeta[],
 > = {
@@ -117,17 +117,17 @@ export type ParsedFinalizeInstruction<
   accounts: {
     channel: TAccountMetas[0];
   };
-  data: FinalizeInstructionData;
+  data: SealInstructionData;
 };
 
-export function parseFinalizeInstruction<
+export function parseSealInstruction<
   TProgram extends string,
   TAccountMetas extends readonly AccountMeta[],
 >(
   instruction: Instruction<TProgram> &
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
-): ParsedFinalizeInstruction<TProgram, TAccountMetas> {
+): ParsedSealInstruction<TProgram, TAccountMetas> {
   if (instruction.accounts.length !== 1) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
@@ -146,6 +146,6 @@ export function parseFinalizeInstruction<
   return {
     programAddress: instruction.programAddress,
     accounts: { channel: getNextAccount() },
-    data: getFinalizeInstructionDataDecoder().decode(instruction.data),
+    data: getSealInstructionDataDecoder().decode(instruction.data),
   };
 }

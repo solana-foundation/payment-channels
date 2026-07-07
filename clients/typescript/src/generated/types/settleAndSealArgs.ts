@@ -16,24 +16,24 @@ import {
 } from "@solana/kit";
 import { getU8Decoder, getU8Encoder } from "../../safe-codecs.js";
 
-export type SettleAndFinalizeArgs = { hasVoucher: number };
+export type SettleAndSealArgs = { hasVoucher: number };
 
-export type SettleAndFinalizeArgsArgs = SettleAndFinalizeArgs;
+export type SettleAndSealArgsArgs = SettleAndSealArgs;
 
-export function getSettleAndFinalizeArgsEncoder(): FixedSizeEncoder<SettleAndFinalizeArgsArgs> {
+export function getSettleAndSealArgsEncoder(): FixedSizeEncoder<SettleAndSealArgsArgs> {
   return getStructEncoder([["hasVoucher", getU8Encoder()]]);
 }
 
-export function getSettleAndFinalizeArgsDecoder(): FixedSizeDecoder<SettleAndFinalizeArgs> {
+export function getSettleAndSealArgsDecoder(): FixedSizeDecoder<SettleAndSealArgs> {
   return getStructDecoder([["hasVoucher", getU8Decoder()]]);
 }
 
-export function getSettleAndFinalizeArgsCodec(): FixedSizeCodec<
-  SettleAndFinalizeArgsArgs,
-  SettleAndFinalizeArgs
+export function getSettleAndSealArgsCodec(): FixedSizeCodec<
+  SettleAndSealArgsArgs,
+  SettleAndSealArgs
 > {
   return combineCodec(
-    getSettleAndFinalizeArgsEncoder(),
-    getSettleAndFinalizeArgsDecoder(),
+    getSettleAndSealArgsEncoder(),
+    getSettleAndSealArgsDecoder(),
   );
 }
