@@ -125,6 +125,9 @@ pub struct Fixture {
     pub authorized_signer: Keypair,
     pub mint: Pubkey,
     pub payer_ata: Pubkey,
+    /// Ground so channel + escrow bumps are canonical (255); the `open` ix
+    /// must echo exactly this value.
+    pub salt: u64,
     /// Slot committed at derivation time. `open_slot` is a channel PDA
     /// seed, so it is fixed when `channel` is derived and the `open` ix
     /// must echo exactly this value.
@@ -160,32 +163,45 @@ fn seeded_mint_funded(
     (payer, mint, payer_ata)
 }
 
-fn derive_channel_pdas(
+/// Grind `salt` (from [`DEFAULT_SALT`]) until both the channel PDA and its
+/// escrow ATA sit at the canonical bump 255, i.e. every on-chain
+/// `find_program_address` over them costs exactly one iteration. Each
+/// missed bump costs ~1,500 CU per derivation, so without this the CU
+/// report measures bump roulette (rerolled whenever the seed schema or any
+/// input address changes) instead of instruction behavior. `salt` is free
+/// for a client to choose, so this also mirrors what a CU-conscious client
+/// can do in production.
+fn grind_canonical_salt(
     payer: &Pubkey,
     payee: &Pubkey,
     mint: &Pubkey,
     authorized_signer: &Pubkey,
-    salt: u64,
     open_slot: u64,
     token_program: &Pubkey,
-) -> (Pubkey, Pubkey) {
-    let (channel, _) = Pubkey::find_program_address(
-        &[
-            b"channel",
-            payer.as_ref(),
-            payee.as_ref(),
-            mint.as_ref(),
-            authorized_signer.as_ref(),
-            &salt.to_le_bytes(),
-            &open_slot.to_le_bytes(),
-        ],
-        &PROGRAM_ID,
-    );
-    let (channel_ata, _) = Pubkey::find_program_address(
-        &[channel.as_ref(), token_program.as_ref(), mint.as_ref()],
-        &ATA_PROGRAM,
-    );
-    (channel, channel_ata)
+) -> (u64, Pubkey, Pubkey) {
+    for i in 0..1_024u64 {
+        let salt = DEFAULT_SALT.wrapping_add(i);
+        let (channel, channel_bump) = Pubkey::find_program_address(
+            &[
+                b"channel",
+                payer.as_ref(),
+                payee.as_ref(),
+                mint.as_ref(),
+                authorized_signer.as_ref(),
+                &salt.to_le_bytes(),
+                &open_slot.to_le_bytes(),
+            ],
+            &PROGRAM_ID,
+        );
+        let (channel_ata, ata_bump) = Pubkey::find_program_address(
+            &[channel.as_ref(), token_program.as_ref(), mint.as_ref()],
+            &ATA_PROGRAM,
+        );
+        if channel_bump == 255 && ata_bump == 255 {
+            return (salt, channel, channel_ata);
+        }
+    }
+    panic!("no canonical-bump salt within 1024 tries");
 }
 
 /// `n` deterministic 1-bps recipients. Sum ≤ 32 bps → payee gets 9968+ as
@@ -219,12 +235,11 @@ pub fn prepare_channel(svm: &mut LiteSVM, num_recipients: usize, token_program: 
     // at derivation time. Scenarios open without warping in between, so the
     // slot captured here stays inside the open window (trivially: equal).
     let open_slot = current_slot(svm);
-    let (channel, channel_ata) = derive_channel_pdas(
+    let (salt, channel, channel_ata) = grind_canonical_salt(
         &payer.pubkey(),
         &payee.pubkey(),
         &mint,
         &authorized_signer.pubkey(),
-        DEFAULT_SALT,
         open_slot,
         &token_program,
     );
@@ -233,6 +248,7 @@ pub fn prepare_channel(svm: &mut LiteSVM, num_recipients: usize, token_program: 
         payer,
         payee,
         authorized_signer,
+        salt,
         mint,
         payer_ata,
         open_slot,
@@ -273,7 +289,7 @@ pub fn build_open_ix(f: &Fixture, deposit: u64) -> Instruction {
     }
     .instruction(OpenInstructionArgs {
         open_args: OpenArgs {
-            salt: DEFAULT_SALT,
+            salt: f.salt,
             deposit,
             grace_period: GRACE_PERIOD,
             open_slot: f.open_slot,
