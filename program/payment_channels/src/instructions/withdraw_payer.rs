@@ -20,7 +20,7 @@ pub struct WithdrawPayerAccounts<'a> {
     /// Must equal [`Channel::payer`](crate::Channel::payer) and be a signer.
     pub payer: PayerAccountView<'a>,
     /// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at)
-    /// stamped; not tombstoned.
+    /// stamped; the PDA is not closed.
     pub channel: ChannelAccountView<'a>,
     pub channel_token_account: ChannelTokenAccountView<'a>,
     pub payer_token_account: PayerTokenAccountView<'a>,
@@ -55,9 +55,9 @@ impl<'a> TryFrom<&'a mut [AccountView]> for WithdrawPayerAccounts<'a> {
 }
 
 /// Payer-only refund of [`deposit`](crate::Channel::deposit) `−`
-/// [`settled`](crate::Channel::settled) during `FINALIZED`; records
+/// [`settled`](crate::Channel::settled) during `SEALED`; records
 /// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `= now` and
-/// does **not** tombstone the PDA.
+/// does **not** close the PDA.
 pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
     let accs = WithdrawPayerAccounts::try_from(accounts)?;
     let now = Clock::get()?.unix_timestamp;
@@ -70,8 +70,8 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
     // Owner / discriminator / version checks.
     let ch = Channel::from_account(&accs.channel)?;
 
-    // Status gate: FINALIZED only.
-    if ch.status != ChannelStatus::Finalized as u8 {
+    // Status gate: SEALED only.
+    if ch.status != ChannelStatus::Sealed as u8 {
         return Err(PaymentChannelsError::InvalidChannelStatus.into());
     }
 
@@ -94,6 +94,7 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
     let mint_bytes: [u8; 32] = *ch.mint.as_array();
     let signer_bytes: [u8; 32] = *ch.authorized_signer.as_array();
     let salt_bytes: [u8; 8] = ch.salt().to_le_bytes();
+    let open_slot_bytes: [u8; 8] = ch.open_slot().to_le_bytes();
     let bump_byte: [u8; 1] = [ch.bump];
     drop(ch);
 
@@ -115,6 +116,7 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
         &mint_bytes,
         &signer_bytes,
         &salt_bytes,
+        &open_slot_bytes,
         &bump_byte,
     );
     let signers = [Signer::from(&signer_seeds)];

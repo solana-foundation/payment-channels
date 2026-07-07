@@ -10,6 +10,11 @@ use crate::event_engine::{EventDiscriminator, EventSerialize};
 #[cfg_attr(feature = "idl", codama(discriminator(bytes = "a6ac61094d4cbd6d")))]
 pub struct Opened {
     pub channel: Address,
+    /// The channel's per-incarnation epoch (client-supplied, window-validated
+    /// at `open`). Surfaced so voucher issuers and indexers get the epoch
+    /// without an extra account fetch. Appended last so prefix-readers of the
+    /// original 32-byte payload keep working.
+    pub open_slot: u64,
 }
 
 impl EventDiscriminator for Opened {
@@ -17,5 +22,5 @@ impl EventDiscriminator for Opened {
 }
 
 impl EventSerialize for Opened {
-    const DATA_LEN: usize = 32;
+    const DATA_LEN: usize = 40;
 }

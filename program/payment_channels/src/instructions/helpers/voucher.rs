@@ -2,10 +2,10 @@
 //!
 //! Parses the caller-bundled Ed25519 precompile ix from the Instructions
 //! sysvar at `current - 1`, reads the voucher fields straight out of the
-//! precompile-verified message, and checks binding / freshness / cap / strict
-//! monotonicity / precompile pubkey against the channel state. The signed
-//! message IS the Borsh voucher payload, so there is no second on-wire copy
-//! to carry or reconcile. Pure validator; the caller is responsible for
+//! precompile-verified message, and checks binding / epoch / freshness / cap
+//! / strict monotonicity / precompile pubkey against the channel state. The
+//! signed message IS the Borsh voucher payload, so there is no second on-wire
+//! copy to carry or reconcile. Pure validator; the caller is responsible for
 //! writing [`Channel::settled`] back.
 //!
 //! Precompile wire layout + parser live in the sibling [`super::ed25519`]
@@ -15,7 +15,7 @@ use pinocchio::{AccountView, Address, error::ProgramError, sysvars::instructions
 
 use super::ed25519::parse as ed25519_ix;
 use crate::errors::PaymentChannelsError;
-use crate::instructions::VoucherArgs;
+use crate::instructions::{VOUCHER_MAGIC, VoucherArgs};
 use crate::state::channel::Channel;
 use crate::state::load;
 
@@ -47,9 +47,9 @@ pub fn verify_voucher(
 ///
 /// The Ed25519 precompile has already proven that `parsed.message` was signed
 /// by `parsed.pubkey`. That message *is* the Borsh voucher payload
-/// (`channel_id || cumulative_amount || expires_at`), so the voucher fields
-/// are read directly from it — there is no caller-supplied copy, hence no
-/// message-equality check to perform.
+/// (`magic || channel_id || cumulative_amount || expires_at`), so
+/// the voucher fields are read directly from it — there is no caller-supplied
+/// copy, hence no message-equality check to perform.
 fn verify_parsed(
     channel_address: &Address,
     channel: &Channel,
@@ -63,8 +63,16 @@ fn verify_parsed(
     let voucher: &VoucherArgs = unsafe { load::<VoucherArgs>(parsed.message) }
         .map_err(|_| PaymentChannelsError::MalformedEd25519Instruction)?;
 
-    let v_channel_id: Address = voucher.channel_id;
-    if v_channel_id != *channel_address {
+    if voucher.magic != VOUCHER_MAGIC {
+        return Err(PaymentChannelsError::VoucherBadMagic.into());
+    }
+
+    // Address binding IS the epoch binding: `open_slot` is a PDA seed, so
+    // an address never hosts two incarnations (see
+    // `constants::OPEN_SLOT_WINDOW`) and a voucher issued for a previous
+    // channel at recycled parameters targets an address that no longer —
+    // and can never again — exist.
+    if voucher.channel_id != *channel_address {
         return Err(PaymentChannelsError::VoucherChannelMismatch.into());
     }
 
@@ -184,10 +192,10 @@ mod tests {
 
     // --- payload contract -------------------------------------------------
 
-    /// Pins the `channel_id || cumulative_amount || expires_at`
-    /// byte layout that the off-chain signer and the Ed25519 precompile
-    /// depend on. `as_bytes` is a zero-cost reinterpretation of the
-    /// struct, so this doubles as a guard against anyone reordering
+    /// Pins the `magic || channel_id || cumulative_amount ||
+    /// expires_at` byte layout that the off-chain signer and the Ed25519
+    /// precompile depend on. `as_bytes` is a zero-cost reinterpretation of
+    /// the struct, so this doubles as a guard against anyone reordering
     /// [`VoucherArgs`] without updating the signer contract.
     #[test]
     fn voucher_args_bytes_match_signed_payload_layout() {
@@ -196,9 +204,11 @@ mod tests {
         let args = VoucherArgs::new(CHANNEL_ID, CUMULATIVE, EXPIRES_AT);
         let bytes = args.as_bytes();
         assert_eq!(bytes.len(), VOUCHER_PAYLOAD_SIZE);
-        assert_eq!(&bytes[..32], CHANNEL_ID.as_array());
-        assert_eq!(&bytes[32..40], &CUMULATIVE.to_le_bytes());
-        assert_eq!(&bytes[40..48], &EXPIRES_AT.to_le_bytes());
+        assert_eq!(&bytes[..2], &VOUCHER_MAGIC);
+        assert_eq!(&bytes[..2], &[0x56, 0x01]);
+        assert_eq!(&bytes[2..34], CHANNEL_ID.as_array());
+        assert_eq!(&bytes[34..42], &CUMULATIVE.to_le_bytes());
+        assert_eq!(&bytes[42..50], &EXPIRES_AT.to_le_bytes());
     }
 
     // --- happy paths ------------------------------------------------------
@@ -221,6 +231,34 @@ mod tests {
         let parsed = valid_parsed(msg);
         let out = verify_parsed(&CHANNEL_ID, &ch, &parsed, 1_999).unwrap();
         assert_eq!(out, 500);
+    }
+
+    // --- magic / epoch binding -------------------------------------------
+
+    #[test]
+    fn wrong_magic() {
+        let ch = make_channel(0, 500, AUTH);
+        let mut v = VoucherArgs::new(CHANNEL_ID, 100, 0);
+        v.magic[1] = 0x02; // wrong format version byte
+        let msg = v.as_bytes();
+        let parsed = valid_parsed(msg);
+        expect_err(
+            verify_parsed(&CHANNEL_ID, &ch, &parsed, 0),
+            PaymentChannelsError::VoucherBadMagic,
+        );
+    }
+
+    #[test]
+    fn zeroed_magic() {
+        let ch = make_channel(0, 500, AUTH);
+        let mut v = VoucherArgs::new(CHANNEL_ID, 100, 0);
+        v.magic = [0u8; 2];
+        let msg = v.as_bytes();
+        let parsed = valid_parsed(msg);
+        expect_err(
+            verify_parsed(&CHANNEL_ID, &ch, &parsed, 0),
+            PaymentChannelsError::VoucherBadMagic,
+        );
     }
 
     // --- binding / freshness / monotonicity / cap ------------------------
@@ -404,10 +442,21 @@ mod tests {
     }
 
     #[test]
-    fn message_data_size_above_canonical_48() {
-        // Canonical 160-byte ix, but overwrite the declared
+    fn message_data_size_above_canonical_50() {
+        // Canonical 162-byte ix, but overwrite the declared
         // `message_data_size` field at offsets[10..12] (= data[12..14])
-        // to 49. Length guard passes; the dedicated size-check fires.
+        // to 51. Length guard passes; the dedicated size-check fires.
+        let mut data = build_ix_data(
+            AUTH.as_array(),
+            &[0u8; VOUCHER_PAYLOAD_SIZE],
+            &AUTH_SIGNATURE,
+        );
+        data[12..14].copy_from_slice(&51u16.to_le_bytes());
+        assert_eq!(parse_err(&data), ed25519_ix::Ed25519ParseError::MessageSize);
+    }
+
+    #[test]
+    fn message_data_size_below_canonical_50() {
         let mut data = build_ix_data(
             AUTH.as_array(),
             &[0u8; VOUCHER_PAYLOAD_SIZE],
@@ -418,28 +467,17 @@ mod tests {
     }
 
     #[test]
-    fn message_data_size_below_canonical_48() {
-        let mut data = build_ix_data(
-            AUTH.as_array(),
-            &[0u8; VOUCHER_PAYLOAD_SIZE],
-            &AUTH_SIGNATURE,
-        );
-        data[12..14].copy_from_slice(&47u16.to_le_bytes());
-        assert_eq!(parse_err(&data), ed25519_ix::Ed25519ParseError::MessageSize);
-    }
-
-    #[test]
     fn ix_data_shorter_than_canonical() {
-        // 159 bytes — one shy of the canonical 160-byte layout. Must
+        // 161 bytes — one shy of the canonical 162-byte layout. Must
         // fail fast before any offsets are read, so short ixs return a
         // clean error instead of panicking on out-of-bounds indexing.
-        let short = [0u8; 159];
+        let short = [0u8; 161];
         assert_eq!(parse_err(&short), ed25519_ix::Ed25519ParseError::Length);
     }
 
     #[test]
     fn ix_data_longer_than_canonical() {
-        // 161 bytes — trailing byte past the pinned layout.
+        // 163 bytes — trailing byte past the pinned layout.
         let mut data = build_ix_data(
             AUTH.as_array(),
             &[0u8; VOUCHER_PAYLOAD_SIZE],
@@ -515,8 +553,9 @@ mod tests {
     // precompile-verified message, so there is no caller-supplied copy to
     // diverge from it. A tampered message either fails the Ed25519 signature
     // check in the precompile itself, or — when a field byte is altered —
-    // trips the channel / expiry / cap / monotonic guards exercised above
-    // (e.g. flipping a `channel_id` byte yields `VoucherChannelMismatch`).
+    // trips the magic / channel / epoch / expiry / cap / monotonic guards
+    // exercised above (e.g. flipping a `channel_id` byte yields
+    // `VoucherChannelMismatch`).
 
     #[test]
     fn precompile_pubkey_not_authorized_signer() {

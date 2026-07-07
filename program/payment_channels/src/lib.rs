@@ -44,15 +44,16 @@ fn process_instruction(
         PaymentChannelsInstruction::Open(args) => open::process(program_id, accounts, &args),
         PaymentChannelsInstruction::Settle => settle::process(program_id, accounts),
         PaymentChannelsInstruction::TopUp(args) => top_up::process(program_id, accounts, args),
-        PaymentChannelsInstruction::SettleAndFinalize(args) => {
-            settle_and_finalize::process(program_id, accounts, args)
+        PaymentChannelsInstruction::SettleAndSeal(args) => {
+            settle_and_seal::process(program_id, accounts, args)
         }
         PaymentChannelsInstruction::RequestClose => request_close::process(program_id, accounts),
-        PaymentChannelsInstruction::Finalize => finalize::process(program_id, accounts),
+        PaymentChannelsInstruction::Seal => seal::process(program_id, accounts),
         PaymentChannelsInstruction::Distribute(args) => {
             distribute::process(program_id, accounts, &args)
         }
         PaymentChannelsInstruction::WithdrawPayer => withdraw_payer::process(program_id, accounts),
+        PaymentChannelsInstruction::Reclaim => reclaim::process(program_id, accounts),
         PaymentChannelsInstruction::EmitEvent => emit_event::process(program_id, accounts),
     }
 }

@@ -1,6 +1,28 @@
 /// Basis-point denominator used for distribution shares.
 pub const BPS_DENOMINATOR: u32 = 10_000;
 
+/// Slot window `K` shared by `open`'s epoch validation and `distribute`'s
+/// terminal-close gate (~60 s at 400 ms/slot).
+///
+/// `open` requires the client-supplied epoch to satisfy
+/// `open_slot <= clock.slot && clock.slot - open_slot <= K` (future slots
+/// strictly rejected). The SEALED `distribute` of a v2 channel may fully
+/// deallocate the PDA only once `clock.slot > open_slot + K`.
+///
+/// Uniqueness proof: incarnation N closes at slot `C > open_slot_N + K`; any
+/// reincarnation at the same seeds opens at `L >= C` and the open window
+/// forces its epoch to `>= L - K >= C - K > open_slot_N`. So
+/// `(address, open_slot)` is strictly increasing across incarnations forever
+/// — for any client behavior inside the window, including adversarial — and
+/// an old voucher can never match a later incarnation's epoch.
+///
+/// CONSENSUS-CRITICAL: this constant may only ever be DECREASED in future
+/// program versions. The proof requires the `K` in force at a close to
+/// out-wait the window of any later open at that address; increasing `K`
+/// would let a reincarnation reuse an epoch closed under the smaller `K`,
+/// re-arming old vouchers.
+pub const OPEN_SLOT_WINDOW: u64 = 150;
+
 /// The `0xBE 0xEF` × 16 placeholder owner. Fine for localnet/default builds; a
 /// `devnet`/`testnet`/`mainnet-beta` build rejects it (gate below), forcing a real owner.
 const TREASURY_OWNER_SENTINEL: [u8; 32] = [
@@ -47,7 +69,7 @@ mod cluster {
 }
 
 /// Owner of the treasury ATAs that receive rounding residuals when a channel is
-/// finalized by `distribute`. The treasury ATA is derived as
+/// closed by the SEALED `distribute`. The treasury ATA is derived as
 /// `ATA(TREASURY_OWNER, mint, token_program)` and validated on-chain. The
 /// operator must hold the corresponding private key, otherwise accumulated
 /// residuals are unspendable.

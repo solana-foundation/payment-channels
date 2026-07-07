@@ -18,11 +18,12 @@ pub const CURRENT_CHANNEL_VERSION: u8 = 1;
 pub enum AccountDiscriminator {
     /// Active [`Channel`](crate::Channel) PDA.
     Channel = 1,
-    /// Tombstoned [`ClosedChannel`](crate::ClosedChannel) PDA. Distinct
-    /// discriminator so every existing `Channel::from_account_mut` load path
-    /// rejects a tombstoned account before any business logic runs, and the
-    /// system program refuses re-init at the same address (program-owned,
-    /// non-empty data).
+    /// Reserved. The pre-launch deployment tombstoned closed channels with a
+    /// 1-byte account carrying this discriminator; a few such accounts exist
+    /// on mainnet. Channels are now fully deallocated at close (voucher
+    /// replay is blocked by the `open_slot` epoch binding instead), but the
+    /// value stays reserved so no future account shape can alias those
+    /// leftovers.
     ClosedChannel = 2,
 }
 

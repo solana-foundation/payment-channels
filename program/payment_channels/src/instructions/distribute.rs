@@ -4,13 +4,14 @@ use alloc::vec::Vec;
 #[cfg(feature = "idl")]
 use codama::CodamaType;
 use pinocchio::{
-    AccountView, Address, ProgramResult, Resize,
+    AccountView, Address, ProgramResult,
     cpi::Signer,
     error::ProgramError,
-    sysvars::{Sysvar, rent::Rent},
+    sysvars::{Sysvar, clock::Clock},
 };
 use pinocchio_token_2022::instructions::CloseAccount;
 
+use crate::constants::OPEN_SLOT_WINDOW;
 use crate::errors::PaymentChannelsError;
 use crate::helpers::accounts::view::{
     ChannelAccountView, ChannelContext, ChannelTokenAccountView, MintAccountView,
@@ -19,9 +20,10 @@ use crate::helpers::accounts::view::{
 };
 #[cfg(feature = "idl")]
 use crate::instructions::helpers::DistributionEntry;
-use crate::instructions::helpers::{DistributionPreimage, Transfer, channel_signer_seeds};
+use crate::instructions::helpers::{
+    DistributionPreimage, Transfer, channel_signer_seeds, deallocate_channel,
+};
 use crate::state::channel::{Channel, ChannelStatus};
-use crate::state::closed_channel::ClosedChannel;
 
 /// Instruction discriminator byte for `distribute`.
 pub const DISCRIMINATOR: u8 = 7;
@@ -53,25 +55,27 @@ impl<'a> DistributeArgs<'a> {
 /// `recipient_token_accounts` in the same order as the active entries in
 /// `DistributeArgs::recipients`; clients append them as remaining accounts.
 pub struct DistributeAccounts<'a> {
-    /// Channel PDA whose accounting state is advanced and, on FINALIZED,
-    /// tombstoned in place at [`AccountDiscriminator::ClosedChannel`] after
-    /// all token movement is complete. The address stays alive forever and
-    /// is never recycled, blocking voucher replay against a re-initialized
-    /// channel at the same seeds.
+    /// Channel PDA whose accounting state is advanced and, on SEALED,
+    /// closed after all token movement is complete: fully deallocated (all
+    /// lamports to `rent_payer`, account reaped) when
+    /// `clock.slot > open_slot + OPEN_SLOT_WINDOW` has already passed,
+    /// otherwise marked [`ChannelStatus::Distributed`] and left for `reclaim`.
+    /// Voucher replay against a reincarnation at the same seeds is blocked
+    /// by the epoch binding, not address reservation.
     pub channel: ChannelAccountView<'a>,
     /// Original payer wallet. Receives the **token** refund (`deposit − settled`)
-    /// on FINALIZED cleanup and must match [`Channel::payer`](crate::Channel::payer).
+    /// on SEALED cleanup and must match [`Channel::payer`](crate::Channel::payer).
     pub payer: PayerAccountView<'a>,
     /// Receives the **SOL rent** (escrow-ATA close + freed PDA delta) on
-    /// FINALIZED cleanup; must match
+    /// SEALED cleanup; must match
     /// [`Channel::rent_payer`](crate::Channel::rent_payer). Not a signer —
     /// receiving lamports needs no signature, so `distribute` stays
     /// permissionless. MAY equal [`Self::payer`].
     pub rent_payer: &'a mut AccountView,
     /// Escrow; source for all splits, the payee implicit remainder, and the
-    /// FINALIZED payer refund.
+    /// SEALED payer refund.
     pub channel_token_account: ChannelTokenAccountView<'a>,
-    /// Payer refund destination. Used **only** by the FINALIZED branch when
+    /// Payer refund destination. Used **only** by the SEALED branch when
     /// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `== 0` and
     /// `deposit > settled`.
     pub payer_token_account: PayerTokenAccountView<'a>,
@@ -81,7 +85,7 @@ pub struct DistributeAccounts<'a> {
     /// in `Transfer`.
     pub payee_token_account: PayeeTokenAccountView<'a>,
     /// Treasury destination: receives the final irreducible residual when the
-    /// channel is finalized and ready to close.
+    /// channel is sealed and ready to close.
     pub treasury_token_account: TreasuryTokenAccountView<'a>,
     /// Mint bound into the channel and used for every token transfer.
     pub mint: MintAccountView<'a>,
@@ -141,13 +145,14 @@ impl<'a> TryFrom<&'a mut [AccountView]> for DistributeAccounts<'a> {
 /// `floor(settled * bps / 10_000) - floor(payout_watermark * bps / 10_000)`.
 /// In `OPEN`, residual dust stays in escrow and is automatically carried into
 /// later cumulative deltas; `payout_watermark` advances to `settled` as an
-/// accounted watermark. From `FINALIZED`, any final irreducible floor residual
-/// is swept to treasury before close. On `FINALIZED`, also refunds the payer the unspent
+/// accounted watermark. From `SEALED`, any final irreducible floor residual
+/// is swept to treasury before close. On `SEALED`, also refunds the payer the unspent
 /// [`deposit`](Channel::deposit) `−` [`settled`](Channel::settled) headroom
-/// (if not already withdrawn), closes the escrow ATA, and tombstones the
-/// Channel PDA in place via discriminator realloc to
-/// [`ClosedChannel`](crate::ClosedChannel) — refunding the rent delta to the
-/// payer while keeping the address program-owned forever.
+/// (if not already withdrawn) and closes the escrow ATA — all immediately;
+/// no token leg is ever slot-gated. The Channel PDA itself is then fully
+/// deallocated in place when `clock.slot > open_slot + OPEN_SLOT_WINDOW`
+/// has already passed, or marked [`ChannelStatus::Distributed`] otherwise,
+/// leaving only the PDA rent for a later permissionless `reclaim`.
 ///
 /// Operator note: in `OPEN`, if a recipient's or the payee's canonical ATA is
 /// unusable (missing/uninitialized, frozen, closed/malformed, carrying an
@@ -155,11 +160,12 @@ impl<'a> TryFrom<&'a mut [AccountView]> for DistributeAccounts<'a> {
 /// nonzero share is redirected to the treasury and `payout_watermark` still
 /// advances — the beneficiary permanently forfeits it (a [`PayoutRedirected`]
 /// event is emitted for off-chain observability). The same redirect applies to
-/// the payer's refund ATA on `FINALIZED`: when a refund is due
+/// the payer's refund ATA on `SEALED`: when a refund is due
 /// ([`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `== 0` and
 /// `deposit > settled`) and that ATA is unusable, the unspent headroom is
-/// forfeited to the treasury — and because finalization tombstones the channel
-/// in the same instruction, there is no later crank to reclaim it. Ensure the
+/// forfeited to the treasury — and because the SEALED `distribute` is
+/// one-shot (the channel is drained and closed in the same instruction),
+/// there is no later crank to recover it. Ensure the
 /// recipient, payee, and payer ATAs exist and are healthy (or withdraw the
 /// payer headroom beforehand) before cranking `distribute`.
 ///
@@ -174,9 +180,10 @@ pub fn process(
     // Owner / discriminator / version checks.
     let ch = Channel::from_account(&accs.channel)?;
 
-    // Status gate.
+    // Status gate. A `Distributed` channel is fully drained and rejects here;
+    // only `reclaim` acts on it.
     let status = ChannelStatus::try_from(ch.status)?;
-    if !matches!(status, ChannelStatus::Open | ChannelStatus::Finalized) {
+    if !matches!(status, ChannelStatus::Open | ChannelStatus::Sealed) {
         return Err(PaymentChannelsError::ChannelNotDistributable.into());
     }
 
@@ -204,7 +211,7 @@ pub fn process(
     let salt = ch.salt();
 
     // Treasury is needed in both OPEN (skip-and-redirect destination) and
-    // FINALIZED (residual sweep + skip-and-redirect). Validate it eagerly;
+    // SEALED (residual sweep + skip-and-redirect). Validate it eagerly;
     // the payee, recipient, and payer ATAs are validated lazily so a
     // poisoned beneficiary cannot brick the whole crank.
     let treasury_token_account = accs.treasury_token_account.check(&channel_ctx.token_ctx)?;
@@ -237,13 +244,15 @@ pub fn process(
     let mint_bytes: [u8; 32] = *ch.mint.as_array();
     let signer_bytes: [u8; 32] = *ch.authorized_signer.as_array();
     let salt_bytes: [u8; 8] = salt.to_le_bytes();
+    let open_slot_bytes: [u8; 8] = ch.open_slot().to_le_bytes();
     let bump_byte: [u8; 1] = [ch.bump];
 
-    // Snapshot accounting fields needed after token CPIs. FINALIZED relies on
-    // this payer-withdrawal gate without writing back before tombstoning.
+    // Snapshot accounting fields needed after token CPIs. SEALED relies on
+    // this payer-withdrawal gate without writing back before closing.
     let deposit = ch.deposit();
     let payer_withdrawn_at = ch.payer_withdrawn_at();
-    let is_finalized = status.is_finalized();
+    let open_slot = ch.open_slot();
+    let is_sealed = status.is_sealed();
 
     // Release the data borrow before token CPIs and the later state update.
     drop(ch);
@@ -254,6 +263,7 @@ pub fn process(
         &mint_bytes,
         &signer_bytes,
         &salt_bytes,
+        &open_slot_bytes,
         &bump_byte,
     );
     let signers = [Signer::from(&signer_seeds)];
@@ -299,9 +309,9 @@ pub fn process(
     )?;
     transfer.push(payee_destination, payee_share)?;
 
-    if is_finalized {
+    if is_sealed {
         // Payer refund branch is one-shot and lazily validated. A payer who
-        // poisons their canonical ATA cannot block OPEN or no-refund FINALIZED
+        // poisons their canonical ATA cannot block OPEN or no-refund SEALED
         // distributions; if a refund is due, the unsupported-account payout is
         // redirected to treasury and the channel can still close.
         if payer_withdrawn_at == 0 && deposit > settled {
@@ -336,9 +346,33 @@ pub fn process(
     // Execute every queued transfer (direct CPI or batched SPL `Batch`).
     transfer.flush()?;
 
-    if is_finalized {
-        // Close escrow ATA and tombstone the channel PDA in place.
-        tombstone_finalized_channel(&mut channel_ctx, accs.rent_payer, &signers)?;
+    if is_sealed {
+        // Close the escrow SPL account; its rent flows to the rent payer.
+        // Every token leg is settled at this point — the channel PDA's own
+        // rent is the only value left at the address.
+        CloseAccount {
+            account: &channel_ctx.channel_token_account,
+            destination: accs.rent_payer,
+            authority: &channel_ctx.channel,
+            token_program: channel_ctx.token_ctx.token_program.address(),
+        }
+        .invoke_signed(&signers)?;
+
+        // The address may only be freed once no earlier-incarnation epoch
+        // can re-enter the open window (see `constants::OPEN_SLOT_WINDOW`).
+        // Fast path: if that gate has already passed, deallocate here and
+        // save the `reclaim` crank. Otherwise mark the channel `Distributed` —
+        // inert to everything except `reclaim`, which recovers the PDA rent
+        // after the gate. Token movement is never delayed either way.
+        let close_unlock = open_slot
+            .checked_add(OPEN_SLOT_WINDOW)
+            .ok_or(ProgramError::ArithmeticOverflow)?;
+        if Clock::get()?.slot > close_unlock {
+            deallocate_channel(&mut channel_ctx.channel, accs.rent_payer)?;
+        } else {
+            let mut ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
+            ch.status = ChannelStatus::Distributed as u8;
+        }
     } else {
         // OPEN: advance the accounted watermark to the settled watermark so
         // future cumulative deltas only cover newly settled amounts.
@@ -346,55 +380,6 @@ pub fn process(
         ch.settlement_mut().mark_as_settled();
     }
 
-    Ok(())
-}
-
-/// Closes the finalized channel's escrow token account and tombstones the
-/// Channel PDA in place: shrinks the data buffer to
-/// [`ClosedChannel::LEN`], writes the [`AccountDiscriminator::ClosedChannel`]
-/// payload, and refunds the freed rent delta to the rent payer. The PDA stays
-/// alive forever — program-owned, non-empty — so the system program rejects
-/// any future `CreateAccount` against the same seeds, blocking voucher
-/// replay against a re-initialized channel.
-fn tombstone_finalized_channel(
-    channel_ctx: &mut ChannelContext<'_>,
-    rent_payer: &mut AccountView,
-    signers: &[Signer<'_, '_>],
-) -> ProgramResult {
-    // Close the escrow SPL account; its rent flows to the rent payer.
-    CloseAccount {
-        account: &channel_ctx.channel_token_account,
-        destination: rent_payer,
-        authority: &channel_ctx.channel,
-        token_program: channel_ctx.token_ctx.token_program.address(),
-    }
-    .invoke_signed(signers)?;
-
-    // Shrink the Channel PDA data from `Channel::LEN` (216) to
-    // `ClosedChannel::LEN` (1).
-    channel_ctx.channel.resize(ClosedChannel::LEN)?;
-
-    // Overwrite the now-truncated buffer with the tombstone header.
-    {
-        let mut data = channel_ctx.channel.try_borrow_mut()?;
-        ClosedChannel::write_into(&mut data)?;
-    }
-
-    // Rebalance lamports to the new rent-exempt minimum and refund the
-    // delta to the rent payer. The PDA must remain rent-exempt so the runtime
-    // never garbage-collects it, which is what keeps the address reserved.
-    let rent = Rent::get()?;
-    let new_min = rent.try_minimum_balance(ClosedChannel::LEN)?;
-    let current = channel_ctx.channel.lamports();
-    let delta = current
-        .checked_sub(new_min)
-        .ok_or(PaymentChannelsError::DistributeBalanceCalculationOverflow)?;
-    let new_rent_payer_bal = rent_payer
-        .lamports()
-        .checked_add(delta)
-        .ok_or(PaymentChannelsError::DistributePayerBalanceOverflow)?;
-    channel_ctx.channel.set_lamports(new_min);
-    rent_payer.set_lamports(new_rent_payer_bal);
     Ok(())
 }
 

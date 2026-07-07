@@ -13,7 +13,11 @@ use crate::state::common::{AccountDiscriminator, CURRENT_CHANNEL_VERSION};
 use crate::state::transmutable::{Transmutable, load, load_mut};
 
 /// PDA seed prefix. Full seeds:
-/// `[CHANNEL_SEED, payer, payee, mint, authorized_signer, salt.to_le_bytes()]`.
+/// `[CHANNEL_SEED, payer, payee, mint, authorized_signer, salt.to_le_bytes(),
+/// open_slot.to_le_bytes()]`. Because `open_slot` is a seed, the channel
+/// address itself is per-incarnation: the open window plus the reclaim gate
+/// guarantee an address can never host two channels, so vouchers bind the
+/// incarnation by binding `channel_id` alone.
 pub const CHANNEL_SEED: &[u8] = b"channel";
 
 /// Current position of a [`Channel`] in the FSM.
@@ -26,25 +30,34 @@ pub const CHANNEL_SEED: &[u8] = b"channel";
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub enum ChannelStatus {
     /// Active channel: accepts `settle`, `topUp`, and the cooperative or
-    /// adversarial transitions that exit toward [`Finalized`](Self::Finalized) /
+    /// adversarial transitions that exit toward [`Sealed`](Self::Sealed) /
     /// [`Closing`](Self::Closing).
     Open = 0,
-    /// Watermark locked. Awaits `distribute` (splits + optional payer
-    /// refund + tombstone) and/or a standalone `withdraw_payer`.
-    Finalized = 1,
+    /// Watermark locked; vouchers can no longer move it. Awaits `distribute`
+    /// (splits + optional payer refund + close) and/or a standalone
+    /// `withdraw_payer`.
+    Sealed = 1,
     /// `requestClose` has started the grace window. Exits to
-    /// [`Finalized`](Self::Finalized) cooperatively (merchant
-    /// `settleAndFinalize` mid-grace) or permissionlessly (`finalize`
+    /// [`Sealed`](Self::Sealed) cooperatively (payee
+    /// `settleAndSeal` mid-grace) or permissionlessly (`seal`
     /// post-grace).
     Closing = 2,
+    /// Terminal, fully-drained state. The SEALED `distribute` has paid
+    /// every token leg and closed the escrow ATA but ran before the reclaim
+    /// gate (`clock.slot > open_slot + OPEN_SLOT_WINDOW`) unlocked, so the
+    /// PDA stays alive — inert to every instruction except `reclaim`, which
+    /// deallocates it (all lamports to `rent_payer`) once the gate passes.
+    /// Keeping the address occupied through the window is what preserves the
+    /// `(address, open_slot)` uniqueness invariant.
+    Distributed = 3,
 }
 
 impl ChannelStatus {
-    /// Whether the channel is in [`Finalized`](Self::Finalized), gating
-    /// refund/sweep/tombstone branches in `distribute`.
+    /// Whether the channel is in [`Sealed`](Self::Sealed), gating
+    /// refund/sweep/close branches in `distribute`.
     #[inline]
-    pub const fn is_finalized(&self) -> bool {
-        matches!(self, Self::Finalized)
+    pub const fn is_sealed(&self) -> bool {
+        matches!(self, Self::Sealed)
     }
 }
 
@@ -54,8 +67,9 @@ impl TryFrom<u8> for ChannelStatus {
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(Self::Open),
-            1 => Ok(Self::Finalized),
+            1 => Ok(Self::Sealed),
             2 => Ok(Self::Closing),
+            3 => Ok(Self::Distributed),
             _ => Err(PaymentChannelsError::InvalidChannelStatus.into()),
         }
     }
@@ -63,7 +77,7 @@ impl TryFrom<u8> for ChannelStatus {
 
 /// Active channel PDA: escrowed deposit, settled watermark, closure
 /// timestamps, distribution commitment, and participant bindings. Fixed
-/// 248-byte layout for zero-copy load.
+/// 256-byte layout for zero-copy load.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaAccount))]
@@ -94,18 +108,18 @@ pub struct Channel {
     /// Cumulative settlement and payout accounting watermarks.
     settlement: SettlementWatermarks,
     /// Set to `now` by `requestClose` (starts grace) and reset to 0 on
-    /// `CLOSING → FINALIZED` via either `settleAndFinalize` (mid-grace)
-    /// or `finalize` (post-grace). Always 0 in `OPEN` and `FINALIZED`;
+    /// `CLOSING → SEALED` via either `settleAndSeal` (mid-grace)
+    /// or `seal` (post-grace). Always 0 in `OPEN` and `SEALED`;
     /// only `CLOSING` carries a live timestamp.
     #[cfg_attr(feature = "idl", codama(type = number(i64)))]
     closure_started_at: [u8; 8],
     /// Unix ts of the payer's one-shot refund via `withdraw_payer`; 0
     /// means not yet withdrawn. Gates the atomic refund branch inside
-    /// `distribute` when it runs from `FINALIZED`.
+    /// `distribute` when it runs from `SEALED`.
     #[cfg_attr(feature = "idl", codama(type = number(i64)))]
     payer_withdrawn_at: [u8; 8],
     /// Per-channel grace duration in seconds, set at `open`. Governs
-    /// the `CLOSING → FINALIZED` unlock for permissionless `finalize`.
+    /// the `CLOSING → SEALED` unlock for permissionless `seal`.
     #[cfg_attr(feature = "idl", codama(type = number(u32)))]
     grace_period: [u8; 4],
     /// SHA-256 commitment to the distribution preimage.
@@ -126,10 +140,19 @@ pub struct Channel {
     /// this mint.
     pub mint: Address,
     /// Funds the PDA + escrow-ATA rent at `open` and receives that SOL back on
-    /// FINALIZED cleanup. Lets a stablecoin-only client avoid holding SOL: the
+    /// SEALED cleanup. Lets a stablecoin-only client avoid holding SOL: the
     /// transaction submitter (typically the operator/fee payer) fronts the rent
     /// and reclaims it at close. MAY equal [`Self::payer`].
     pub rent_payer: Address,
+    /// Client-supplied per-incarnation epoch, window-validated at `open`
+    /// against the Clock (see
+    /// [`OPEN_SLOT_WINDOW`](crate::constants::OPEN_SLOT_WINDOW)). Vouchers
+    /// must bind the same `open_slot`, which is what lets the SEALED
+    /// `distribute` fully deallocate the PDA: any reincarnation at the same
+    /// seeds carries a strictly larger `open_slot`, so old vouchers can
+    /// never settle against it.
+    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    open_slot: [u8; 8],
 }
 
 impl Channel {
@@ -203,12 +226,22 @@ impl Channel {
         self.grace_period = v.to_le_bytes();
     }
 
+    #[inline(always)]
+    pub fn open_slot(&self) -> u64 {
+        u64::from_le_bytes(self.open_slot)
+    }
+    #[inline(always)]
+    pub fn set_open_slot(&mut self, v: u64) {
+        self.open_slot = v.to_le_bytes();
+    }
+
     pub fn find_pda(
         payer: &Address,
         payee: &Address,
         mint: &Address,
         authorized_signer: &Address,
         salt: u64,
+        open_slot: u64,
     ) -> (Address, u8) {
         Address::find_program_address(
             &[
@@ -218,6 +251,7 @@ impl Channel {
                 mint.as_ref(),
                 authorized_signer.as_ref(),
                 &salt.to_le_bytes(),
+                &open_slot.to_le_bytes(),
             ],
             &crate::ID,
         )
@@ -260,6 +294,7 @@ impl Channel {
         authorized_signer: Address,
         mint: Address,
         rent_payer: Address,
+        open_slot: u64,
     ) -> Result<(), ProgramError> {
         // SAFETY: `Channel` is `repr(C)` with alignment 1; load_mut checks length.
         let ch = unsafe { load_mut::<Self>(bytes) }?;
@@ -279,6 +314,7 @@ impl Channel {
         ch.authorized_signer = authorized_signer;
         ch.mint = mint;
         ch.rent_payer = rent_payer;
+        ch.open_slot = open_slot.to_le_bytes();
         Ok(())
     }
 
@@ -310,7 +346,7 @@ unsafe impl Transmutable for Channel {
 }
 
 const _: () = {
-    assert!(Channel::LEN == 248);
+    assert!(Channel::LEN == 256);
 };
 
 /// Cumulative settlement watermarks stored inside [`Channel`].
@@ -445,8 +481,8 @@ mod tests {
     }
 
     #[test]
-    fn size_is_248_bytes() {
-        assert_eq!(core::mem::size_of::<Channel>(), 248);
+    fn size_is_256_bytes() {
+        assert_eq!(core::mem::size_of::<Channel>(), 256);
     }
 
     #[test]
@@ -484,5 +520,30 @@ mod tests {
     fn load_accepts_valid_header() {
         let bytes = valid_bytes();
         assert!(Channel::load(&bytes).is_ok());
+    }
+
+    #[test]
+    fn init_at_writes_open_slot_tail() {
+        let mut bytes = [0u8; Channel::LEN];
+        Channel::init_at(
+            &mut bytes,
+            255,
+            7,
+            1_000,
+            900,
+            [3u8; 32],
+            Address::new_from_array([1u8; 32]),
+            Address::new_from_array([2u8; 32]),
+            Address::new_from_array([4u8; 32]),
+            Address::new_from_array([5u8; 32]),
+            Address::new_from_array([6u8; 32]),
+            424_242,
+        )
+        .unwrap();
+        assert_eq!(bytes[1], CURRENT_CHANNEL_VERSION);
+        // `open_slot` occupies the final 8 bytes of the fixed layout.
+        assert_eq!(&bytes[248..256], &424_242u64.to_le_bytes());
+        let ch = Channel::load(&bytes).unwrap();
+        assert_eq!(ch.open_slot(), 424_242);
     }
 }

@@ -90,7 +90,7 @@ impl<'a> Transfer<'a> {
     }
 
     /// Sum of every non-zero queued amount. Used by `distribute::process` to
-    /// derive the FINALIZED treasury sweep as `escrow_at_entry - scheduled_outflow()`.
+    /// derive the SEALED treasury sweep as `escrow_at_entry - scheduled_outflow()`.
     pub fn scheduled_outflow(&self) -> u64 {
         self.scheduled_outflow
     }
