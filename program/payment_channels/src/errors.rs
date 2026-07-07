@@ -133,6 +133,8 @@ pub enum PaymentChannelsError {
     // ix seal
     #[error("Deadline overflow on grace period")]
     SealDeadlineOverflow = 2200,
+    #[error("Grace period has not elapsed yet")]
+    SealGracePeriodNotElapsed = 2201,
 
     // ix withdraw_payer
     #[error("Payer refund has already been claimed")]
@@ -165,8 +167,8 @@ pub enum PaymentChannelsError {
     DistributePoolOverflow = 2410,
     #[error("Channel rent rebalance calculation underflow")]
     DistributeBalanceCalculationOverflow = 2411,
-    #[error("Payer lamports overflow on rent refund")]
-    DistributePayerBalanceOverflow = 2412,
+    #[error("Rent payer lamports overflow on channel deallocation")]
+    RentPayerBalanceOverflow = 2412,
     #[error("Transfer queue capacity exceeded")]
     DistributeTransferQueueOverflow = 2413,
     #[error("Channel cannot be fully closed until clock.slot > open_slot + OPEN_SLOT_WINDOW")]

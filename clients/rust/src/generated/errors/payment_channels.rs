@@ -154,6 +154,9 @@ pub enum PaymentChannelsError {
     /// 2200 - Deadline overflow on grace period
     #[error("Deadline overflow on grace period")]
     SealDeadlineOverflow = 0x898,
+    /// 2201 - Grace period has not elapsed yet
+    #[error("Grace period has not elapsed yet")]
+    SealGracePeriodNotElapsed = 0x899,
     /// 2300 - Payer refund has already been claimed
     #[error("Payer refund has already been claimed")]
     PayerAlreadyWithdrawn = 0x8FC,
@@ -196,9 +199,9 @@ pub enum PaymentChannelsError {
     /// 2411 - Channel rent rebalance calculation underflow
     #[error("Channel rent rebalance calculation underflow")]
     DistributeBalanceCalculationOverflow = 0x96B,
-    /// 2412 - Payer lamports overflow on rent refund
-    #[error("Payer lamports overflow on rent refund")]
-    DistributePayerBalanceOverflow = 0x96C,
+    /// 2412 - Rent payer lamports overflow on channel deallocation
+    #[error("Rent payer lamports overflow on channel deallocation")]
+    RentPayerBalanceOverflow = 0x96C,
     /// 2413 - Transfer queue capacity exceeded
     #[error("Transfer queue capacity exceeded")]
     DistributeTransferQueueOverflow = 0x96D,

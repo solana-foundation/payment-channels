@@ -36,7 +36,7 @@ pub fn deallocate_channel(
     let new_rent_payer_bal = rent_payer
         .lamports()
         .checked_add(drained)
-        .ok_or(PaymentChannelsError::DistributePayerBalanceOverflow)?;
+        .ok_or(PaymentChannelsError::RentPayerBalanceOverflow)?;
     rent_payer.set_lamports(new_rent_payer_bal);
     channel.set_lamports(0);
 

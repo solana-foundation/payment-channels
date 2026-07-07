@@ -83,7 +83,7 @@ fn mid_grace_rejects() {
 
     expect_custom_err(
         send_seal(&mut svm, &channel, &fee_payer),
-        PaymentChannelsError::InvalidChannelStatus,
+        PaymentChannelsError::SealGracePeriodNotElapsed,
     );
 }
 

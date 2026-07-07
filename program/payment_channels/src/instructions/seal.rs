@@ -51,7 +51,7 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
         .ok_or(PaymentChannelsError::SealDeadlineOverflow)?;
 
     if now < deadline {
-        return Err(PaymentChannelsError::InvalidChannelStatus.into());
+        return Err(PaymentChannelsError::SealGracePeriodNotElapsed.into());
     }
 
     ch.status = ChannelStatus::Sealed as u8;

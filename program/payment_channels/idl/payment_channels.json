@@ -871,6 +871,12 @@
         "name": "sealDeadlineOverflow"
       },
       {
+        "code": 2201,
+        "kind": "errorNode",
+        "message": "Grace period has not elapsed yet",
+        "name": "sealGracePeriodNotElapsed"
+      },
+      {
         "code": 2300,
         "kind": "errorNode",
         "message": "Payer refund has already been claimed",
@@ -957,8 +963,8 @@
       {
         "code": 2412,
         "kind": "errorNode",
-        "message": "Payer lamports overflow on rent refund",
-        "name": "distributePayerBalanceOverflow"
+        "message": "Rent payer lamports overflow on channel deallocation",
+        "name": "rentPayerBalanceOverflow"
       },
       {
         "code": 2413,
