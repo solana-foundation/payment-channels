@@ -18,12 +18,9 @@ pub const CURRENT_CHANNEL_VERSION: u8 = 1;
 pub enum AccountDiscriminator {
     /// Active [`Channel`](crate::Channel) PDA.
     Channel = 1,
-    /// Reserved. The pre-launch deployment tombstoned closed channels with a
-    /// 1-byte account carrying this discriminator; a few such accounts exist
-    /// on mainnet. Channels are now fully deallocated at close (voucher
-    /// replay is blocked by the `open_slot` epoch binding instead), but the
-    /// value stays reserved so no future account shape can alias those
-    /// leftovers.
+    /// Tombstone written by a previous deployment of this program id. The
+    /// program neither creates nor reads these accounts; the byte value is
+    /// kept so no future account shape aliases the on-chain leftovers.
     ClosedChannel = 2,
 }
 

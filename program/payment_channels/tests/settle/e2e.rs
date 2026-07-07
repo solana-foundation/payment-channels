@@ -445,8 +445,7 @@ fn settle_with_invalid_signature_rejects_before_settle_runs() {
 //
 // (Former `settle_voucher_wrong_init_id_rejects` removed: the voucher no
 // longer carries an `open_slot` field, so there is no on-chain epoch check
-// to exercise — error 238 `VoucherEpochMismatch` is reserved and never
-// emitted. `open_slot` is now a channel PDA seed, so every incarnation lives
+// to exercise. `open_slot` is now a channel PDA seed, so every incarnation lives
 // at its own address and a voucher binds its epoch by binding the address in
 // `channel_id`. The equivalent property — "a voucher for a different address
 // rejects with `VoucherChannelMismatch`" — is pinned by

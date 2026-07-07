@@ -93,14 +93,8 @@ pub enum PaymentChannelsError {
     VoucherMessageMismatch = 236,
     #[error("Voucher signer does not match channel authorized_signer")]
     VoucherSignerMismatch = 237,
-    /// Reserved. Formerly returned when a voucher's epoch field disagreed
-    /// with the channel's `open_slot`. `open_slot` is now a PDA seed, so the
-    /// address itself is per-incarnation and the `channel_id` binding covers
-    /// the epoch; the discriminant is retained so error codes stay stable.
-    #[error("Reserved (formerly: voucher epoch does not match channel open_slot)")]
-    VoucherEpochMismatch = 238,
     #[error("Voucher payload magic prefix is invalid")]
-    VoucherBadMagic = 239,
+    VoucherBadMagic = 238,
 
     // distribution validation
     #[error("num_recipients outside [0, 32]")]

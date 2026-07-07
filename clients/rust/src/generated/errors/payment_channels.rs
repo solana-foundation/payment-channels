@@ -112,12 +112,9 @@ pub enum PaymentChannelsError {
     /// 237 - Voucher signer does not match channel authorized_signer
     #[error("Voucher signer does not match channel authorized_signer")]
     VoucherSignerMismatch = 0xED,
-    /// 238 - Reserved (formerly: voucher epoch does not match channel open_slot)
-    #[error("Reserved (formerly: voucher epoch does not match channel open_slot)")]
-    VoucherEpochMismatch = 0xEE,
-    /// 239 - Voucher payload magic prefix is invalid
+    /// 238 - Voucher payload magic prefix is invalid
     #[error("Voucher payload magic prefix is invalid")]
-    VoucherBadMagic = 0xEF,
+    VoucherBadMagic = 0xEE,
     /// 260 - num_recipients outside [0, 32]
     #[error("num_recipients outside [0, 32]")]
     InvalidRecipientCount = 0x104,

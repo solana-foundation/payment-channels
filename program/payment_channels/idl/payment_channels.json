@@ -789,12 +789,6 @@
       {
         "code": 238,
         "kind": "errorNode",
-        "message": "Reserved (formerly: voucher epoch does not match channel open_slot)",
-        "name": "voucherEpochMismatch"
-      },
-      {
-        "code": 239,
-        "kind": "errorNode",
         "message": "Voucher payload magic prefix is invalid",
         "name": "voucherBadMagic"
       },

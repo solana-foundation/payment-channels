@@ -16,6 +16,14 @@ pub const BPS_DENOMINATOR: u32 = 10_000;
 /// — for any client behavior inside the window, including adversarial — and
 /// an old voucher can never match a later incarnation's epoch.
 ///
+/// Operational constraint: because the window is measured from the
+/// client-chosen `open_slot`, the `open` transaction must be signed AND
+/// landed within `K` slots (~60 s) of choosing it. Signing flows slower
+/// than that — hardware wallets, multisigs, cold storage — will miss the
+/// window and must re-derive with a fresh `open_slot` (which, being a PDA
+/// seed, also changes the channel address) and re-sign. Only `open` is
+/// affected; vouchers and every other instruction carry no such deadline.
+///
 /// CONSENSUS-CRITICAL: this constant may only ever be DECREASED in future
 /// program versions. The proof requires the `K` in force at a close to
 /// out-wait the window of any later open at that address; increasing `K`
