@@ -38,7 +38,7 @@ the status byte is interpreted.
 #[repr(u8)]
 pub enum AccountDiscriminator {
     Channel = 1,                    // starts at 1 so zero-init accounts fail load
-    ClosedChannel = 2,              // reserved: 1-byte tombstones left by the pre-launch deployment
+    ClosedChannel = 2,              // tombstones of a previous deployment; not created or read
 }
 ```
 
@@ -256,4 +256,3 @@ The same reasoning applies, less acutely, to the mint authority and to any Token
 - **Uniqueness proof**: an address encodes one fixed `open_slot` in its seeds, so it can only ever be re-derived while `clock.slot − open_slot ≤ OPEN_SLOT_WINDOW`. The address stays occupied — live, then `DISTRIBUTED` — until it is deallocated at some slot `C > open_slot + OPEN_SLOT_WINDOW`; from `C` onward the open window can never re-admit that `open_slot`, so **the address never repeats**: no address ever hosts two channels, for any client behavior inside the window, including adversarial. An old voucher can never settle against a later incarnation — the later incarnation lives at a different address, so the stale voucher fails as wrong-address (`VoucherChannelMismatch`) or targets a deallocated account.
 - **Trade-off**: the open-landing window and the reclaim unlock share the `OPEN_SLOT_WINDOW` budget measured from the supplied slot, but the only thing the wait delays is the operator's recovery of the PDA rent (~2.7M lamports per channel for up to ~60 s). All settlement and payout value moves ungated; back-dating `open_slot` remains available to shorten the rent float at the cost of a narrower landing window. Additionally, every incarnation lives at a fresh address — anything keyed by channel address (metering ledgers, indexers, resume flows) sees a new identifier per incarnation, and reopening a closed relationship means opening a new channel at a new address (the same `salt` is fine); in exchange the voucher needs no epoch field and consumers need no `(channelId, openSlot)` composite key.
 - **`OPEN_SLOT_WINDOW = 150`** (~60 s). Consensus-critical: it may only ever be **decreased** in future program versions — the proof requires the window in force at a close to out-wait the window of any later `open` attempt at that address; enlarging it could let a deallocated address become re-derivable again.
-- **Pre-launch tombstones**: the pre-launch deployment closed channels by tombstoning (1-byte accounts, discriminator 2, rent-exempt, program-owned). A handful of those leftovers exist on mainnet; the program no longer produces or reads them, and their addresses stay permanently reserved.

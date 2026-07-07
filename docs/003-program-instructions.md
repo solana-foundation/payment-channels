@@ -50,7 +50,7 @@ salt(u64 LE) || deposit(u64 LE) || grace_period(u32 LE) || open_slot(u64 LE) || 
 | `salt` | `u64` | PDA disambiguator for concurrent channels with the same payer/payee/mint/signer tuple. |
 | `deposit` | `u64` | Initial escrow amount. Must be non-zero. |
 | `grace_period` | `u32` | Seconds that must elapse after `requestClose` before permissionless `seal`. Must be non-zero. |
-| `open_slot` | `u64` | Client-supplied per-incarnation epoch; a PDA seed, so it is also a derivation input for the channel address. Validated on-chain: `open_slot ≤ clock.slot` and `clock.slot − open_slot ≤ OPEN_SLOT_WINDOW` (150). A back-dated value shortens the terminal-close delay at the cost of a narrower landing window; the current slot maximizes landing safety. |
+| `open_slot` | `u64` | Client-supplied per-incarnation epoch; a PDA seed, so it is also a derivation input for the channel address. Validated on-chain: `open_slot ≤ clock.slot` and `clock.slot − open_slot ≤ OPEN_SLOT_WINDOW` (150). The `open` transaction must therefore be **signed and landed within ~60 s** of choosing the slot — slower signing flows (hardware wallets, multisigs, cold storage) miss the window and must re-derive with a fresh `open_slot` (a new channel address) and re-sign. Back-dating shortens the rent-reclaim delay at the cost of a narrower landing window; the current slot maximizes landing safety. Only `open` carries this deadline. |
 | `recipients` | `Vec<DistributionEntry>` | Distribution preimage. Parsed as `count(u32 LE) || entries`; stored only as `sha256(preimage)` in the channel. |
 
 **Accounts**
@@ -276,8 +276,7 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | 235 | `VoucherOverDeposit` | `voucher.cumulative_amount > Channel.deposit`. |
 | 236 | `VoucherMessageMismatch` | Reserved (formerly: signed message did not equal a caller-supplied voucher copy; the voucher is now read from the precompile message directly). |
 | 237 | `VoucherSignerMismatch` | Ed25519 pubkey does not equal `Channel.authorized_signer`. |
-| 238 | `VoucherEpochMismatch` | Reserved, never emitted (formerly: voucher `open_slot` did not equal `Channel.open_slot`; `open_slot` is now a PDA seed, so the `channel_id` binding covers the epoch — see 232). The discriminant is retained so error codes stay stable. |
-| 239 | `VoucherBadMagic` | Voucher payload does not start with the `[0x56, 0x01]` magic (tag byte `'V'` + format version). |
+| 238 | `VoucherBadMagic` | Voucher payload does not start with the `[0x56, 0x01]` magic (tag byte `'V'` + format version). |
 
 ### Distribution validation
 
