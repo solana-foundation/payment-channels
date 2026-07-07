@@ -52,7 +52,11 @@ pub fn install_lookup_table(
     )
     .expect("install ALT account");
 
-    svm.warp_to_slot(1);
+    // Advance one slot relative to wherever the test's clock already is —
+    // some callers have warped past a channel's close gate and must not be
+    // rewound. Strict `current_slot > last_extended_slot` (= 0) still holds.
+    let next_slot = svm.get_sysvar::<solana_clock::Clock>().slot + 1;
+    svm.warp_to_slot(next_slot);
 
     (
         alt_key,

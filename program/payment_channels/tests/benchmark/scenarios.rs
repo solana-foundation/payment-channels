@@ -8,12 +8,10 @@
 #![allow(clippy::result_large_err)]
 
 use payment_channels_client::instructions::{
-    Distribute, DistributeInstructionArgs, Finalize, RequestClose, SettleAndFinalize,
-    SettleAndFinalizeInstructionArgs, TopUp, TopUpInstructionArgs, WithdrawPayer,
+    Distribute, DistributeInstructionArgs, RequestClose, Seal, SettleAndSeal,
+    SettleAndSealInstructionArgs, TopUp, TopUpInstructionArgs, WithdrawPayer,
 };
-use payment_channels_client::types::{
-    DistributeArgs, DistributionEntry, SettleAndFinalizeArgs, VoucherArgs,
-};
+use payment_channels_client::types::{DistributeArgs, DistributionEntry, SettleAndSealArgs};
 use solana_clock::Clock;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_message::{AddressLookupTableAccount, VersionedMessage, v0::Message as MessageV0};
@@ -28,9 +26,10 @@ use super::fixtures::{
 };
 use super::record;
 use crate::common::{
-    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, SPL_TOKEN, TOKEN_2022, compute_budget_ix,
-    event_authority, mutate_channel, set_clock,
-    voucher::{build_ed25519_ix, voucher_payload},
+    INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, SPL_TOKEN, TOKEN_2022, build_reclaim_ix,
+    compute_budget_ix, event_authority, mutate_channel, set_clock,
+    voucher::{build_ed25519_ix, voucher, voucher_payload},
+    warp_past_close_gate,
 };
 
 const COMPUTE_UNIT_LIMIT: u32 = 1_400_000;
@@ -240,14 +239,14 @@ fn request_close() {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// finalize — CLOSING → FINALIZED post-grace. State mutated directly so we
-// measure finalize alone (not the open + request_close prelude).
+// seal — CLOSING → SEALED post-grace. State mutated directly so we
+// measure seal alone (not the open + request_close prelude).
 
-/// Post-grace `CLOSING → FINALIZED` transition: Clock-read against
+/// Post-grace `CLOSING → SEALED` transition: Clock-read against
 /// `closure_started_at + grace_period`, status flip, `closure_started_at`
 /// cleared. No CPI, permissionless crank.
 #[test]
-fn finalize() {
+fn seal() {
     let mut svm = LiteSVM::load_program();
     let f = fixtures::prepare_channel(&mut svm, 1, SPL_TOKEN);
     fixtures::open_setup(&mut svm, &f, DEFAULT_DEPOSIT);
@@ -259,16 +258,16 @@ fn finalize() {
     });
     set_clock(&mut svm, closure_at + GRACE_PERIOD as i64);
 
-    let ix = Finalize { channel: f.channel }.instruction();
+    let ix = Seal { channel: f.channel }.instruction();
     let tx = build_focal_tx(&svm, &f.payer, &[], &[ix]);
-    record(&mut svm, tx, "finalize").expect("finalize ok");
+    record(&mut svm, tx, "seal").expect("seal ok");
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// settle_and_finalize — merchant-signed transition, with or without voucher
-// across the OPEN → FINALIZED and CLOSING → FINALIZED entry points.
+// settle_and_seal — payee-signed transition, with or without voucher
+// across the OPEN → SEALED and CLOSING → SEALED entry points.
 
-fn run_settle_and_finalize(from_closing: bool, with_voucher: bool, label: &str) {
+fn run_settle_and_seal(from_closing: bool, with_voucher: bool, label: &str) {
     let mut svm = LiteSVM::load_program();
     let f = fixtures::prepare_channel(&mut svm, 1, SPL_TOKEN);
     fixtures::open_setup(&mut svm, &f, DEFAULT_DEPOSIT);
@@ -278,15 +277,11 @@ fn run_settle_and_finalize(from_closing: bool, with_voucher: bool, label: &str) 
             ch.status = fixtures::status::CLOSING;
             ch.set_closure_started_at(closure_at);
         });
-        // Keep `now < closure_at + grace_period` so the CLOSING → FINALIZED
+        // Keep `now < closure_at + grace_period` so the CLOSING → SEALED
         // mid-grace path is exercised.
         set_clock(&mut svm, closure_at + 10);
     }
-    let voucher = VoucherArgs {
-        channel_id: f.channel,
-        cumulative_amount: DEFAULT_SETTLED,
-        expires_at: 0,
-    };
+    let voucher = voucher(f.channel, DEFAULT_SETTLED, 0);
     let ed_ix = with_voucher.then(|| {
         let payload = voucher_payload(&voucher);
         let signature: [u8; 64] = f.authorized_signer.sign_message(&payload).into();
@@ -296,49 +291,49 @@ fn run_settle_and_finalize(from_closing: bool, with_voucher: bool, label: &str) 
             &payload,
         )
     });
-    let saf_ix = SettleAndFinalize {
-        merchant: f.payee.pubkey(),
+    let saf_ix = SettleAndSeal {
+        payee: f.payee.pubkey(),
         channel: f.channel,
         instructions_sysvar: INSTRUCTIONS_SYSVAR,
     }
-    .instruction(SettleAndFinalizeInstructionArgs {
-        settle_and_finalize_args: SettleAndFinalizeArgs {
+    .instruction(SettleAndSealInstructionArgs {
+        settle_and_seal_args: SettleAndSealArgs {
             has_voucher: if with_voucher { 1 } else { 0 },
         },
     });
     let ixs: Vec<_> = ed_ix.into_iter().chain(core::iter::once(saf_ix)).collect();
     let tx = build_focal_tx(&svm, &f.payer, &[&f.payee], &ixs);
-    record(&mut svm, tx, label).expect("settle_and_finalize ok");
+    record(&mut svm, tx, label).expect("settle_and_seal ok");
 }
 
-/// Merchant-signed cooperative close from OPEN: ed25519-verified final
-/// voucher + watermark commit + `OPEN → FINALIZED`. `closure_started_at`
+/// Payee-signed cooperative close from OPEN: ed25519-verified final
+/// voucher + watermark commit + `OPEN → SEALED`. `closure_started_at`
 /// left untouched (was 0).
 #[test]
-fn settle_and_finalize_from_open() {
-    run_settle_and_finalize(false, true, "settle_and_finalize[from_open]");
+fn settle_and_seal_from_open() {
+    run_settle_and_seal(false, true, "settle_and_seal[from_open]");
 }
 
 /// Cooperative close mid-grace from CLOSING. Same wire path as
 /// `from_open`, plus the additional `closure_started_at → 0` write that's
 /// only triggered when the prior status was CLOSING.
 #[test]
-fn settle_and_finalize_from_closing() {
-    run_settle_and_finalize(true, true, "settle_and_finalize[from_closing]");
+fn settle_and_seal_from_closing() {
+    run_settle_and_seal(true, true, "settle_and_seal[from_closing]");
 }
 
 /// `has_voucher == 0` from OPEN: skips the ed25519 precompile + voucher
 /// decode entirely, exercising the lean cooperative-close path.
 #[test]
-fn settle_and_finalize_from_open_no_voucher() {
-    run_settle_and_finalize(false, false, "settle_and_finalize[from_open,voucher=no]");
+fn settle_and_seal_from_open_no_voucher() {
+    run_settle_and_seal(false, false, "settle_and_seal[from_open,voucher=no]");
 }
 
 /// `has_voucher == 0` from CLOSING: same lean path as `from_open_no_voucher`
 /// plus the `closure_started_at → 0` write.
 #[test]
-fn settle_and_finalize_from_closing_no_voucher() {
-    run_settle_and_finalize(true, false, "settle_and_finalize[from_closing,voucher=no]");
+fn settle_and_seal_from_closing_no_voucher() {
+    run_settle_and_seal(true, false, "settle_and_seal[from_closing,voucher=no]");
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -398,16 +393,20 @@ fn distribute_setup_open(
     (svm, f, accts)
 }
 
-fn distribute_setup_finalized(
+fn distribute_setup_sealed(
     num_recipients: usize,
     token_program: solana_pubkey::Pubkey,
 ) -> (LiteSVM, Fixture, fixtures::DistributeAccounts) {
     let (mut svm, f, accts) = distribute_setup_open(num_recipients, token_program);
-    // Mutate to FINALIZED so the focal tx exercises the
-    // treasury-sweep + payer-refund + tombstone branch.
+    // Mutate to SEALED so the focal tx exercises the
+    // treasury-sweep + payer-refund + full-closure branch.
     mutate_channel(&mut svm, &f.channel, |ch| {
-        ch.status = fixtures::status::FINALIZED
+        ch.status = fixtures::status::SEALED
     });
+    // The terminal distribute deallocates the channel PDA and is gated on
+    // `clock.slot > open_slot + OPEN_SLOT_WINDOW`; advance past it so the
+    // focal tx measures the close itself, not a `ChannelCloseTooEarly` abort.
+    warp_past_close_gate(&mut svm, &f.channel);
     (svm, f, accts)
 }
 
@@ -446,20 +445,20 @@ fn distribute_n16_t22_open() {
     run_distribute(&f, &mut svm, &accts, "distribute[n=16,tok=t22,open]");
 }
 
-/// `distribute` from FINALIZED at 1 recipient, SPL. Adds the tombstone
+/// `distribute` from SEALED at 1 recipient, SPL. Adds the close
 /// branch on top of the OPEN baseline: residual sweep to treasury, payer
-/// refund of `deposit - settled`, channel-PDA shrink-to-tombstone.
+/// refund of `deposit - settled`, full channel-PDA deallocation.
 #[test]
 fn distribute_n01_spl_fin() {
-    let (mut svm, f, accts) = distribute_setup_finalized(1, SPL_TOKEN);
+    let (mut svm, f, accts) = distribute_setup_sealed(1, SPL_TOKEN);
     run_distribute(&f, &mut svm, &accts, "distribute[n=01,tok=spl,fin]");
 }
 
-/// `distribute` from FINALIZED at 16 recipients, SPL. Tombstone branch
+/// `distribute` from SEALED at 16 recipients, SPL. Close branch
 /// stacked on the high-end recipient-loop cost.
 #[test]
 fn distribute_n16_spl_fin() {
-    let (mut svm, f, accts) = distribute_setup_finalized(16, SPL_TOKEN);
+    let (mut svm, f, accts) = distribute_setup_sealed(16, SPL_TOKEN);
     run_distribute(&f, &mut svm, &accts, "distribute[n=16,tok=spl,fin]");
 }
 
@@ -532,34 +531,58 @@ fn distribute_n32_t22_open() {
     run_distribute_alt(&f, &mut svm, &accts, "distribute[n=32,tok=t22,open]");
 }
 
-/// `distribute` at 32 recipients on SPL, FINALIZED, via ALT. Tombstone
+/// `distribute` at 32 recipients on SPL, SEALED, via ALT. Close
 /// branch stacked on the protocol-max recipient-loop cost.
 #[test]
 fn distribute_n32_spl_fin() {
-    let (mut svm, f, accts) = distribute_setup_finalized(32, SPL_TOKEN);
+    let (mut svm, f, accts) = distribute_setup_sealed(32, SPL_TOKEN);
     run_distribute_alt(&f, &mut svm, &accts, "distribute[n=32,tok=spl,fin]");
 }
 
-/// `distribute` at 32 recipients on Token-2022, FINALIZED, via ALT. The
+/// `distribute` at 32 recipients on Token-2022, SEALED, via ALT. The
 /// worst-case scenario — protocol-max recipient loop on the heavier token
-/// program plus the tombstone branch (treasury sweep + payer refund +
-/// channel PDA shrink).
+/// program plus the close branch (treasury sweep + payer refund +
+/// channel PDA deallocation).
 #[test]
 fn distribute_n32_t22_fin() {
-    let (mut svm, f, accts) = distribute_setup_finalized(32, TOKEN_2022);
+    let (mut svm, f, accts) = distribute_setup_sealed(32, TOKEN_2022);
     run_distribute_alt(&f, &mut svm, &accts, "distribute[n=32,tok=t22,fin]");
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// withdraw_payer — FINALIZED-only, payer-signed one-shot refund.
+// reclaim — permissionless rent recovery for a Distributed channel PDA.
+
+/// `Distributed → deallocated` rent sweep: status + rent-payer + slot-gate
+/// checks, full lamport drain, account close. Two writable accounts, no
+/// signers, no CPI — the protocol's terminal-ix CU floor. State is planted
+/// directly in `Distributed` so the row measures reclaim alone, not the
+/// distribute prelude.
+#[test]
+fn reclaim() {
+    let mut svm = LiteSVM::load_program();
+    let f = fixtures::prepare_channel(&mut svm, 1, SPL_TOKEN);
+    fixtures::open_setup(&mut svm, &f, DEFAULT_DEPOSIT);
+    mutate_channel(&mut svm, &f.channel, |ch| {
+        ch.status = fixtures::status::DISTRIBUTED;
+    });
+    // The reclaim gate requires `clock.slot > open_slot + OPEN_SLOT_WINDOW`.
+    warp_past_close_gate(&mut svm, &f.channel);
+
+    let ix = build_reclaim_ix(&f.channel, &f.payer.pubkey());
+    let tx = build_focal_tx(&svm, &f.payer, &[], &[ix]);
+    record(&mut svm, tx, "reclaim").expect("reclaim ok");
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// withdraw_payer — SEALED-only, payer-signed one-shot refund.
 
 fn run_withdraw_payer(token_program: solana_pubkey::Pubkey, label: &str) {
     let mut svm = LiteSVM::load_program();
     let f = fixtures::prepare_channel(&mut svm, 1, token_program);
     fixtures::open_setup(&mut svm, &f, DEFAULT_DEPOSIT);
-    // Skip the request_close + grace + finalize prelude — measure withdraw_payer alone.
+    // Skip the request_close + grace + seal prelude — measure withdraw_payer alone.
     mutate_channel(&mut svm, &f.channel, |ch| {
-        ch.status = fixtures::status::FINALIZED;
+        ch.status = fixtures::status::SEALED;
         ch.set_settled(DEFAULT_SETTLED);
     });
     let mut clock = svm.get_sysvar::<Clock>();
@@ -579,7 +602,7 @@ fn run_withdraw_payer(token_program: solana_pubkey::Pubkey, label: &str) {
     record(&mut svm, tx, label).expect("withdraw_payer ok");
 }
 
-/// SPL Token `withdraw_payer` on a FINALIZED channel: one-shot refund of
+/// SPL Token `withdraw_payer` on a SEALED channel: one-shot refund of
 /// `deposit - settled` from escrow to the payer ATA + `payer_withdrawn_at`
 /// stamp.
 #[test]

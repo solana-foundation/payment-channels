@@ -1,16 +1,31 @@
 //! Voucher + Ed25519 precompile helpers shared across litesvm-driven tests.
 //!
 //! The on-chain `VoucherArgs` field order
-//! (`channel_id || cumulative_amount || expires_at`) matches the
-//! Ed25519-signed payload byte-for-byte, so the client's Borsh output IS
-//! the message the precompile must verify.
+//! (`magic || channel_id || cumulative_amount || expires_at`)
+//! matches the Ed25519-signed payload byte-for-byte, so the client's Borsh
+//! output IS the message the precompile must verify.
+//!
+//! There is no epoch field: `open_slot` is a channel PDA seed, so
+//! `channel_id` alone pins the exact incarnation the voucher pays into.
 
-use payment_channels::VOUCHER_PAYLOAD_SIZE;
 use payment_channels::ed25519;
+use payment_channels::{VOUCHER_MAGIC, VOUCHER_PAYLOAD_SIZE};
 use payment_channels_client::types::VoucherArgs;
 use solana_instruction::Instruction;
+use solana_pubkey::Pubkey;
 
 use super::ed25519_program_id;
+
+/// Convenience constructor: fills the domain magic so call sites only carry
+/// the semantic fields.
+pub fn voucher(channel_id: Pubkey, cumulative_amount: u64, expires_at: i64) -> VoucherArgs {
+    VoucherArgs {
+        magic: VOUCHER_MAGIC,
+        channel_id,
+        cumulative_amount,
+        expires_at,
+    }
+}
 
 /// Borsh-serialize a voucher into the byte string the Ed25519 precompile
 /// must verify.

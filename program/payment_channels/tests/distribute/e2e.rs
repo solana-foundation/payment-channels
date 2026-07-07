@@ -8,11 +8,12 @@
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 use payment_channels::PaymentChannelsError;
+use payment_channels::constants::OPEN_SLOT_WINDOW;
 use payment_channels::instructions::distribute::DISCRIMINATOR;
 use payment_channels::instructions::open::DISCRIMINATOR as OPEN_DISCRIMINATOR;
 use payment_channels_client::instructions::{Settle, WithdrawPayer};
 use payment_channels_client::types::{
-    DistributionEntry, PayoutBeneficiary, PayoutRedirected, RedirectReason, VoucherArgs,
+    DistributionEntry, PayoutBeneficiary, PayoutRedirected, RedirectReason,
 };
 use solana_instruction::error::InstructionError;
 use solana_instruction::{AccountMeta, Instruction};
@@ -20,12 +21,11 @@ use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
-use solana_transaction_error::TransactionError;
 use spl_token_2022_interface::state::AccountState;
 
 use super::{
-    MAX_DISTRIBUTION_RECIPIENTS, STATUS_CLOSING, STATUS_FINALIZED, STATUS_OPEN, Split, TOKEN_2022,
-    build_distribute_ix, build_recipients,
+    MAX_DISTRIBUTION_RECIPIENTS, STATUS_CLOSING, STATUS_DISTRIBUTED, STATUS_OPEN, STATUS_SEALED,
+    Split, TOKEN_2022, build_distribute_ix, build_recipients,
 };
 use crate::common::events::events;
 use crate::common::token_2022::{
@@ -42,9 +42,11 @@ use solana_compute_budget_interface::ComputeBudgetInstruction;
 
 use crate::common::{
     ATA_PROGRAM, INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM,
-    SYSVAR_RENT, event_authority, expect_custom_err, expect_instruction_err, mutate_channel,
-    read_channel, set_clock, token_balance, treasury_owner,
-    voucher::{build_ed25519_ix, voucher_payload},
+    SYSVAR_RENT, build_reclaim_ix, channel_open_slot, current_slot, event_authority,
+    expect_custom_err, expect_instruction_err, mutate_channel, read_channel, set_clock,
+    token_balance, treasury_owner,
+    voucher::{build_ed25519_ix, voucher, voucher_payload},
+    warp_past_close_gate,
 };
 
 const GRACE_PERIOD: u32 = 3600;
@@ -79,23 +81,22 @@ fn read_payout_watermark(svm: &LiteSVM, channel: &Pubkey) -> u64 {
     read_channel(svm, channel, |ch| ch.payout_watermark())
 }
 
-/// Rent-exempt lamports for the 1-byte tombstone PDA.
-fn tombstone_rent_lamports() -> u64 {
-    solana_rent::Rent::default().minimum_balance(1)
-}
-
-/// Assert the tombstone shape of a channel PDA after FINALIZED `distribute`:
-/// program-owned, 1-byte data == `ClosedChannel` discriminator, rent-exempt.
-fn assert_tombstone(svm: &LiteSVM, channel: &Pubkey) {
-    let acct = svm.get_account(channel).expect("tombstone exists");
-    assert_eq!(acct.owner, PROGRAM_ID, "tombstone stays program-owned");
-    assert_eq!(acct.data.len(), 1, "tombstone shrinks to 1 byte");
-    assert_eq!(acct.data[0], 2, "discriminator = ClosedChannel");
-    assert_eq!(
-        acct.lamports,
-        tombstone_rent_lamports(),
-        "tombstone rent-exempt at 1 byte",
-    );
+/// Assert the full-closure shape of a channel PDA after SEALED
+/// `distribute`: every lamport moved to the rent payer and the account
+/// reaped by the runtime — `get_account` returns `None`, or an empty
+/// 0-lamport system-owned shell if the runtime kept the entry around.
+fn assert_fully_closed(svm: &LiteSVM, channel: &Pubkey) {
+    match svm.get_account(channel) {
+        None => {}
+        Some(acct) => {
+            assert_eq!(acct.lamports, 0, "closed channel keeps no lamports");
+            assert!(acct.data.is_empty(), "closed channel keeps no data");
+            assert_eq!(
+                acct.owner, SYSTEM_PROGRAM,
+                "closed channel reverts to the system program"
+            );
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -140,12 +141,17 @@ fn setup_funded_svm_with_token_program(
     (payer, mint, payer_ata)
 }
 
+/// `open_slot` is a channel PDA seed: the caller must fix it (the same
+/// value it will pass in the `open` ix args) before the address is known,
+/// and each distinct `open_slot` yields a distinct address.
+#[allow(clippy::too_many_arguments)]
 fn derive_pdas_with_token_program(
     payer: &Pubkey,
     payee: &Pubkey,
     mint: &Pubkey,
     authorized_signer: &Pubkey,
     salt: u64,
+    open_slot: u64,
     token_program: &Pubkey,
 ) -> (Pubkey, Pubkey) {
     let (channel, _) = Pubkey::find_program_address(
@@ -156,6 +162,7 @@ fn derive_pdas_with_token_program(
             mint.as_ref(),
             authorized_signer.as_ref(),
             &salt.to_le_bytes(),
+            &open_slot.to_le_bytes(),
         ],
         &PROGRAM_ID,
     );
@@ -173,6 +180,7 @@ fn open_ix_data_for_splits(
     salt: u64,
     deposit: u64,
     grace_period: u32,
+    open_slot: u64,
     splits: &[Split],
 ) -> Vec<u8> {
     assert!(splits.len() <= MAX_DISTRIBUTION_RECIPIENTS);
@@ -180,6 +188,7 @@ fn open_ix_data_for_splits(
     data.extend_from_slice(&salt.to_le_bytes());
     data.extend_from_slice(&deposit.to_le_bytes());
     data.extend_from_slice(&grace_period.to_le_bytes());
+    data.extend_from_slice(&open_slot.to_le_bytes());
     data.extend_from_slice(&(splits.len() as u32).to_le_bytes());
     for s in splits {
         data.extend_from_slice(s.owner.as_ref());
@@ -201,11 +210,12 @@ fn open_ix_for_splits(
     salt: u64,
     deposit: u64,
     grace_period: u32,
+    open_slot: u64,
     splits: &[Split],
 ) -> Instruction {
     Instruction::new_with_bytes(
         PROGRAM_ID,
-        &open_ix_data_for_splits(salt, deposit, grace_period, splits),
+        &open_ix_data_for_splits(salt, deposit, grace_period, open_slot, splits),
         vec![
             AccountMeta::new(*payer, true),
             AccountMeta::new(*payer, true), // rent_payer (= payer)
@@ -246,12 +256,16 @@ fn open_channel(
 ) -> OpenedChannel {
     let payee = Pubkey::new_unique();
     let authorized_signer = Keypair::new();
+    // `open_slot` (freshest valid value: the current slot) is a PDA seed,
+    // so it is fixed before derivation and the ix must echo the same value.
+    let open_slot = current_slot(svm);
     let (channel, channel_ata) = derive_pdas_with_token_program(
         &payer.pubkey(),
         &payee,
         mint,
         &authorized_signer.pubkey(),
         salt,
+        open_slot,
         token_program,
     );
 
@@ -267,6 +281,7 @@ fn open_channel(
         salt,
         deposit,
         grace_period,
+        open_slot,
         splits,
     );
 
@@ -306,11 +321,9 @@ fn settle_to(
     cumulative_amount: u64,
     expires_at: i64,
 ) {
-    let voucher = VoucherArgs {
-        channel_id: *channel,
-        cumulative_amount,
-        expires_at,
-    };
+    // Vouchers are bound to the incarnation through `channel_id` alone:
+    // `open_slot` is a PDA seed, so the address IS the epoch.
+    let voucher = voucher(*channel, cumulative_amount, expires_at);
     let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = authorized_signer.sign_message(&payload).into();
     let pubkey = authorized_signer.pubkey().to_bytes();
@@ -331,7 +344,7 @@ fn settle_to(
 // Scenario fixture — owns the SVM and every account a `distribute` call
 // needs. `status`, `settlement.payout_watermark`, and `payer_withdrawn_at`
 // are mutated through the typed mutators above pending real
-// `request_close` / `finalize` / `withdraw_payer` instructions.
+// `request_close` / `seal` / `withdraw_payer` instructions.
 struct Scenario {
     svm: LiteSVM,
     fee_payer: Keypair,
@@ -427,6 +440,17 @@ impl Scenario {
 
         if status != STATUS_OPEN {
             mutate_channel(&mut svm, &channel, |ch| ch.status = status);
+        }
+
+        // Scenarios built directly in SEALED exist to run the terminal
+        // distribute. Advance past the reclaim gate
+        // (`clock.slot > open_slot + OPEN_SLOT_WINDOW`) so it takes the fast
+        // path and fully deallocates the channel in the same instruction;
+        // the in-window two-phase path (`Distributed` + later `reclaim`) is
+        // pinned by `sealed_distribute_inside_window_takes_two_phase_path`
+        // and the `reclaim` suite.
+        if status == STATUS_SEALED {
+            warp_past_close_gate(&mut svm, &channel);
         }
 
         let treasury_ata = CreateAssociatedTokenAccount::new(&mut svm, &fee_payer, &mint)
@@ -741,7 +765,7 @@ fn one_bps_share_releases_at_ten_thousand_settled() {
 }
 
 #[test]
-fn finalized_after_open_zero_delta_distribution_refunds_and_sweeps_residual() {
+fn sealed_after_open_zero_delta_distribution_refunds_and_sweeps_residual() {
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 5000,
@@ -755,19 +779,22 @@ fn finalized_after_open_zero_delta_distribution_refunds_and_sweeps_residual() {
     assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
     assert_eq!(token_balance(&s.svm, &s.channel_ata), deposit);
 
-    set_status(&mut s.svm, &s.channel, STATUS_FINALIZED);
+    set_status(&mut s.svm, &s.channel, STATUS_SEALED);
+    // Warp past the reclaim gate so the terminal distribute takes the fast
+    // path and fully deallocates the channel.
+    warp_past_close_gate(&mut s.svm, &s.channel);
     s.send(s.distribute_ix())
-        .expect("finalized zero-delta close ok");
+        .expect("sealed zero-delta close ok");
 
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), settled);
-    assert_tombstone(&s.svm, &s.channel);
+    assert_fully_closed(&s.svm, &s.channel);
 }
 
 #[test]
-fn finalized_after_withdraw_payer_sweeps_open_zero_delta_residual_once() {
+fn sealed_after_withdraw_payer_sweeps_open_zero_delta_residual_once() {
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 5000,
@@ -778,20 +805,23 @@ fn finalized_after_withdraw_payer_sweeps_open_zero_delta_residual_once() {
 
     s.send(s.distribute_ix())
         .expect("open zero-delta distribution ok");
-    set_status(&mut s.svm, &s.channel, STATUS_FINALIZED);
+    set_status(&mut s.svm, &s.channel, STATUS_SEALED);
+    // Warp past the reclaim gate so the terminal distribute takes the fast
+    // path and fully deallocates the channel.
+    warp_past_close_gate(&mut s.svm, &s.channel);
 
     set_clock(&mut s.svm, 1_000_000);
     send_withdraw_payer(&mut s);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
 
     s.send(s.distribute_ix())
-        .expect("finalized residual sweep after withdraw ok");
+        .expect("sealed residual sweep after withdraw ok");
 
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), settled);
-    assert_tombstone(&s.svm, &s.channel);
+    assert_fully_closed(&s.svm, &s.channel);
 }
 
 #[test]
@@ -821,13 +851,16 @@ fn repeated_open_micro_distributes_match_single_final_distribution() {
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 50);
     assert_eq!(token_balance(&s.svm, &s.channel_ata), 0);
 
-    set_status(&mut s.svm, &s.channel, STATUS_FINALIZED);
-    s.send(s.distribute_ix()).expect("finalized distribute ok");
+    set_status(&mut s.svm, &s.channel, STATUS_SEALED);
+    // Warp past the reclaim gate so the terminal distribute takes the fast
+    // path and fully deallocates the channel.
+    warp_past_close_gate(&mut s.svm, &s.channel);
+    s.send(s.distribute_ix()).expect("sealed distribute ok");
 
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 50);
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 50);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
-    assert_tombstone(&s.svm, &s.channel);
+    assert_fully_closed(&s.svm, &s.channel);
 }
 
 #[test]
@@ -864,14 +897,17 @@ fn uneven_three_share_micro_distributes_preserve_cumulative_entitlements() {
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 2);
     assert_eq!(token_balance(&s.svm, &s.channel_ata), 2);
 
-    set_status(&mut s.svm, &s.channel, STATUS_FINALIZED);
-    s.send(s.distribute_ix()).expect("finalized distribute ok");
+    set_status(&mut s.svm, &s.channel, STATUS_SEALED);
+    // Warp past the reclaim gate so the terminal distribute takes the fast
+    // path and fully deallocates the channel.
+    warp_past_close_gate(&mut s.svm, &s.channel);
+    s.send(s.distribute_ix()).expect("sealed distribute ok");
 
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 1);
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 1);
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 2);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 2);
-    assert_tombstone(&s.svm, &s.channel);
+    assert_fully_closed(&s.svm, &s.channel);
 }
 
 #[test]
@@ -908,7 +944,7 @@ fn happy_path_open_splits_spl_token() {
 }
 
 #[test]
-fn happy_path_finalized_tombstone() {
+fn happy_path_sealed_close() {
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 5000,
@@ -921,7 +957,7 @@ fn happy_path_finalized_tombstone() {
         deposit,
         settled,
         payout_watermark,
-        STATUS_FINALIZED,
+        STATUS_SEALED,
     );
 
     let payer_balance_before = s.svm.get_account(&s.payer).unwrap().lamports;
@@ -935,19 +971,19 @@ fn happy_path_finalized_tombstone() {
     assert_eq!(token_balance(&s.svm, &s.payer_ata), 50_000);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
 
-    assert_tombstone(&s.svm, &s.channel);
+    assert_fully_closed(&s.svm, &s.channel);
 
-    // Payer recovers the channel rent delta plus the full escrow ATA rent.
+    // Payer recovers the ENTIRE channel-account balance (full closure) plus
+    // the escrow ATA rent.
     let payer_after = s.svm.get_account(&s.payer).unwrap().lamports;
-    let channel_rent_delta = channel_lamports_before - tombstone_rent_lamports();
     assert_eq!(
         payer_after - payer_balance_before,
-        channel_rent_delta + channel_ata_lamports_before
+        channel_lamports_before + channel_ata_lamports_before
     );
 }
 
 #[test]
-fn happy_path_finalized_tombstone_spl_token() {
+fn happy_path_sealed_close_spl_token() {
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 5000,
@@ -960,16 +996,16 @@ fn happy_path_finalized_tombstone_spl_token() {
         deposit,
         settled,
         payout_watermark,
-        STATUS_FINALIZED,
+        STATUS_SEALED,
         SPL_TOKEN,
     );
 
-    s.send(s.distribute_ix()).expect("spl finalized ok");
+    s.send(s.distribute_ix()).expect("spl sealed ok");
 
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), 50_000);
-    assert_tombstone(&s.svm, &s.channel);
+    assert_fully_closed(&s.svm, &s.channel);
 }
 
 #[test]
@@ -980,14 +1016,8 @@ fn distribute_after_withdraw_payer_skips_payer_refund() {
     }];
     let deposit = 200_000;
     let settled = 150_000;
-    let mut s = Scenario::build_with_token_program(
-        splits,
-        deposit,
-        settled,
-        0,
-        STATUS_FINALIZED,
-        SPL_TOKEN,
-    );
+    let mut s =
+        Scenario::build_with_token_program(splits, deposit, settled, 0, STATUS_SEALED, SPL_TOKEN);
 
     // Advance the clock so withdraw_payer stamps a non-zero payer_withdrawn_at.
     set_clock(&mut s.svm, 1_000_000);
@@ -1004,11 +1034,11 @@ fn distribute_after_withdraw_payer_skips_payer_refund() {
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
-    assert_tombstone(&s.svm, &s.channel);
+    assert_fully_closed(&s.svm, &s.channel);
 }
 
 #[test]
-fn finalized_zero_pool_still_refunds_and_tombstones() {
+fn sealed_zero_pool_still_refunds_and_closes() {
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 1000,
@@ -1016,21 +1046,21 @@ fn finalized_zero_pool_still_refunds_and_tombstones() {
     let deposit = 200_000;
     let settled = 100_000;
     let payout_watermark = 100_000;
-    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_FINALIZED);
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_SEALED);
 
     set_token_balance(&mut s.svm, &s.channel_ata, deposit - settled);
 
-    s.send(s.distribute_ix()).expect("finalized zero pool ok");
+    s.send(s.distribute_ix()).expect("sealed zero pool ok");
 
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
-    assert_tombstone(&s.svm, &s.channel);
+    assert_fully_closed(&s.svm, &s.channel);
 }
 
 #[test]
-fn finalized_sweeps_final_flooring_residual_to_treasury() {
+fn sealed_sweeps_final_flooring_residual_to_treasury() {
     let splits = vec![
         Split {
             owner: Pubkey::new_unique(),
@@ -1044,7 +1074,7 @@ fn finalized_sweeps_final_flooring_residual_to_treasury() {
     let deposit = 250;
     let settled = 150;
     let payout_watermark = 100;
-    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_FINALIZED);
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_SEALED);
 
     set_token_balance(&mut s.svm, &s.channel_ata, deposit - payout_watermark + 1);
 
@@ -1055,11 +1085,11 @@ fn finalized_sweeps_final_flooring_residual_to_treasury() {
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 17);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 2);
-    assert_tombstone(&s.svm, &s.channel);
+    assert_fully_closed(&s.svm, &s.channel);
 }
 
 #[test]
-fn happy_path_finalized_already_withdrawn() {
+fn happy_path_sealed_already_withdrawn() {
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 5000,
@@ -1067,7 +1097,7 @@ fn happy_path_finalized_already_withdrawn() {
     let deposit = 200_000;
     let settled = 150_000;
     let payout_watermark = 0;
-    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_FINALIZED);
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_SEALED);
 
     set_payer_withdrawn_at(&mut s.svm, &s.channel, 1_700_000_000);
     set_token_balance(&mut s.svm, &s.channel_ata, settled - payout_watermark);
@@ -1081,13 +1111,12 @@ fn happy_path_finalized_already_withdrawn() {
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
-    assert_tombstone(&s.svm, &s.channel);
+    assert_fully_closed(&s.svm, &s.channel);
 
     let payer_after = s.svm.get_account(&s.payer).unwrap().lamports;
-    let channel_rent_delta = channel_lamports_before - tombstone_rent_lamports();
     assert_eq!(
         payer_after - payer_balance_before,
-        channel_rent_delta + channel_ata_lamports_before
+        channel_lamports_before + channel_ata_lamports_before
     );
 }
 
@@ -1364,29 +1393,29 @@ fn reassigned_recipient_ata_owner_redirects_share_to_treasury_in_open() {
     );
 }
 
-// A poisoned recipient must not block the finalized tombstone. The
+// A poisoned recipient must not block the sealed close. The
 // reassigned-owner share forfeits to treasury and the channel closes, draining
-// the escrow and tombstoning the PDA.
+// the escrow and deallocating the PDA.
 #[test]
-fn reassigned_recipient_ata_owner_redirects_and_tombstones_in_finalized() {
+fn reassigned_recipient_ata_owner_redirects_and_closes_in_sealed() {
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 5000,
     }];
     let deposit = 200_000;
     let settled = 150_000;
-    let mut s = Scenario::build(splits, deposit, settled, 0, STATUS_FINALIZED);
+    let mut s = Scenario::build(splits, deposit, settled, 0, STATUS_SEALED);
     let poisoned_owner = s.splits[0].owner;
     set_token_account_owner(&mut s.svm, &s.recipient_atas[0], &Pubkey::new_unique());
 
     let meta = s
         .send(s.distribute_ix())
-        .expect("reassigned recipient ATA owner forfeits its share; tombstone completes");
+        .expect("reassigned recipient ATA owner forfeits its share; close completes");
 
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 75_000);
-    assert_tombstone(&s.svm, &s.channel);
+    assert_fully_closed(&s.svm, &s.channel);
 
     assert_eq!(
         events::<PayoutRedirected>(&meta),
@@ -1439,28 +1468,28 @@ fn reassigned_payee_ata_owner_redirects_remainder_to_treasury_in_open() {
 }
 
 // A payer that reassigns its canonical refund ATA owner via
-// `SetAuthority(AccountOwner)` must not be able to brick the finalized close.
+// `SetAuthority(AccountOwner)` must not be able to brick the sealed close.
 // The refund forfeits to treasury (`ReassignedAuthority`) and the channel
-// tombstones; the recipient and payee legs are paid normally.
+// closes; the recipient and payee legs are paid normally.
 #[test]
-fn reassigned_payer_ata_owner_redirects_refund_to_treasury_in_finalized() {
+fn reassigned_payer_ata_owner_redirects_refund_to_treasury_in_sealed() {
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 5000,
     }];
     let deposit = 200_000;
     let settled = 150_000;
-    let mut s = Scenario::build(splits, deposit, settled, 0, STATUS_FINALIZED);
+    let mut s = Scenario::build(splits, deposit, settled, 0, STATUS_SEALED);
     set_token_account_owner(&mut s.svm, &s.payer_ata, &Pubkey::new_unique());
 
     let meta = s
         .send(s.distribute_ix())
-        .expect("reassigned payer ATA owner forfeits refund; tombstone completes");
+        .expect("reassigned payer ATA owner forfeits refund; close completes");
 
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), deposit - settled);
-    assert_tombstone(&s.svm, &s.channel);
+    assert_fully_closed(&s.svm, &s.channel);
 
     assert_eq!(
         events::<PayoutRedirected>(&meta),
@@ -1475,24 +1504,24 @@ fn reassigned_payer_ata_owner_redirects_refund_to_treasury_in_finalized() {
 }
 
 #[test]
-fn frozen_payer_ata_redirects_refund_to_treasury_in_finalized() {
+fn frozen_payer_ata_redirects_refund_to_treasury_in_sealed() {
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 5000,
     }];
     let deposit = 200_000;
     let settled = 150_000;
-    let mut s = Scenario::build(splits, deposit, settled, 0, STATUS_FINALIZED);
+    let mut s = Scenario::build(splits, deposit, settled, 0, STATUS_SEALED);
     set_token_account_state(&mut s.svm, &s.payer_ata, AccountState::Frozen);
 
     let meta = s
         .send(s.distribute_ix())
-        .expect("frozen payer ATA forfeits refund; tombstone completes");
+        .expect("frozen payer ATA forfeits refund; close completes");
 
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), deposit - settled);
-    assert_tombstone(&s.svm, &s.channel);
+    assert_fully_closed(&s.svm, &s.channel);
 
     assert_eq!(
         events::<PayoutRedirected>(&meta),
@@ -1550,7 +1579,7 @@ fn zero_share_poisoned_payee_does_not_block_recipient_only_open_distribute() {
 }
 
 #[test]
-fn zero_share_poisoned_payee_does_not_block_recipient_only_finalized_distribute() {
+fn zero_share_poisoned_payee_does_not_block_recipient_only_sealed_distribute() {
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 10_000,
@@ -1558,17 +1587,17 @@ fn zero_share_poisoned_payee_does_not_block_recipient_only_finalized_distribute(
     let deposit = 200_000;
     let settled = 100_000;
     let payout_watermark = 0;
-    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_FINALIZED);
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_SEALED);
     add_account_extension(&mut s.svm, &s.payee_ata, EXT_MEMO_TRANSFER, 1);
 
     s.send(s.distribute_ix())
-        .expect("zero-share poisoned payee must not block finalized close");
+        .expect("zero-share poisoned payee must not block sealed close");
 
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), settled);
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
-    assert_tombstone(&s.svm, &s.channel);
+    assert_fully_closed(&s.svm, &s.channel);
 }
 
 #[test]
@@ -1594,7 +1623,7 @@ fn poisoned_payer_ata_does_not_affect_open_distribute() {
 }
 
 #[test]
-fn poisoned_payer_ata_redirects_refund_to_treasury_in_finalized_with_refund() {
+fn poisoned_payer_ata_redirects_refund_to_treasury_in_sealed_with_refund() {
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 5000,
@@ -1602,17 +1631,17 @@ fn poisoned_payer_ata_redirects_refund_to_treasury_in_finalized_with_refund() {
     let deposit = 200_000;
     let settled = 150_000;
     let payout_watermark = 0;
-    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_FINALIZED);
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_SEALED);
     add_account_extension(&mut s.svm, &s.payer_ata, EXT_MEMO_TRANSFER, 1);
 
     s.send(s.distribute_ix())
-        .expect("poisoned payer ATA forfeits refund; tombstone completes");
+        .expect("poisoned payer ATA forfeits refund; close completes");
 
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), deposit - settled);
-    assert_tombstone(&s.svm, &s.channel);
+    assert_fully_closed(&s.svm, &s.channel);
 }
 
 #[test]
@@ -1968,11 +1997,11 @@ fn happy_path_spl_token_max_recipients_plus_payee() {
 }
 
 #[test]
-fn happy_path_spl_token_finalized_max_recipients_plus_payee_refund_sweep() {
-    // Worst-case FINALIZED distribute: every payout phase present —
+fn happy_path_spl_token_sealed_max_recipients_plus_payee_refund_sweep() {
+    // Worst-case SEALED distribute: every payout phase present —
     // N=32 recipients + payee + payer refund + sweep = 35 logical slots
     // across 5 chunks (8+8+8+8+3), followed by a standalone escrow-close CPI
-    // in the shared tombstone tail.
+    // in the shared close tail.
     const N: usize = MAX_DISTRIBUTION_RECIPIENTS;
     const RECIPIENT_BPS: u16 = 100;
     let splits: Vec<Split> = (0..N)
@@ -1989,7 +2018,7 @@ fn happy_path_spl_token_finalized_max_recipients_plus_payee_refund_sweep() {
         deposit,
         settled,
         payout_watermark,
-        STATUS_FINALIZED,
+        STATUS_SEALED,
         SPL_TOKEN,
     );
 
@@ -1999,7 +2028,7 @@ fn happy_path_spl_token_finalized_max_recipients_plus_payee_refund_sweep() {
     let channel_ata_lamports_before = s.svm.get_account(&s.channel_ata).unwrap().lamports;
 
     s.send_v0_distribute(s.recipient_atas.clone(), None)
-        .expect("spl finalized max recipients ok");
+        .expect("spl sealed max recipients ok");
 
     let expected_per_recipient: u64 = 999;
     let expected_payee: u64 = 67_999;
@@ -2021,19 +2050,19 @@ fn happy_path_spl_token_finalized_max_recipients_plus_payee_refund_sweep() {
         expected_treasury_sweep
     );
 
-    assert_tombstone(&s.svm, &s.channel);
+    assert_fully_closed(&s.svm, &s.channel);
 
-    // Payer recovers channel-rent delta + escrow-ATA rent on the SOL leg.
+    // Payer recovers the entire channel-account balance + escrow-ATA rent on
+    // the SOL leg.
     let payer_sol_after = s.svm.get_account(&s.payer).unwrap().lamports;
-    let channel_rent_delta = channel_lamports_before - tombstone_rent_lamports();
     assert_eq!(
         payer_sol_after - payer_sol_before,
-        channel_rent_delta + channel_ata_lamports_before
+        channel_lamports_before + channel_ata_lamports_before
     );
 }
 
 #[test]
-fn spl_token_finalized_zero_pool_still_refunds_and_tombstones() {
+fn spl_token_sealed_zero_pool_still_refunds_and_closes() {
     // pool == 0: recipient slots zero-skip and payee has no payable amount;
     // only payer refund, sweep, and close phases run.
     let splits = vec![Split {
@@ -2048,25 +2077,24 @@ fn spl_token_finalized_zero_pool_still_refunds_and_tombstones() {
         deposit,
         settled,
         payout_watermark,
-        STATUS_FINALIZED,
+        STATUS_SEALED,
         SPL_TOKEN,
     );
 
     // Simulate the post-OPEN escrow balance: just the refund headroom left.
     set_token_balance(&mut s.svm, &s.channel_ata, deposit - settled);
 
-    s.send(s.distribute_ix())
-        .expect("spl finalized zero pool ok");
+    s.send(s.distribute_ix()).expect("spl sealed zero pool ok");
 
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
-    assert_tombstone(&s.svm, &s.channel);
+    assert_fully_closed(&s.svm, &s.channel);
 }
 
 #[test]
-fn spl_token_finalized_already_withdrawn() {
+fn spl_token_sealed_already_withdrawn() {
     // `payer_withdrawn_at != 0` skips payer refund when pool > 0.
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
@@ -2080,7 +2108,7 @@ fn spl_token_finalized_already_withdrawn() {
         deposit,
         settled,
         payout_watermark,
-        STATUS_FINALIZED,
+        STATUS_SEALED,
         SPL_TOKEN,
     );
 
@@ -2091,20 +2119,20 @@ fn spl_token_finalized_already_withdrawn() {
     set_token_balance(&mut s.svm, &s.channel_ata, settled - payout_watermark);
 
     s.send(s.distribute_ix())
-        .expect("spl finalized already-withdrawn ok");
+        .expect("spl sealed already-withdrawn ok");
 
     assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
     assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
     assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
     assert_eq!(token_balance(&s.svm, &s.treasury_ata), 0);
-    assert_tombstone(&s.svm, &s.channel);
+    assert_fully_closed(&s.svm, &s.channel);
 }
 
 #[test]
-fn spl_token_finalized_chunk_boundary() {
-    // N=7 recipients + payee = 8 exactly fills one chunk; the FINALIZED
+fn spl_token_sealed_chunk_boundary() {
+    // N=7 recipients + payee = 8 exactly fills one chunk; the SEALED
     // tail (refund + sweep) spills into a second chunk of 2, followed by a
-    // standalone escrow-close CPI in the shared tombstone tail.
+    // standalone escrow-close CPI in the shared close tail.
     const N: usize = 7;
     const RECIPIENT_BPS: u16 = 1000;
     let splits: Vec<Split> = (0..N)
@@ -2121,7 +2149,7 @@ fn spl_token_finalized_chunk_boundary() {
         deposit,
         settled,
         payout_watermark,
-        STATUS_FINALIZED,
+        STATUS_SEALED,
         SPL_TOKEN,
     );
 
@@ -2131,7 +2159,7 @@ fn spl_token_finalized_chunk_boundary() {
     let channel_ata_lamports_before = s.svm.get_account(&s.channel_ata).unwrap().lamports;
 
     s.send(s.distribute_ix())
-        .expect("spl finalized chunk-boundary ok");
+        .expect("spl sealed chunk-boundary ok");
 
     let expected_per_recipient: u64 = 9_999;
     let expected_payee: u64 = 29_999;
@@ -2151,18 +2179,17 @@ fn spl_token_finalized_chunk_boundary() {
         token_balance(&s.svm, &s.treasury_ata),
         expected_treasury_sweep
     );
-    assert_tombstone(&s.svm, &s.channel);
+    assert_fully_closed(&s.svm, &s.channel);
 
     let payer_sol_after = s.svm.get_account(&s.payer).unwrap().lamports;
-    let channel_rent_delta = channel_lamports_before - tombstone_rent_lamports();
     assert_eq!(
         payer_sol_after - payer_sol_before,
-        channel_rent_delta + channel_ata_lamports_before
+        channel_lamports_before + channel_ata_lamports_before
     );
 }
 
 #[test]
-fn token_2022_max_recipients_plus_payee_finalized() {
+fn token_2022_max_recipients_plus_payee_sealed() {
     // Token-2022 uses direct TransferChecked CPIs (no SPL Batch); worst case
     // is 32 recipients + payee + refund + sweep = 35 CPIs before close.
     const N: usize = MAX_DISTRIBUTION_RECIPIENTS;
@@ -2181,12 +2208,12 @@ fn token_2022_max_recipients_plus_payee_finalized() {
         deposit,
         settled,
         payout_watermark,
-        STATUS_FINALIZED,
+        STATUS_SEALED,
         TOKEN_2022,
     );
 
     let escrow_before = token_balance(&s.svm, &s.channel_ata);
-    // Token-2022 FINALIZED at N=32 needs to increase compute budget limit; default CU cap (200k) is too low.
+    // Token-2022 SEALED at N=32 needs to increase compute budget limit; default CU cap (200k) is too low.
     s.send_v0_distribute(s.recipient_atas.clone(), Some(MAX_COMPUTE_UNIT_LIMIT))
         .expect("token-2022 max recipients ok");
 
@@ -2206,7 +2233,7 @@ fn token_2022_max_recipients_plus_payee_finalized() {
         token_balance(&s.svm, &s.treasury_ata),
         expected_treasury_sweep
     );
-    assert_tombstone(&s.svm, &s.channel);
+    assert_fully_closed(&s.svm, &s.channel);
 }
 
 #[test]
@@ -2232,17 +2259,18 @@ fn spl_token_legacy_tx_rejects_max_recipients() {
 }
 
 // ===========================================================================
-// LiteSVM-only tombstone tests. Mollusk variants for `distribute` / `top_up`
-// rejection on a tombstoned channel live in their respective `integration.rs`
-// suites; these scenarios exercise behavior that needs a real SVM:
+// LiteSVM-only full-closure lifecycle tests. These scenarios exercise
+// behavior that needs a real SVM:
 //   - the Ed25519 precompile + `Instructions` sysvar (settle),
-//   - the system program's `CreateAccount` rejection path through `open`'s
-//     CPI chain (across-tx reopen),
-//   - and end-of-tx rollback semantics (same-tx reopen).
+//   - the system program's Transfer+Allocate+Assign path through `open`'s
+//     CPI chain (a fresh incarnation opened after full closure),
+//   - and the Clock-driven close gate.
 
-/// Drive a Scenario to FINALIZED with one 50/50 split, then run distribute
-/// to produce the tombstone. Returns the now-tombstoned scenario.
-fn finalized_then_tombstoned() -> Scenario {
+/// Drive a Scenario to SEALED with one 50/50 split, then run the terminal
+/// distribute to fully deallocate the channel PDA. Returns the scenario plus
+/// the closed incarnation's `open_slot` (a PDA seed of the now-dead
+/// `s.channel` address) for reincarnation tests.
+fn sealed_then_fully_closed() -> (Scenario, u64) {
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 5000,
@@ -2250,68 +2278,100 @@ fn finalized_then_tombstoned() -> Scenario {
     let deposit = 200_000;
     let settled = 150_000;
     let payout_watermark = 0;
-    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_FINALIZED);
+    let mut s = Scenario::build(splits, deposit, settled, payout_watermark, STATUS_SEALED);
+    let closed_epoch = channel_open_slot(&s.svm, &s.channel);
     s.send(s.distribute_ix()).expect("distribute ok");
-    assert_tombstone(&s.svm, &s.channel);
-    s
+    assert_fully_closed(&s.svm, &s.channel);
+    (s, closed_epoch)
+}
+
+/// `[ed25519, settle]` pair for an explicit voucher and settle target —
+/// unlike `settle_to`, the voucher's `channel_id` and the targeted account
+/// can diverge, so callers can present a dead incarnation's voucher against
+/// a live channel (or settle a dead address).
+fn settle_pair_for(
+    s: &Scenario,
+    voucher: &payment_channels_client::types::VoucherArgs,
+    target: &Pubkey,
+) -> [Instruction; 2] {
+    let payload = voucher_payload(voucher);
+    let signature: [u8; 64] = s.authorized_signer.sign_message(&payload).into();
+    let pubkey = s.authorized_signer.pubkey().to_bytes();
+    [
+        build_ed25519_ix(&pubkey, &signature, &payload),
+        build_settle_ix(target),
+    ]
 }
 
 #[test]
-fn settle_on_tombstoned_channel_rejects() {
-    let mut s = finalized_then_tombstoned();
+fn settle_on_closed_channel_rejects() {
+    let (mut s, _closed_epoch) = sealed_then_fully_closed();
 
-    // A voucher that would be valid against a fresh channel at these seeds:
-    // strictly monotonic cumulative_amount, no expiry. `Channel::load_mut`
-    // length-gates the 1-byte tombstone buffer before any voucher logic runs.
-    let voucher = VoucherArgs {
-        channel_id: s.channel,
-        cumulative_amount: 1,
-        expires_at: 0,
-    };
-    let payload = voucher_payload(&voucher);
-    let signature: [u8; 64] = s.authorized_signer.sign_message(&payload).into();
-    let pubkey = s.authorized_signer.pubkey().to_bytes();
-    let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
-    let settle_ix = build_settle_ix(&s.channel);
+    // A voucher that was valid against the closed incarnation. The PDA is
+    // fully deallocated, so the runtime hands settle a 0-lamport system-owned
+    // shell and the channel owner check fails before any voucher logic runs.
+    let voucher = voucher(s.channel, 1, 0);
+    let ixs = settle_pair_for(&s, &voucher, &s.channel);
 
     let blockhash = s.svm.latest_blockhash();
     let tx = Transaction::new_signed_with_payer(
-        &[ed25519_ix, settle_ix],
+        &ixs,
         Some(&s.fee_payer.pubkey()),
         &[&s.fee_payer],
         blockhash,
     );
     expect_instruction_err(
         s.svm.send_transaction(tx),
-        InstructionError::InvalidAccountData,
+        InstructionError::InvalidAccountOwner,
     );
-    assert_tombstone(&s.svm, &s.channel);
+    assert_fully_closed(&s.svm, &s.channel);
 }
 
 #[test]
-fn reopen_at_same_seeds_rejects_across_tx() {
-    let mut s = finalized_then_tombstoned();
+fn reopen_same_tuple_after_close_lands_at_new_address_and_old_voucher_dies() {
+    let (mut s, closed_epoch) = sealed_then_fully_closed();
+    let old_channel = s.channel;
 
-    // Attempt a fresh `open` on the same (payer, payee, mint, signer, salt)
-    // tuple in a new transaction. The system program's `CreateAccount`
-    // rejects because the PDA is non-empty + program-owned, surfacing as
-    // `SystemError::AccountAlreadyInUse` (= 0) propagated through `open`'s
-    // CPI as `InstructionError::Custom(0)`.
+    // The SEALED close refunded `deposit - settled` (= 50_000) tokens to
+    // the payer ATA; redeposit part of it into the fresh incarnation.
+    let new_deposit: u64 = 40_000;
+
+    // (a) A fresh `open` on the same (payer, payee, mint, signer, salt)
+    // tuple must succeed — but `open_slot` is a PDA seed, so the new
+    // incarnation lands at a NEW address by construction. The close gate
+    // forced `clock.slot > closed_epoch + OPEN_SLOT_WINDOW`, so the old
+    // address (whose seeds carry `closed_epoch`) can never be re-derived:
+    // "reopen at the same address" is impossible, period.
+    let reopen_slot = current_slot(&s.svm);
+    assert!(reopen_slot > closed_epoch + OPEN_SLOT_WINDOW);
+    let (new_channel, new_channel_ata) = derive_pdas_with_token_program(
+        &s.payer,
+        &s.payee,
+        &s.mint,
+        &s.authorized_signer.pubkey(),
+        DEFAULT_SALT,
+        reopen_slot,
+        &s.token_program,
+    );
+    assert_ne!(
+        new_channel, old_channel,
+        "same tuple + new open_slot seed = new address"
+    );
     let open_ix = open_ix_for_splits(
         &s.payer,
         &s.payee,
         &s.mint,
         &s.authorized_signer.pubkey(),
-        &s.channel,
+        &new_channel,
         &s.payer_ata,
-        &s.channel_ata,
+        &new_channel_ata,
         &s.token_program,
         DEFAULT_SALT,
-        1, // tiny deposit; ix fails before this matters
+        new_deposit,
         GRACE_PERIOD,
+        reopen_slot,
         &s.splits,
     );
-
     let blockhash = s.svm.latest_blockhash();
     let tx = Transaction::new_signed_with_payer(
         &[open_ix],
@@ -2319,77 +2379,236 @@ fn reopen_at_same_seeds_rejects_across_tx() {
         &[&s.payer_keypair],
         blockhash,
     );
-    expect_instruction_err(s.svm.send_transaction(tx), InstructionError::Custom(0));
-    // Tombstone bytes preserved — no partial reinit happened.
-    assert_tombstone(&s.svm, &s.channel);
+    s.svm
+        .send_transaction(tx)
+        .expect("reopen of the same tuple after full close should succeed");
+    assert_eq!(channel_open_slot(&s.svm, &new_channel), reopen_slot);
+    read_channel(&s.svm, &new_channel, |ch| {
+        assert_eq!(ch.status, STATUS_OPEN, "fresh incarnation starts OPEN");
+        assert_eq!(ch.deposit(), new_deposit);
+        assert_eq!(ch.settled(), 0, "watermark does not carry over");
+    });
+    // The old address stays a dead shell — nothing was resurrected there.
+    assert_fully_closed(&s.svm, &old_channel);
+
+    // (b) A voucher minted for the DEAD incarnation presented against the
+    // NEW channel: correctly signed, monotonic, under deposit — but its
+    // `channel_id` is the old address, and since `open_slot` rides in the
+    // seeds, that address binding IS the epoch check.
+    let stale = voucher(old_channel, 1_000, 0);
+    let ixs = settle_pair_for(&s, &stale, &new_channel);
+    s.svm.expire_blockhash();
+    let blockhash = s.svm.latest_blockhash();
+    let tx = Transaction::new_signed_with_payer(
+        &ixs,
+        Some(&s.fee_payer.pubkey()),
+        &[&s.fee_payer],
+        blockhash,
+    );
+    expect_custom_err(
+        s.svm.send_transaction(tx),
+        PaymentChannelsError::VoucherChannelMismatch,
+    );
+    read_channel(&s.svm, &new_channel, |ch| {
+        assert_eq!(
+            ch.settled(),
+            0,
+            "dead incarnation's voucher must not settle"
+        );
+    });
+
+    // (c) Settling the OLD address with its own (channel-matching) voucher
+    // is equally dead: the account is a 0-lamport system-owned shell, so
+    // the owner check fails before any voucher logic runs.
+    let ixs = settle_pair_for(&s, &stale, &old_channel);
+    s.svm.expire_blockhash();
+    let blockhash = s.svm.latest_blockhash();
+    let tx = Transaction::new_signed_with_payer(
+        &ixs,
+        Some(&s.fee_payer.pubkey()),
+        &[&s.fee_payer],
+        blockhash,
+    );
+    expect_instruction_err(
+        s.svm.send_transaction(tx),
+        InstructionError::InvalidAccountOwner,
+    );
+
+    // (d) A voucher bound to the new address settles normally.
+    settle_to(
+        &mut s.svm,
+        &s.fee_payer,
+        &new_channel,
+        &s.authorized_signer,
+        2_000,
+        0,
+    );
+    read_channel(&s.svm, &new_channel, |ch| {
+        assert_eq!(ch.settled(), 2_000, "live incarnation's voucher settles");
+    });
 }
 
 #[test]
-fn reopen_at_same_seeds_rejects_same_tx() {
-    // Bundle distribute + open in a single tx. distribute would tombstone
-    // the channel mid-tx; open with identical seeds must still fail before
-    // commit, otherwise the runtime's tx-rollback is the only thing
-    // protecting against in-tx voucher replay against a fresh channel.
+fn reopen_after_close_unaffected_by_lamports_donated_to_dead_address() {
+    let (mut s, _closed_epoch) = sealed_then_fully_closed();
+    let old_channel = s.channel;
+
+    // Griefing attempt: park lamports on the dead address between close and
+    // the next open. Since `open_slot` is a PDA seed, the fresh incarnation
+    // lands at a NEW address anyway — the donation cannot even touch it.
+    // (Prefund tolerance of the *live* target address is pinned separately
+    // by `open::e2e::open_succeeds_with_prefunded_channel_pda_lamports`.)
+    let donation: u64 = 1_000_000;
+    s.svm
+        .airdrop(&old_channel, donation)
+        .expect("donate to dead channel address");
+
+    let new_deposit: u64 = 40_000;
+    let reopen_slot = current_slot(&s.svm);
+    let (new_channel, new_channel_ata) = derive_pdas_with_token_program(
+        &s.payer,
+        &s.payee,
+        &s.mint,
+        &s.authorized_signer.pubkey(),
+        DEFAULT_SALT,
+        reopen_slot,
+        &s.token_program,
+    );
+    assert_ne!(new_channel, old_channel);
+    let open_ix = open_ix_for_splits(
+        &s.payer,
+        &s.payee,
+        &s.mint,
+        &s.authorized_signer.pubkey(),
+        &new_channel,
+        &s.payer_ata,
+        &new_channel_ata,
+        &s.token_program,
+        DEFAULT_SALT,
+        new_deposit,
+        GRACE_PERIOD,
+        reopen_slot,
+        &s.splits,
+    );
+    let blockhash = s.svm.latest_blockhash();
+    let tx = Transaction::new_signed_with_payer(
+        &[open_ix],
+        Some(&s.payer_keypair.pubkey()),
+        &[&s.payer_keypair],
+        blockhash,
+    );
+    s.svm
+        .send_transaction(tx)
+        .expect("open of the fresh incarnation ignores the dead address entirely");
+    assert_eq!(channel_open_slot(&s.svm, &new_channel), reopen_slot);
+    read_channel(&s.svm, &new_channel, |ch| {
+        assert_eq!(ch.status, STATUS_OPEN);
+        assert_eq!(ch.deposit(), new_deposit);
+    });
+
+    // The donation is simply stranded on the dead system-owned address —
+    // harmless to the protocol, unrecoverable by the program (which will
+    // never own that address again).
+    let dead = s
+        .svm
+        .get_account(&old_channel)
+        .expect("donated shell exists");
+    assert_eq!(dead.lamports, donation, "donation stranded on dead address");
+    assert!(dead.data.is_empty(), "dead address holds no channel data");
+    assert_eq!(dead.owner, SYSTEM_PROGRAM);
+}
+
+#[test]
+fn sealed_distribute_inside_window_takes_two_phase_path() {
     let splits = vec![Split {
         owner: Pubkey::new_unique(),
         bps: 5000,
     }];
     let deposit = 200_000;
     let settled = 150_000;
-    let payout_watermark = 0;
-    let mut s = Scenario::build(
-        splits.clone(),
-        deposit,
-        settled,
-        payout_watermark,
-        STATUS_FINALIZED,
-    );
+    // Built in OPEN so the fixture does not auto-warp past the gate.
+    let mut s = Scenario::build(splits, deposit, settled, 0, STATUS_OPEN);
+    let open_slot = channel_open_slot(&s.svm, &s.channel);
 
-    let distribute_ix = s.distribute_ix();
-    let open_ix = open_ix_for_splits(
-        &s.payer,
-        &s.payee,
-        &s.mint,
-        &s.authorized_signer.pubkey(),
-        &s.channel,
-        &s.payer_ata,
-        &s.channel_ata,
-        &s.token_program,
-        DEFAULT_SALT,
-        1,
-        GRACE_PERIOD,
-        &splits,
-    );
+    // OPEN-state (partial) distribute is never gated: it only advances the
+    // watermark and cannot deallocate, so running inside the window is fine.
+    s.send(s.distribute_ix())
+        .expect("open distribute inside the window ok");
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 75_000);
 
-    let blockhash = s.svm.latest_blockhash();
-    let tx = Transaction::new_signed_with_payer(
-        &[
-            ComputeBudgetInstruction::set_compute_unit_limit(MAX_COMPUTE_UNIT_LIMIT),
-            distribute_ix,
-            open_ix,
-        ],
-        Some(&s.payer_keypair.pubkey()),
-        &[&s.payer_keypair],
-        blockhash,
-    );
-    let err = s.svm.send_transaction(tx).expect_err("tx should fail").err;
-    // Lock down both the failing ix index (open is at index 2 — after
-    // compute-budget at 0 and distribute at 1) and the variant. A regression
-    // that shifts the failure to a different ix or a different system error
-    // would mask the in-tx replay protection this test asserts.
-    match err {
-        TransactionError::InstructionError(2, InstructionError::Custom(0)) => {}
-        other => panic!(
-            "expected open ix (index 2) to fail with SystemError::AccountAlreadyInUse, got {other:?}"
-        ),
-    }
+    set_status(&mut s.svm, &s.channel, STATUS_SEALED);
 
-    // Tx reverted: channel is restored to its pre-tx FINALIZED state.
+    // `clock.slot == open_slot + OPEN_SLOT_WINDOW` is still inside the
+    // window — the reclaim gate is strict (`>`). The SEALED distribute
+    // runs anyway: token movement is never slot-gated, so the refund and
+    // residue sweep pay out now and the escrow ATA closes. Only the PDA
+    // deallocation is deferred: the channel is left `Distributed`, holding
+    // exactly its own rent, keeping the address occupied for as long as its
+    // `open_slot` — a PDA seed — would still clear the open window, so the
+    // same address can never be re-created.
+    s.svm.warp_to_slot(open_slot + OPEN_SLOT_WINDOW);
+    let channel_rent = s.svm.get_account(&s.channel).unwrap().lamports;
+    s.send(s.distribute_ix())
+        .expect("sealed distribute inside the window ok");
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
+    assert!(
+        s.svm
+            .get_account(&s.channel_ata)
+            .is_none_or(|a| a.lamports == 0 && a.data.is_empty()),
+        "escrow ATA closed"
+    );
     read_channel(&s.svm, &s.channel, |ch| {
-        assert_eq!(
-            ch.discriminator, 1,
-            "discriminator restored to Channel after revert",
-        );
-        assert_eq!(ch.status, STATUS_FINALIZED, "status restored after revert");
+        assert_eq!(ch.status, STATUS_DISTRIBUTED);
     });
+    assert_eq!(
+        s.svm.get_account(&s.channel).unwrap().lamports,
+        channel_rent
+    );
+
+    // The rent is freed by `reclaim`, gated at the same strict boundary:
+    // at `open_slot + OPEN_SLOT_WINDOW` it is still too early...
+    expect_custom_err(
+        s.send(build_reclaim_ix(&s.channel, &s.payer)),
+        PaymentChannelsError::ChannelCloseTooEarly,
+    );
+
+    // ...one slot past the window the address is surrendered.
+    s.svm.warp_to_slot(open_slot + OPEN_SLOT_WINDOW + 1);
+    s.send(build_reclaim_ix(&s.channel, &s.payer))
+        .expect("reclaim past the close gate ok");
+    assert_fully_closed(&s.svm, &s.channel);
+}
+
+#[test]
+fn full_close_recovers_prefund_surplus_lamports() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5000,
+    }];
+    let deposit = 200_000;
+    let settled = 150_000;
+    let mut s = Scenario::build(splits, deposit, settled, 0, STATUS_SEALED);
+
+    // Surplus lamports parked on the live PDA (donated between open and
+    // close). Full closure drains *every* lamport to the rent payer, not
+    // just the rent-exempt minimum — nothing is stranded on the address.
+    let surplus: u64 = 3_456_789;
+    s.svm
+        .airdrop(&s.channel, surplus)
+        .expect("donate surplus to channel PDA");
+
+    let payer_before = s.svm.get_account(&s.payer).unwrap().lamports;
+    let channel_lamports_before = s.svm.get_account(&s.channel).unwrap().lamports;
+    let channel_ata_lamports_before = s.svm.get_account(&s.channel_ata).unwrap().lamports;
+    assert!(channel_lamports_before > surplus, "donation landed");
+
+    s.send(s.distribute_ix()).expect("distribute ok");
+
+    assert_fully_closed(&s.svm, &s.channel);
+    let payer_after = s.svm.get_account(&s.payer).unwrap().lamports;
+    assert_eq!(
+        payer_after - payer_before,
+        channel_lamports_before + channel_ata_lamports_before,
+        "rent payer recovers rent + surplus + escrow-ATA rent"
+    );
 }

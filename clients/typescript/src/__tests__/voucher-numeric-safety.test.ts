@@ -11,6 +11,9 @@ import { getI64Encoder, getU64Encoder } from '../safe-codecs.js';
 // Any valid base58 address works; system program is the easiest to grab.
 const SYSTEM_ADDR = '11111111111111111111111111111111' as Address;
 
+// Domain-separation prefix of the voucher payload: tag 'V' + version 0x01.
+const MAGIC = [0x56, 0x01];
+
 describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
   it('throws TypeError on cumulativeAmount above 2^53-1 passed as number', () => {
     const encoder = getVoucherArgsEncoder();
@@ -18,6 +21,7 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
     // The error message should mention bigint so the caller knows what to do.
     expect(() =>
       encoder.encode({
+        magic: MAGIC,
         channelId: SYSTEM_ADDR,
         cumulativeAmount: 9007199254740993 as unknown as bigint,
         expiresAt: 0n,
@@ -33,22 +37,25 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
   it('produces distinct images for 2^53 and 2^53 + 1 (regression for the SOLA4-2 root cause)', () => {
     const encoder = getVoucherArgsEncoder();
     const a = encoder.encode({
+      magic: MAGIC,
       channelId: SYSTEM_ADDR,
       cumulativeAmount: 2n ** 53n,
       expiresAt: 0n,
     });
     const b = encoder.encode({
+      magic: MAGIC,
       channelId: SYSTEM_ADDR,
       cumulativeAmount: 2n ** 53n + 1n,
       expiresAt: 0n,
     });
-    expect(a.length).toBe(48);
-    expect(b.length).toBe(48);
+    expect(a.length).toBe(50);
+    expect(b.length).toBe(50);
     expect(Buffer.from(a).equals(Buffer.from(b))).toBe(false);
   });
 
   it('round-trips bigint cumulativeAmount through encoder/decoder as bigint', () => {
     const bytes = getVoucherArgsEncoder().encode({
+      magic: MAGIC,
       channelId: SYSTEM_ADDR,
       cumulativeAmount: 100n,
       expiresAt: 0n,
@@ -62,11 +69,13 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
   it('accepts safe-integer JS number at runtime and matches bigint encoding', () => {
     const encoder = getVoucherArgsEncoder();
     const fromNumber = encoder.encode({
+      magic: MAGIC,
       channelId: SYSTEM_ADDR,
       cumulativeAmount: 100 as unknown as bigint,
       expiresAt: 0n,
     });
     const fromBigint = encoder.encode({
+      magic: MAGIC,
       channelId: SYSTEM_ADDR,
       cumulativeAmount: 100n,
       expiresAt: 0n,
@@ -79,6 +88,7 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
     // -1n is valid i64
     expect(() =>
       encoder.encode({
+        magic: MAGIC,
         channelId: SYSTEM_ADDR,
         cumulativeAmount: 0n,
         expiresAt: -1n,
@@ -87,6 +97,7 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
     // 2^63 overflows signed i64
     expect(() =>
       encoder.encode({
+        magic: MAGIC,
         channelId: SYSTEM_ADDR,
         cumulativeAmount: 0n,
         expiresAt: 2n ** 63n,
@@ -131,6 +142,7 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
         salt: 0n,
         deposit: 9007199254740993 as unknown as bigint,
         gracePeriod: 0,
+        openSlot: 0n,
         recipients: [],
       }),
     ).toThrow(TypeError);
@@ -143,6 +155,7 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
         salt: 9007199254740993 as unknown as bigint,
         deposit: 0n,
         gracePeriod: 0,
+        openSlot: 0n,
         recipients: [],
       }),
     ).toThrow(TypeError);
@@ -155,8 +168,8 @@ describe('safe u64/i64 encoders runtime-reject lossy JS numbers', () => {
     );
   });
 
-  // (The former SettleAndFinalizeArgs voucher-embedding tests were removed:
-  // `settleAndFinalize` no longer carries a voucher in its instruction data —
+  // (The former SettleAndSealArgs voucher-embedding tests were removed:
+  // `settleAndSeal` no longer carries a voucher in its instruction data —
   // the voucher rides in the bundled Ed25519 precompile ix. Voucher numeric
   // safety is covered directly via getVoucherArgsEncoder above, which is the
   // encoder the off-chain signer uses to build that precompile payload.)

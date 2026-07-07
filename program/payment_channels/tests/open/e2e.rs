@@ -22,9 +22,11 @@ use super::{
 use payment_channels::PaymentChannelsError;
 
 use crate::common::{
-    ProgramLoader, SPL_TOKEN, TOKEN_2022, expect_custom_err, expect_instruction_err, read_channel,
+    ProgramLoader, SPL_TOKEN, TOKEN_2022, channel_open_slot, expect_custom_err,
+    expect_instruction_err, read_channel,
 };
 use litesvm_token::CreateAssociatedTokenAccount;
+use payment_channels::constants::OPEN_SLOT_WINDOW;
 
 const SALT: u64 = 42;
 const DEPOSIT: u64 = 5_000_000;
@@ -38,7 +40,7 @@ fn open_sets_channel_fields() {
     let authorized_signer = Keypair::new().pubkey();
     let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
     let (channel, channel_token_account) =
-        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
+        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT, 0);
 
     let ix = open_ix(
         &payer.pubkey(),
@@ -51,6 +53,7 @@ fn open_sets_channel_fields() {
         SALT,
         DEPOSIT,
         GRACE_PERIOD,
+        0, // open_slot: fresh LiteSVM boots at slot 0
         1,
     );
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
@@ -95,7 +98,7 @@ fn open_with_no_splits_succeeds() {
     let authorized_signer = Keypair::new().pubkey();
     let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
     let (channel, channel_token_account) =
-        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
+        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT, 0);
 
     let ix = open_ix(
         &payer.pubkey(),
@@ -108,6 +111,7 @@ fn open_with_no_splits_succeeds() {
         SALT,
         DEPOSIT,
         GRACE_PERIOD,
+        0, // open_slot: fresh LiteSVM boots at slot 0
         0,
     );
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
@@ -131,7 +135,7 @@ fn wrong_channel_token_account_rejected() {
     let payee = Pubkey::new_unique();
     let authorized_signer = Keypair::new().pubkey();
     let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
-    let (channel, _) = derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
+    let (channel, _) = derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT, 0);
     let wrong_channel_ata = Pubkey::new_unique();
 
     let ix = open_ix(
@@ -145,6 +149,7 @@ fn wrong_channel_token_account_rejected() {
         SALT,
         DEPOSIT,
         GRACE_PERIOD,
+        0, // open_slot: fresh LiteSVM boots at slot 0
         1,
     );
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
@@ -169,6 +174,7 @@ fn open_sets_channel_fields_token_2022() {
         &mint,
         &authorized_signer,
         SALT,
+        0, // open_slot seed: fresh LiteSVM boots at slot 0
         &TOKEN_2022,
     );
 
@@ -184,6 +190,7 @@ fn open_sets_channel_fields_token_2022() {
         SALT,
         DEPOSIT,
         GRACE_PERIOD,
+        0, // open_slot: fresh LiteSVM boots at slot 0
         1,
     );
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
@@ -230,6 +237,7 @@ fn open_with_no_splits_succeeds_token_2022() {
         &mint,
         &authorized_signer,
         SALT,
+        0, // open_slot seed: fresh LiteSVM boots at slot 0
         &TOKEN_2022,
     );
 
@@ -245,6 +253,7 @@ fn open_with_no_splits_succeeds_token_2022() {
         SALT,
         DEPOSIT,
         GRACE_PERIOD,
+        0, // open_slot: fresh LiteSVM boots at slot 0
         0,
     );
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
@@ -269,11 +278,11 @@ fn open_succeeds_with_prefunded_channel_pda_lamports() {
     let authorized_signer = Keypair::new().pubkey();
     let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
     let (channel, channel_token_account) =
-        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
+        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT, 0);
 
     // 1_000_000 lamports clears the 0-byte rent-exempt floor (~890_880) so
     // LiteSVM accepts the airdrop, but is below the rent minimum for
-    // Channel::LEN so `open` still has a shortfall to top up.
+    // the 256-byte channel so `open` still has a shortfall to top up.
     let prefund: u64 = 1_000_000;
     svm.airdrop(&channel, prefund).expect("airdrop PDA prefund");
 
@@ -290,6 +299,7 @@ fn open_succeeds_with_prefunded_channel_pda_lamports() {
         SALT,
         DEPOSIT,
         GRACE_PERIOD,
+        0, // open_slot: fresh LiteSVM boots at slot 0
         1,
     );
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
@@ -324,7 +334,7 @@ fn open_succeeds_with_precreated_escrow_ata() {
     let authorized_signer = Keypair::new().pubkey();
     let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
     let (channel, channel_token_account) =
-        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
+        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT, 0);
 
     // Griefing setup: a third party front-runs `open` by pre-creating the
     // canonical escrow ATA. Under non-idempotent Create this reverted `open`
@@ -347,6 +357,7 @@ fn open_succeeds_with_precreated_escrow_ata() {
         SALT,
         DEPOSIT,
         GRACE_PERIOD,
+        0, // open_slot: fresh LiteSVM boots at slot 0
         1,
     );
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
@@ -362,8 +373,9 @@ fn open_succeeds_with_precreated_escrow_ata() {
 
 #[test]
 fn reopen_at_same_seeds_while_open_rejects() {
-    // A second `open` on the same (payer, payee, mint, authorizedSigner, salt)
-    // tuple while the channel is still OPEN must revert. Unlike the prefund
+    // A second `open` on the same (payer, payee, mint, authorizedSigner, salt,
+    // openSlot) seed tuple — hence the same address — while the channel is
+    // still OPEN must revert. Unlike the prefund
     // cases above — where the PDA is system-owned and data-empty, so `open` is
     // tolerant — the live channel PDA already holds an initialized `Channel`
     // and is program-owned, so the signed `Allocate` (which requires a
@@ -375,7 +387,7 @@ fn reopen_at_same_seeds_while_open_rejects() {
     let authorized_signer = Keypair::new().pubkey();
     let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
     let (channel, channel_token_account) =
-        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
+        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT, 0);
 
     // First open establishes the OPEN channel.
     let first = open_ix(
@@ -389,6 +401,7 @@ fn reopen_at_same_seeds_while_open_rejects() {
         SALT,
         DEPOSIT,
         GRACE_PERIOD,
+        0, // open_slot: fresh LiteSVM boots at slot 0
         1,
     );
     let msg = Message::new(&[first], Some(&payer.pubkey()));
@@ -412,6 +425,7 @@ fn reopen_at_same_seeds_while_open_rejects() {
         SALT,
         1,
         GRACE_PERIOD,
+        0, // open_slot: fresh LiteSVM boots at slot 0
         1,
     );
     let msg = Message::new(&[second], Some(&payer.pubkey()));
@@ -423,4 +437,106 @@ fn reopen_at_same_seeds_while_open_rejects() {
         assert_eq!(ch.status, ChannelStatus::Open as u8);
         assert_eq!(ch.deposit(), DEPOSIT);
     });
+}
+
+// ─── open_slot window boundaries ─────────────────────────────────────────────
+//
+// `open` only accepts an `open_slot` inside `[clock.slot - OPEN_SLOT_WINDOW,
+// clock.slot]`: a future value would let the payer stall the terminal-close
+// gate forever, while a staler one could re-derive a dead incarnation's
+// address (`open_slot` is a channel seed) and re-arm its vouchers. Together
+// with the reclaim gate — which keeps an address occupied until its
+// `open_slot` has aged out of this window — the check guarantees the same
+// channel address can never exist twice. The SVM is warped past the window
+// first so the stale side of the boundary is representable.
+
+#[test]
+fn open_slot_at_current_slot_accepted() {
+    open_slot_boundary_case(|now| now, Ok(()));
+}
+
+#[test]
+fn open_slot_one_slot_in_future_rejected() {
+    open_slot_boundary_case(
+        |now| now + 1,
+        Err(PaymentChannelsError::OpenSlotOutOfWindow),
+    );
+}
+
+#[test]
+fn open_slot_at_window_edge_accepted() {
+    open_slot_boundary_case(|now| now - OPEN_SLOT_WINDOW, Ok(()));
+}
+
+#[test]
+fn open_slot_one_past_window_rejected() {
+    open_slot_boundary_case(
+        |now| now - OPEN_SLOT_WINDOW - 1,
+        Err(PaymentChannelsError::OpenSlotOutOfWindow),
+    );
+}
+
+/// Drives one `open` at a warped clock (slot 200 > OPEN_SLOT_WINDOW + 1, so
+/// every boundary case is a representable u64) with `open_slot` picked by
+/// `pick(now)`, then asserts acceptance (epoch persisted in the channel
+/// tail) or rejection (no channel account, deposit untouched).
+fn open_slot_boundary_case(
+    pick: impl FnOnce(u64) -> u64,
+    expected: Result<(), PaymentChannelsError>,
+) {
+    let mut svm = LiteSVM::load_program();
+
+    let payee = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
+    let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
+
+    let now: u64 = 200;
+    svm.warp_to_slot(now);
+    let open_slot = pick(now);
+    // `open_slot` is a channel seed, so the boundary value under test picks
+    // the address too — derive only after `pick` has fixed it.
+    let (channel, channel_token_account) = derive_pdas(
+        &payer.pubkey(),
+        &payee,
+        &mint,
+        &authorized_signer,
+        SALT,
+        open_slot,
+    );
+
+    let ix = open_ix(
+        &payer.pubkey(),
+        &payee,
+        &mint,
+        &authorized_signer,
+        &channel,
+        &payer_token_account,
+        &channel_token_account,
+        SALT,
+        DEPOSIT,
+        GRACE_PERIOD,
+        open_slot,
+        1,
+    );
+    let msg = Message::new(&[ix], Some(&payer.pubkey()));
+    let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
+    let res = svm.send_transaction(tx);
+
+    match expected {
+        Ok(()) => {
+            res.expect("open inside the window should succeed");
+            assert_eq!(
+                channel_open_slot(&svm, &channel),
+                open_slot,
+                "channel tail carries the committed epoch"
+            );
+        }
+        Err(err) => {
+            expect_custom_err(res, err);
+            assert!(
+                svm.get_account(&channel).is_none(),
+                "rejected open must not create the channel"
+            );
+        }
+    }
 }

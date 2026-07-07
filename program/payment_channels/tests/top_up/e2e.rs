@@ -170,7 +170,7 @@ fn top_up_non_open_status_rejects() {
     seed_channel(
         &mut svm,
         &channel,
-        1, /* Finalized */
+        1, /* Sealed */
         1_000_000,
         &payer.pubkey(),
     );

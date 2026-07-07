@@ -67,13 +67,13 @@ fn closing_status_rejects() {
 }
 
 #[test]
-fn finalized_status_rejects() {
+fn sealed_status_rejects() {
     let payer = Pubkey::new_unique();
     assert_eq!(
         RequestCloseRun::new(
             payer,
             ChannelBuilder::new()
-                .status(ChannelStatus::Finalized)
+                .status(ChannelStatus::Sealed)
                 .payer(payer)
                 .build(),
         )
