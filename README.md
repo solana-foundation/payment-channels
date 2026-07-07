@@ -15,19 +15,22 @@ flowchart LR
   A["open<br/>(escrow a deposit)"] --> B["off-chain vouchers<br/>(cumulative spend)"]
   B --> C["settle<br/>(advance settled amount)"]
   C --> D["distribute<br/>(payee + splits, refund payer)"]
+  D --> E["reclaim<br/>(recover channel rent)"]
 ```
 
 ```mermaid
 stateDiagram-v2
   [*] --> Open: open
-  Open --> Open: settle / top_up
-  Open --> Finalized: settle_and_finalize (cooperative)
+  Open --> Open: settle / top_up / distribute (partial)
+  Open --> Sealed: settle_and_seal (cooperative)
   Open --> Closing: request_close (forced)
-  Closing --> Finalized: settle_and_finalize / finalize (after grace)
-  Finalized --> [*]
+  Closing --> Sealed: settle_and_seal (mid-grace) / seal (after grace)
+  Sealed --> Distributed: distribute (pay out, close escrow)
+  Distributed --> [*]: reclaim (after epoch window)
+  Sealed --> [*]: distribute (fast path, window already elapsed)
 ```
 
-Vouchers are signed off-chain (Ed25519) and carry a **cumulative** amount, so a newer voucher supersedes older ones and the program never settles more than the deposit. `distribute` / `withdraw_payer` move the settled funds out and refund the unspent remainder.
+Vouchers are signed off-chain (Ed25519) and carry a **cumulative** amount, so a newer voucher supersedes older ones and the program never settles more than the deposit. `distribute` / `withdraw_payer` move the settled funds out and refund the unspent remainder the moment the channel is sealed — no payout ever waits. The channel account itself is then fully deallocated (directly, or by a later `reclaim` once the epoch window elapses), returning 100% of its rent: a closed channel leaves nothing on chain.
 
 ## Used by pay.sh
 
@@ -44,12 +47,13 @@ See **[Payment channels](https://pay.sh/docs/building-with-pay/payment-channels/
 | --- | --- |
 | `open` | Create the channel PDA and escrow the deposit. |
 | `settle` | Advance the on-chain settled amount from a signed voucher. |
-| `settle_and_finalize` | Settle a final voucher and close in one step (cooperative). |
+| `settle_and_seal` | Settle a final voucher and seal in one step (cooperative). |
 | `top_up` | Add funds to an open channel. |
 | `request_close` | Payer-initiated forced close — starts the grace period. |
-| `finalize` | Finalize a forced-closing channel once the grace period elapses. |
-| `distribute` | Pay the payee and any split recipients; refund the payer. |
+| `seal` | Seal a forced-closing channel once the grace period elapses. |
+| `distribute` | Pay the payee and any split recipients; refund the payer; close the escrow. |
 | `withdraw_payer` | Payer recovers the unspent remainder. |
+| `reclaim` | Deallocate a distributed channel and recover its rent (batchable). |
 
 ## Build & test
 
