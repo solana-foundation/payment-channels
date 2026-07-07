@@ -8,7 +8,7 @@
 //!
 //! For non-OPEN prerequisite states, scenarios use `mutate_channel` (in
 //! [`crate::common`]) to write the channel buffer directly — running the real
-//! `request_close`/`finalize`/`settle` chain would inflate the focal tx's
+//! `request_close`/`seal`/`settle` chain would inflate the focal tx's
 //! CU measurement through unrelated setup cost.
 //!
 //! Voucher / precompile helpers live in [`crate::common::voucher`] and are
@@ -17,7 +17,7 @@
 use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, MintTo};
 use payment_channels_client::instructions::{Open, OpenInstructionArgs, Settle};
-use payment_channels_client::types::{DistributionEntry, OpenArgs, VoucherArgs};
+use payment_channels_client::types::{DistributionEntry, OpenArgs};
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -27,9 +27,9 @@ use solana_transaction::Transaction;
 use spl_token_2022_interface::instruction::initialize_mint2;
 
 use crate::common::{
-    ATA_PROGRAM, INSTRUCTIONS_SYSVAR, PROGRAM_ID, SYSTEM_PROGRAM, SYSVAR_RENT, event_authority,
-    treasury_owner,
-    voucher::{build_ed25519_ix, voucher_payload},
+    ATA_PROGRAM, INSTRUCTIONS_SYSVAR, PROGRAM_ID, SYSTEM_PROGRAM, SYSVAR_RENT, current_slot,
+    event_authority, treasury_owner,
+    voucher::{build_ed25519_ix, voucher, voucher_payload},
 };
 
 pub const GRACE_PERIOD: u32 = 3_600;
@@ -46,8 +46,9 @@ pub const DEFAULT_SETTLED: u64 = 500_000;
 pub mod status {
     #[allow(dead_code)]
     pub const OPEN: u8 = 0;
-    pub const FINALIZED: u8 = 1;
+    pub const SEALED: u8 = 1;
     pub const CLOSING: u8 = 2;
+    pub const DISTRIBUTED: u8 = 3;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,7 +117,7 @@ fn create_seeded_mint(
 
 /// All the state a benchmark scenario needs to talk to a single channel.
 /// `payee` is a `Keypair` rather than a bare `Pubkey` because
-/// `settle_and_finalize` requires the merchant (= payee) to sign; other
+/// `settle_and_seal` requires the payee (= payee) to sign; other
 /// scenarios use only `payee.pubkey()`.
 pub struct Fixture {
     pub payer: Keypair,
@@ -124,6 +125,13 @@ pub struct Fixture {
     pub authorized_signer: Keypair,
     pub mint: Pubkey,
     pub payer_ata: Pubkey,
+    /// Ground so channel + escrow bumps are canonical (255); the `open` ix
+    /// must echo exactly this value.
+    pub salt: u64,
+    /// Slot committed at derivation time. `open_slot` is a channel PDA
+    /// seed, so it is fixed when `channel` is derived and the `open` ix
+    /// must echo exactly this value.
+    pub open_slot: u64,
     pub channel: Pubkey,
     pub channel_ata: Pubkey,
     pub token_program: Pubkey,
@@ -155,30 +163,45 @@ fn seeded_mint_funded(
     (payer, mint, payer_ata)
 }
 
-fn derive_channel_pdas(
+/// Grind `salt` (from [`DEFAULT_SALT`]) until both the channel PDA and its
+/// escrow ATA sit at the canonical bump 255, i.e. every on-chain
+/// `find_program_address` over them costs exactly one iteration. Each
+/// missed bump costs ~1,500 CU per derivation, so without this the CU
+/// report measures bump roulette (rerolled whenever the seed schema or any
+/// input address changes) instead of instruction behavior. `salt` is free
+/// for a client to choose, so this also mirrors what a CU-conscious client
+/// can do in production.
+fn grind_canonical_salt(
     payer: &Pubkey,
     payee: &Pubkey,
     mint: &Pubkey,
     authorized_signer: &Pubkey,
-    salt: u64,
+    open_slot: u64,
     token_program: &Pubkey,
-) -> (Pubkey, Pubkey) {
-    let (channel, _) = Pubkey::find_program_address(
-        &[
-            b"channel",
-            payer.as_ref(),
-            payee.as_ref(),
-            mint.as_ref(),
-            authorized_signer.as_ref(),
-            &salt.to_le_bytes(),
-        ],
-        &PROGRAM_ID,
-    );
-    let (channel_ata, _) = Pubkey::find_program_address(
-        &[channel.as_ref(), token_program.as_ref(), mint.as_ref()],
-        &ATA_PROGRAM,
-    );
-    (channel, channel_ata)
+) -> (u64, Pubkey, Pubkey) {
+    for i in 0..1_024u64 {
+        let salt = DEFAULT_SALT.wrapping_add(i);
+        let (channel, channel_bump) = Pubkey::find_program_address(
+            &[
+                b"channel",
+                payer.as_ref(),
+                payee.as_ref(),
+                mint.as_ref(),
+                authorized_signer.as_ref(),
+                &salt.to_le_bytes(),
+                &open_slot.to_le_bytes(),
+            ],
+            &PROGRAM_ID,
+        );
+        let (channel_ata, ata_bump) = Pubkey::find_program_address(
+            &[channel.as_ref(), token_program.as_ref(), mint.as_ref()],
+            &ATA_PROGRAM,
+        );
+        if channel_bump == 255 && ata_bump == 255 {
+            return (salt, channel, channel_ata);
+        }
+    }
+    panic!("no canonical-bump salt within 1024 tries");
 }
 
 /// `n` deterministic 1-bps recipients. Sum ≤ 32 bps → payee gets 9968+ as
@@ -208,12 +231,16 @@ pub fn prepare_channel(svm: &mut LiteSVM, num_recipients: usize, token_program: 
     let (payer, mint, payer_ata) = seeded_mint_funded(svm, DEFAULT_DEPOSIT, &token_program);
     let payee = seeded_keypair("payee");
     let authorized_signer = seeded_keypair("authorized_signer");
-    let (channel, channel_ata) = derive_channel_pdas(
+    // `open_slot` is a channel PDA seed, so the address depends on the slot
+    // at derivation time. Scenarios open without warping in between, so the
+    // slot captured here stays inside the open window (trivially: equal).
+    let open_slot = current_slot(svm);
+    let (salt, channel, channel_ata) = grind_canonical_salt(
         &payer.pubkey(),
         &payee.pubkey(),
         &mint,
         &authorized_signer.pubkey(),
-        DEFAULT_SALT,
+        open_slot,
         &token_program,
     );
     let splits = seeded_splits(num_recipients);
@@ -221,8 +248,10 @@ pub fn prepare_channel(svm: &mut LiteSVM, num_recipients: usize, token_program: 
         payer,
         payee,
         authorized_signer,
+        salt,
         mint,
         payer_ata,
+        open_slot,
         channel,
         channel_ata,
         token_program,
@@ -230,7 +259,9 @@ pub fn prepare_channel(svm: &mut LiteSVM, num_recipients: usize, token_program: 
     }
 }
 
-/// Build the `open` ix from the fixture (no tx assembly, no send).
+/// Build the `open` ix from the fixture (no tx assembly, no send). The ix
+/// echoes `f.open_slot` — the value baked into the channel address at
+/// derivation time; any other value would target a different PDA.
 pub fn build_open_ix(f: &Fixture, deposit: u64) -> Instruction {
     let recipients: Vec<DistributionEntry> = f
         .splits
@@ -258,9 +289,10 @@ pub fn build_open_ix(f: &Fixture, deposit: u64) -> Instruction {
     }
     .instruction(OpenInstructionArgs {
         open_args: OpenArgs {
-            salt: DEFAULT_SALT,
+            salt: f.salt,
             deposit,
             grace_period: GRACE_PERIOD,
+            open_slot: f.open_slot,
             recipients,
         },
     })
@@ -279,17 +311,15 @@ pub fn open_setup(svm: &mut LiteSVM, f: &Fixture, deposit: u64) {
     svm.send_transaction(tx).expect("open setup ok");
 }
 
-/// `[ed25519, settle]` against the fixture's authorized signer.
+/// `[ed25519, settle]` against the fixture's authorized signer. The voucher
+/// binds the incarnation through `channel_id` alone — `open_slot` lives in
+/// the channel PDA seeds, so the address IS the epoch.
 pub fn build_settle_pair(
     f: &Fixture,
     cumulative_amount: u64,
     expires_at: i64,
 ) -> (Instruction, Instruction) {
-    let voucher = VoucherArgs {
-        channel_id: f.channel,
-        cumulative_amount,
-        expires_at,
-    };
+    let voucher = voucher(f.channel, cumulative_amount, expires_at);
     let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = f.authorized_signer.sign_message(&payload).into();
     let pubkey = f.authorized_signer.pubkey().to_bytes();

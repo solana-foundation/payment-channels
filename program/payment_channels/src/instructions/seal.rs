@@ -8,12 +8,12 @@ use crate::errors::PaymentChannelsError;
 use crate::state::Channel;
 use crate::state::channel::ChannelStatus;
 
-/// Instruction discriminator byte for `finalize`.
+/// Instruction discriminator byte for `seal`.
 pub const DISCRIMINATOR: u8 = 6;
 
 pub struct FinalizeAccounts<'a> {
     /// [`status`](crate::Channel::status) →
-    /// [`Finalized`](crate::ChannelStatus::Finalized),
+    /// [`Sealed`](crate::ChannelStatus::Sealed),
     /// [`closure_started_at`](crate::Channel::closure_started_at) → 0.
     pub channel: &'a mut AccountView,
 }
@@ -30,7 +30,7 @@ impl<'a> TryFrom<&'a mut [AccountView]> for FinalizeAccounts<'a> {
 }
 
 /// Permissionless, voucher-free crank: freezes the watermark and moves
-/// `CLOSING → FINALIZED` once `now ≥`
+/// `CLOSING → SEALED` once `now ≥`
 /// [`closure_started_at`](crate::Channel::closure_started_at) `+`
 /// [`grace_period`](crate::Channel::grace_period); resets
 /// [`closure_started_at`](crate::Channel::closure_started_at) to 0.
@@ -48,13 +48,13 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
     let deadline = ch
         .closure_started_at()
         .checked_add(ch.grace_period() as i64)
-        .ok_or(PaymentChannelsError::FinalizeDeadlineOverflow)?;
+        .ok_or(PaymentChannelsError::SealDeadlineOverflow)?;
 
     if now < deadline {
-        return Err(PaymentChannelsError::InvalidChannelStatus.into());
+        return Err(PaymentChannelsError::SealGracePeriodNotElapsed.into());
     }
 
-    ch.status = ChannelStatus::Finalized as u8;
+    ch.status = ChannelStatus::Sealed as u8;
     ch.set_closure_started_at(0);
 
     Ok(())

@@ -7,7 +7,7 @@ use solana_pubkey::Pubkey;
 
 use crate::common::ChannelBuilder;
 
-use super::SettleAndFinalizeRun;
+use super::SettleAndSealRun;
 
 fn channel(result: &mollusk_svm::result::InstructionResult) -> &Channel {
     let data = &result.resulting_accounts[1].1.data;
@@ -28,15 +28,15 @@ const GRACE_PERIOD_ZERO: u32 = 0;
 
 #[test]
 fn unsigned_merchant_rejects() {
-    let merchant = Pubkey::new_unique();
+    let payee = Pubkey::new_unique();
     assert_eq!(
-        SettleAndFinalizeRun {
+        SettleAndSealRun {
             is_signer: false,
-            ..SettleAndFinalizeRun::new(
-                merchant,
+            ..SettleAndSealRun::new(
+                payee,
                 ChannelBuilder::new()
                     .status(ChannelStatus::Open)
-                    .payee(merchant)
+                    .payee(payee)
                     .build(),
             )
         }
@@ -48,14 +48,14 @@ fn unsigned_merchant_rejects() {
 }
 
 #[test]
-fn finalized_status_rejects() {
-    let merchant = Pubkey::new_unique();
+fn sealed_status_rejects() {
+    let payee = Pubkey::new_unique();
     assert_eq!(
-        SettleAndFinalizeRun::new(
-            merchant,
+        SettleAndSealRun::new(
+            payee,
             ChannelBuilder::new()
-                .status(ChannelStatus::Finalized)
-                .payee(merchant)
+                .status(ChannelStatus::Sealed)
+                .payee(payee)
                 .build(),
         )
         .run(),
@@ -67,13 +67,13 @@ fn finalized_status_rejects() {
 
 #[test]
 fn closing_post_grace_rejects() {
-    let merchant = Pubkey::new_unique();
+    let payee = Pubkey::new_unique();
     assert_eq!(
-        SettleAndFinalizeRun::new(
-            merchant,
+        SettleAndSealRun::new(
+            payee,
             ChannelBuilder::new()
                 .status(ChannelStatus::Closing)
-                .payee(merchant)
+                .payee(payee)
                 .closure_started_at(CLOSURE_STARTED_AT_POST_GRACE)
                 .grace_period(GRACE_PERIOD_ZERO)
                 .build(),
@@ -90,7 +90,7 @@ fn wrong_merchant_rejects() {
     let payee = Pubkey::new_unique();
     let impostor = Pubkey::new_unique();
     assert_eq!(
-        SettleAndFinalizeRun::new(
+        SettleAndSealRun::new(
             impostor,
             ChannelBuilder::new()
                 .status(ChannelStatus::Open)
@@ -105,14 +105,14 @@ fn wrong_merchant_rejects() {
 }
 
 #[test]
-fn open_to_finalized_without_voucher_succeeds() {
-    let merchant = Pubkey::new_unique();
+fn open_to_sealed_without_voucher_succeeds() {
+    let payee = Pubkey::new_unique();
     assert_eq!(
-        SettleAndFinalizeRun::new(
-            merchant,
+        SettleAndSealRun::new(
+            payee,
             ChannelBuilder::new()
                 .status(ChannelStatus::Open)
-                .payee(merchant)
+                .payee(payee)
                 .build(),
         )
         .run(),
@@ -121,14 +121,14 @@ fn open_to_finalized_without_voucher_succeeds() {
 }
 
 #[test]
-fn closing_to_finalized_mid_grace_without_voucher_succeeds() {
-    let merchant = Pubkey::new_unique();
+fn closing_to_sealed_mid_grace_without_voucher_succeeds() {
+    let payee = Pubkey::new_unique();
     assert_eq!(
-        SettleAndFinalizeRun::new(
-            merchant,
+        SettleAndSealRun::new(
+            payee,
             ChannelBuilder::new()
                 .status(ChannelStatus::Closing)
-                .payee(merchant)
+                .payee(payee)
                 .closure_started_at(CLOSURE_STARTED_AT_MID_GRACE)
                 .grace_period(GRACE_PERIOD)
                 .build(),
@@ -138,14 +138,14 @@ fn closing_to_finalized_mid_grace_without_voucher_succeeds() {
     );
 }
 
-/// Wrong merchant on CLOSING path (mid-grace): still fails on authority check,
+/// Wrong payee on CLOSING path (mid-grace): still fails on authority check,
 /// not on the grace-period check.
 #[test]
 fn closing_wrong_merchant_rejects() {
     let payee = Pubkey::new_unique();
     let impostor = Pubkey::new_unique();
     assert_eq!(
-        SettleAndFinalizeRun::new(
+        SettleAndSealRun::new(
             impostor,
             ChannelBuilder::new()
                 .status(ChannelStatus::Closing)
@@ -162,30 +162,30 @@ fn closing_wrong_merchant_rejects() {
 }
 
 #[test]
-fn open_to_finalized_writes_status() {
-    let merchant = Pubkey::new_unique();
-    let result = SettleAndFinalizeRun::new(
-        merchant,
+fn open_to_sealed_writes_status() {
+    let payee = Pubkey::new_unique();
+    let result = SettleAndSealRun::new(
+        payee,
         ChannelBuilder::new()
             .status(ChannelStatus::Open)
-            .payee(merchant)
+            .payee(payee)
             .build(),
     )
     .run_inspect();
     assert_eq!(result.program_result, ProgramResult::Success);
     let ch = channel(&result);
-    assert_eq!(ch.status, ChannelStatus::Finalized as u8);
+    assert_eq!(ch.status, ChannelStatus::Sealed as u8);
     assert_eq!(ch.closure_started_at(), 0i64);
 }
 
 #[test]
 fn closing_mid_grace_resets_closure_started_at() {
-    let merchant = Pubkey::new_unique();
-    let result = SettleAndFinalizeRun::new(
-        merchant,
+    let payee = Pubkey::new_unique();
+    let result = SettleAndSealRun::new(
+        payee,
         ChannelBuilder::new()
             .status(ChannelStatus::Closing)
-            .payee(merchant)
+            .payee(payee)
             .closure_started_at(CLOSURE_STARTED_AT_MID_GRACE)
             .grace_period(GRACE_PERIOD)
             .settled(200_000)
@@ -194,7 +194,7 @@ fn closing_mid_grace_resets_closure_started_at() {
     .run_inspect();
     assert_eq!(result.program_result, ProgramResult::Success);
     let ch = channel(&result);
-    assert_eq!(ch.status, ChannelStatus::Finalized as u8);
+    assert_eq!(ch.status, ChannelStatus::Sealed as u8);
     assert_eq!(ch.closure_started_at(), 0i64);
     assert_eq!(ch.settled(), 200_000u64);
 }

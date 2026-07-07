@@ -3,7 +3,7 @@
 //! Two tiers:
 //! - [`integration`]: Mollusk-driven guard/state-validation tests built on top
 //!   of `WithdrawPayerRun` + [`ChannelBuilder`](crate::common::ChannelBuilder).
-//! - [`e2e`]: full LiteSVM scenarios that drive `open` → patch-to-FINALIZED →
+//! - [`e2e`]: full LiteSVM scenarios that drive `open` → patch-to-SEALED →
 //!   `withdraw_payer` against the compiled `.so` and assert real token balances.
 
 mod e2e;

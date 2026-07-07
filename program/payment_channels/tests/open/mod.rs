@@ -28,6 +28,11 @@ pub(super) struct OpenRun {
     pub salt: u64,
     pub deposit: u64,
     pub grace_period: u32,
+    /// Slot committed to the channel — both an `open` ix arg and a channel
+    /// PDA seed. Defaults to 0, which matches Mollusk's default Clock
+    /// (slot 0) and so always clears the
+    /// `open_slot <= clock.slot <= open_slot + OPEN_SLOT_WINDOW` gate.
+    pub open_slot: u64,
     pub num_recipients: u8,
     pub payer: Pubkey,
     pub payer_is_signer: bool,
@@ -53,6 +58,7 @@ impl OpenRun {
             salt,
             deposit,
             grace_period,
+            open_slot: 0,
             num_recipients,
             payer: Pubkey::new_unique(),
             payer_is_signer: true,
@@ -73,6 +79,7 @@ impl OpenRun {
         data.extend_from_slice(&self.salt.to_le_bytes());
         data.extend_from_slice(&self.deposit.to_le_bytes());
         data.extend_from_slice(&self.grace_period.to_le_bytes());
+        data.extend_from_slice(&self.open_slot.to_le_bytes());
         data.extend_from_slice(&(self.num_recipients as u32).to_le_bytes());
         if self.num_recipients > 0 {
             let entries = match &self.recipients {
@@ -166,13 +173,16 @@ pub(crate) fn setup_funded_svm_with_token_program(
     (payer, mint, payer_ata)
 }
 
-/// Derive `(channel_pda, channel_ata)` for the given seeds.
+/// Derive `(channel_pda, channel_ata)` for the given seeds. `open_slot` is
+/// part of the channel seeds, so the caller must fix it (the same value it
+/// will pass in the `open` ix args) before the address can be known.
 pub(super) fn derive_pdas(
     payer: &Pubkey,
     payee: &Pubkey,
     mint: &Pubkey,
     authorized_signer: &Pubkey,
     salt: u64,
+    open_slot: u64,
 ) -> (Pubkey, Pubkey) {
     let (channel, _) = Pubkey::find_program_address(
         &[
@@ -182,6 +192,7 @@ pub(super) fn derive_pdas(
             mint.as_ref(),
             authorized_signer.as_ref(),
             &salt.to_le_bytes(),
+            &open_slot.to_le_bytes(),
         ],
         &PROGRAM_ID,
     );
@@ -195,8 +206,10 @@ pub(super) fn derive_pdas(
 /// Build the `open` instruction with all 13 accounts wired up.
 ///
 /// Wire layout: `discriminator(1) | salt(8) | deposit(8) | grace(4) |
-/// num_recipients(u32 LE) | entries(num_recipients × 34)` where each entry
-/// is `pubkey(32) | bps(u16)`.
+/// open_slot(8) | num_recipients(u32 LE) | entries(num_recipients × 34)`
+/// where each entry is `pubkey(32) | bps(u16)`. `open_slot` must sit inside
+/// the `[clock.slot - OPEN_SLOT_WINDOW, clock.slot]` window; fresh LiteSVM
+/// instances boot at slot 0, so callers that never warp pass 0.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn open_ix(
     payer: &Pubkey,
@@ -209,6 +222,7 @@ pub(super) fn open_ix(
     salt: u64,
     deposit: u64,
     grace_period: u32,
+    open_slot: u64,
     num_recipients: u8,
 ) -> Instruction {
     open_ix_with_token_program(
@@ -223,6 +237,7 @@ pub(super) fn open_ix(
         salt,
         deposit,
         grace_period,
+        open_slot,
         num_recipients,
     )
 }
@@ -241,12 +256,14 @@ pub(super) fn open_ix_with_token_program(
     salt: u64,
     deposit: u64,
     grace_period: u32,
+    open_slot: u64,
     num_recipients: u8,
 ) -> Instruction {
     let mut data = vec![DISCRIMINATOR];
     data.extend_from_slice(&salt.to_le_bytes());
     data.extend_from_slice(&deposit.to_le_bytes());
     data.extend_from_slice(&grace_period.to_le_bytes());
+    data.extend_from_slice(&open_slot.to_le_bytes());
     data.extend_from_slice(&(num_recipients as u32).to_le_bytes());
     if num_recipients > 0 {
         for i in 0..num_recipients as usize {
@@ -283,6 +300,7 @@ pub(super) fn derive_pdas_with_token_program(
     mint: &Pubkey,
     authorized_signer: &Pubkey,
     salt: u64,
+    open_slot: u64,
     token_program: &Pubkey,
 ) -> (Pubkey, Pubkey) {
     let (channel, _) = Pubkey::find_program_address(
@@ -293,6 +311,7 @@ pub(super) fn derive_pdas_with_token_program(
             mint.as_ref(),
             authorized_signer.as_ref(),
             &salt.to_le_bytes(),
+            &open_slot.to_le_bytes(),
         ],
         &PROGRAM_ID,
     );

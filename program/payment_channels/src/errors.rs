@@ -93,6 +93,8 @@ pub enum PaymentChannelsError {
     VoucherMessageMismatch = 236,
     #[error("Voucher signer does not match channel authorized_signer")]
     VoucherSignerMismatch = 237,
+    #[error("Voucher payload magic prefix is invalid")]
+    VoucherBadMagic = 238,
 
     // distribution validation
     #[error("num_recipients outside [0, 32]")]
@@ -115,14 +117,18 @@ pub enum PaymentChannelsError {
     PayerPayeeMustDiffer = 2001,
     #[error("authorized_signer must be a valid Ed25519 public key")]
     InvalidAuthorizedSigner = 2002,
+    #[error("open_slot is in the future or older than the allowed slot window")]
+    OpenSlotOutOfWindow = 2003,
 
     // ix top_up
     #[error("Deposit must be non-zero")]
     TopUpDepositOverflow = 2100,
 
-    // ix finalize
+    // ix seal
     #[error("Deadline overflow on grace period")]
-    FinalizeDeadlineOverflow = 2200,
+    SealDeadlineOverflow = 2200,
+    #[error("Grace period has not elapsed yet")]
+    SealGracePeriodNotElapsed = 2201,
 
     // ix withdraw_payer
     #[error("Payer refund has already been claimed")]
@@ -131,7 +137,7 @@ pub enum PaymentChannelsError {
     RefundCalculationOverflow = 2301,
 
     // ix distribute
-    #[error("Channel is not in OPEN or FINALIZED")]
+    #[error("Channel is not in OPEN or SEALED")]
     ChannelNotDistributable = 2400,
     #[error("Treasury token account is not ATA(TREASURY_OWNER, mint, token_program)")]
     TreasuryAccountMismatch = 2401,
@@ -155,8 +161,10 @@ pub enum PaymentChannelsError {
     DistributePoolOverflow = 2410,
     #[error("Channel rent rebalance calculation underflow")]
     DistributeBalanceCalculationOverflow = 2411,
-    #[error("Payer lamports overflow on rent refund")]
-    DistributePayerBalanceOverflow = 2412,
+    #[error("Rent payer lamports overflow on channel deallocation")]
+    RentPayerBalanceOverflow = 2412,
     #[error("Transfer queue capacity exceeded")]
     DistributeTransferQueueOverflow = 2413,
+    #[error("Channel cannot be fully closed until clock.slot > open_slot + OPEN_SLOT_WINDOW")]
+    ChannelCloseTooEarly = 2414,
 }

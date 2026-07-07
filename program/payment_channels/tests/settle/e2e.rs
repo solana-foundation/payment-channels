@@ -6,7 +6,6 @@ use litesvm::LiteSVM;
 use payment_channels::PaymentChannelsError;
 use payment_channels::ed25519;
 use payment_channels_client::instructions::Settle;
-use payment_channels_client::types::VoucherArgs;
 use solana_account::Account;
 use solana_clock::Clock;
 use solana_instruction::Instruction;
@@ -20,7 +19,7 @@ use solana_compute_budget_interface::ComputeBudgetInstruction;
 use crate::common::{
     ChannelBuilder, INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, expect_custom_err,
     read_channel,
-    voucher::{build_ed25519_ix, voucher_payload},
+    voucher::{build_ed25519_ix, voucher, voucher_payload},
 };
 use payment_channels::state::ChannelStatus;
 
@@ -79,11 +78,7 @@ fn settle_advances_watermark_on_valid_voucher() {
     seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
 
     let cumulative = 500_000u64;
-    let voucher = VoucherArgs {
-        channel_id: channel,
-        cumulative_amount: cumulative,
-        expires_at: 0,
-    };
+    let voucher = voucher(channel, cumulative, 0);
     let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = signer.sign_message(&payload).into();
     let pubkey = signer.pubkey().to_bytes();
@@ -112,16 +107,8 @@ fn settle_batches_two_paired_ix_advance_watermark() {
     let channel = Pubkey::new_unique();
     seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
 
-    let voucher_1 = VoucherArgs {
-        channel_id: channel,
-        cumulative_amount: 300_000,
-        expires_at: 0,
-    };
-    let voucher_2 = VoucherArgs {
-        channel_id: channel,
-        cumulative_amount: 500_000,
-        expires_at: 0,
-    };
+    let voucher_1 = voucher(channel, 300_000, 0);
+    let voucher_2 = voucher(channel, 500_000, 0);
 
     let payload_1 = voucher_payload(&voucher_1);
     let payload_2 = voucher_payload(&voucher_2);
@@ -192,11 +179,7 @@ fn settle_after_expiry_rejects() {
     clock.unix_timestamp = expires_at;
     svm.set_sysvar::<Clock>(&clock);
 
-    let voucher = VoucherArgs {
-        channel_id: channel,
-        cumulative_amount: 500_000,
-        expires_at,
-    };
+    let voucher = voucher(channel, 500_000, expires_at);
     let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = signer.sign_message(&payload).into();
     let pubkey = signer.pubkey().to_bytes();
@@ -218,6 +201,10 @@ fn settle_after_expiry_rejects() {
 
 #[test]
 fn settle_voucher_channel_mismatch_rejects() {
+    // `channel_id` is the voucher's only binding — and because `open_slot`
+    // is a channel PDA seed, binding the address also binds the incarnation.
+    // A voucher for any other address (a different channel OR a dead/future
+    // incarnation of the same seed tuple) must reject here.
     let mut svm = LiteSVM::load_program();
     let fee_payer = Keypair::new();
     svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
@@ -227,11 +214,7 @@ fn settle_voucher_channel_mismatch_rejects() {
     let channel_b = Pubkey::new_unique();
     seed_channel(&mut svm, &channel_a, 0, 1_000_000, 0, &signer.pubkey());
 
-    let voucher = VoucherArgs {
-        channel_id: channel_b,
-        cumulative_amount: 500_000,
-        expires_at: 0,
-    };
+    let voucher = voucher(channel_b, 500_000, 0);
     let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = signer.sign_message(&payload).into();
     let pubkey = signer.pubkey().to_bytes();
@@ -261,11 +244,7 @@ fn settle_voucher_over_deposit_rejects() {
     let channel = Pubkey::new_unique();
     seed_channel(&mut svm, &channel, 0, 500_000, 0, &signer.pubkey());
 
-    let voucher = VoucherArgs {
-        channel_id: channel,
-        cumulative_amount: 500_001,
-        expires_at: 0,
-    };
+    let voucher = voucher(channel, 500_001, 0);
     let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = signer.sign_message(&payload).into();
     let pubkey = signer.pubkey().to_bytes();
@@ -295,11 +274,7 @@ fn settle_voucher_not_monotonic_rejects() {
     let channel = Pubkey::new_unique();
     seed_channel(&mut svm, &channel, 0, 1_000_000, 500_000, &signer.pubkey());
 
-    let voucher = VoucherArgs {
-        channel_id: channel,
-        cumulative_amount: 500_000,
-        expires_at: 0,
-    };
+    let voucher = voucher(channel, 500_000, 0);
     let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = signer.sign_message(&payload).into();
     let pubkey = signer.pubkey().to_bytes();
@@ -336,11 +311,7 @@ fn settle_voucher_signer_mismatch_rejects() {
     let channel = Pubkey::new_unique();
     seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &authorized.pubkey());
 
-    let voucher = VoucherArgs {
-        channel_id: channel,
-        cumulative_amount: 500_000,
-        expires_at: 0,
-    };
+    let voucher = voucher(channel, 500_000, 0);
     let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = impostor.sign_message(&payload).into();
     let pubkey = impostor.pubkey().to_bytes();
@@ -370,11 +341,7 @@ fn settle_malformed_ed25519_ix_rejects() {
     let channel = Pubkey::new_unique();
     seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
 
-    let voucher = VoucherArgs {
-        channel_id: channel,
-        cumulative_amount: 500_000,
-        expires_at: 0,
-    };
+    let voucher = voucher(channel, 500_000, 0);
     let payload = voucher_payload(&voucher);
     let signature: [u8; 64] = signer.sign_message(&payload).into();
     let pubkey = signer.pubkey().to_bytes();
@@ -445,11 +412,7 @@ fn settle_with_invalid_signature_rejects_before_settle_runs() {
     let channel = Pubkey::new_unique();
     seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
 
-    let voucher = VoucherArgs {
-        channel_id: channel,
-        cumulative_amount: 500_000,
-        expires_at: 0,
-    };
+    let voucher = voucher(channel, 500_000, 0);
     let payload = voucher_payload(&voucher);
     let pubkey = signer.pubkey().to_bytes();
     let forged_signature = [0u8; ed25519::SIGNATURE_SERIALIZED_SIZE];
@@ -475,5 +438,51 @@ fn settle_with_invalid_signature_rejects_before_settle_runs() {
     }
 
     // Cross-check: settle never wrote the watermark.
+    assert_eq!(read_settled(&svm, &channel), 0);
+}
+
+// ─── magic binding ───────────────────────────────────────────────────────────
+//
+// (Former `settle_voucher_wrong_init_id_rejects` removed: the voucher no
+// longer carries an `open_slot` field, so there is no on-chain epoch check
+// to exercise. `open_slot` is now a channel PDA seed, so every incarnation lives
+// at its own address and a voucher binds its epoch by binding the address in
+// `channel_id`. The equivalent property — "a voucher for a different address
+// rejects with `VoucherChannelMismatch`" — is pinned by
+// `settle_voucher_channel_mismatch_rejects` above and by the
+// address-per-incarnation lifecycle tests in `distribute::e2e` /
+// `reclaim::e2e`.)
+
+#[test]
+fn settle_voucher_bad_magic_rejects() {
+    let mut svm = LiteSVM::load_program();
+    let fee_payer = Keypair::new();
+    svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
+
+    let signer = Keypair::new();
+    let channel = Pubkey::new_unique();
+    seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
+
+    // Corrupt the domain magic BEFORE signing: the precompile verifies the
+    // (tampered) message fine, so only the program's magic check can reject.
+    let mut voucher = voucher(channel, 500_000, 0);
+    voucher.magic[0] ^= 0xFF;
+    let payload = voucher_payload(&voucher);
+    let signature: [u8; 64] = signer.sign_message(&payload).into();
+    let pubkey = signer.pubkey().to_bytes();
+
+    let ed25519_ix = build_ed25519_ix(&pubkey, &signature, &payload);
+    let settle_ix = build_settle_ix(&channel);
+
+    let tx = Transaction::new_signed_with_payer(
+        &[ed25519_ix, settle_ix],
+        Some(&fee_payer.pubkey()),
+        &[&fee_payer],
+        svm.latest_blockhash(),
+    );
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::VoucherBadMagic,
+    );
     assert_eq!(read_settled(&svm, &channel), 0);
 }

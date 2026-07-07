@@ -21,8 +21,9 @@ use solana_pubkey::Pubkey;
 use crate::common::{PROGRAM_ID, ProgramLoader, SPL_TOKEN, TOKEN_2022, event_authority};
 
 pub(super) const STATUS_OPEN: u8 = 0;
-pub(super) const STATUS_FINALIZED: u8 = 1;
+pub(super) const STATUS_SEALED: u8 = 1;
 pub(super) const STATUS_CLOSING: u8 = 2;
+pub(super) const STATUS_DISTRIBUTED: u8 = 3;
 pub(super) const MAX_DISTRIBUTION_RECIPIENTS: usize = 32;
 
 /// Recipient + share for the distribution plan committed at `open` and

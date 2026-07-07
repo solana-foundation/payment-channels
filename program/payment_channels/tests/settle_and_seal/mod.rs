@@ -2,20 +2,20 @@ mod e2e;
 mod integration;
 
 use mollusk_svm::{Mollusk, result::InstructionResult, result::ProgramResult};
-use payment_channels::instructions::settle_and_finalize::DISCRIMINATOR;
+use payment_channels::instructions::settle_and_seal::DISCRIMINATOR;
 use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
 use crate::common::{PROGRAM_ID, ProgramLoader};
 
-/// Execution descriptor for a single `settleAndFinalize` Mollusk run.
+/// Execution descriptor for a single `settleAndSeal` Mollusk run.
 ///
-/// Construct with [`SettleAndFinalizeRun::new`] for the required fields;
+/// Construct with [`SettleAndSealRun::new`] for the required fields;
 /// override any public field via struct update syntax before calling
-/// [`SettleAndFinalizeRun::run`].
-pub(super) struct SettleAndFinalizeRun {
-    pub merchant: Pubkey,
+/// [`SettleAndSealRun::run`].
+pub(super) struct SettleAndSealRun {
+    pub payee: Pubkey,
     pub is_signer: bool,
     pub channel_blob: Vec<u8>,
     /// `0` = no voucher; any other byte = apply the voucher carried by the
@@ -24,10 +24,10 @@ pub(super) struct SettleAndFinalizeRun {
     pub has_voucher: u8,
 }
 
-impl SettleAndFinalizeRun {
-    pub fn new(merchant: Pubkey, channel_blob: Vec<u8>) -> Self {
+impl SettleAndSealRun {
+    pub fn new(payee: Pubkey, channel_blob: Vec<u8>) -> Self {
         Self {
-            merchant,
+            payee,
             is_signer: true,
             channel_blob,
             has_voucher: 0,
@@ -50,7 +50,7 @@ impl SettleAndFinalizeRun {
             PROGRAM_ID,
             &ix_data,
             vec![
-                AccountMeta::new_readonly(self.merchant, self.is_signer),
+                AccountMeta::new_readonly(self.payee, self.is_signer),
                 AccountMeta::new(channel_pubkey, false),
                 AccountMeta::new_readonly(Pubkey::new_unique(), false), // instructions_sysvar (unused for no-voucher)
             ],

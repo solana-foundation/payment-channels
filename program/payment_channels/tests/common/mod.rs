@@ -10,10 +10,12 @@ pub mod voucher;
 use litesvm::LiteSVM;
 use mollusk_svm::Mollusk;
 use payment_channels::PaymentChannelsError;
+use payment_channels::constants::OPEN_SLOT_WINDOW;
 use payment_channels::instructions::open::DISCRIMINATOR as OPEN_DISCRIMINATOR;
 use payment_channels::state::Channel;
 use payment_channels::state::channel::ChannelStatus;
 use payment_channels::state::{AccountDiscriminator, CURRENT_CHANNEL_VERSION};
+use payment_channels_client::instructions::Reclaim;
 use pinocchio::Address;
 use solana_clock::Clock;
 use solana_instruction::{AccountMeta, Instruction, error::InstructionError};
@@ -62,6 +64,38 @@ pub fn set_clock(svm: &mut LiteSVM, unix_timestamp: i64) {
     svm.set_sysvar::<Clock>(&clock);
 }
 
+/// Current Clock slot as seen by the program.
+pub fn current_slot(svm: &LiteSVM) -> u64 {
+    svm.get_sysvar::<Clock>().slot
+}
+
+/// The channel's `open_slot` epoch.
+pub fn channel_open_slot(svm: &LiteSVM, channel: &Pubkey) -> u64 {
+    read_channel(svm, channel, |ch| ch.open_slot())
+}
+
+/// Advance the Clock slot past the channel's reclaim gate
+/// (`clock.slot > open_slot + OPEN_SLOT_WINDOW`) so the PDA may be
+/// deallocated — by the SEALED `distribute` fast path, or by `reclaim`
+/// on a `Distributed` channel.
+pub fn warp_past_close_gate(svm: &mut LiteSVM, channel: &Pubkey) {
+    let unlock = channel_open_slot(svm, channel) + OPEN_SLOT_WINDOW + 1;
+    if current_slot(svm) < unlock {
+        svm.warp_to_slot(unlock);
+    }
+}
+
+/// Builds the permissionless `reclaim` ix via the generated client:
+/// `[channel (writable), rent_payer (writable)]`, no signers, no data
+/// beyond the discriminator byte.
+pub fn build_reclaim_ix(channel: &Pubkey, rent_payer: &Pubkey) -> Instruction {
+    Reclaim {
+        channel: *channel,
+        rent_payer: *rent_payer,
+    }
+    .instruction()
+}
+
 /// Opens a payment channel with a single 100% distribution recipient and
 /// returns `(channel_pda, channel_ata)`.
 #[allow(clippy::too_many_arguments)]
@@ -76,6 +110,12 @@ pub fn open_channel(
     payer_ata: &Pubkey,
     token_program: &Pubkey,
 ) -> (Pubkey, Pubkey) {
+    // `open_slot` is both an ix arg and a channel PDA seed, so it must be
+    // known BEFORE deriving the address: the freshest valid value — the
+    // current slot. Tests that need the exact value afterwards read it back
+    // via `channel_open_slot`.
+    let open_slot = svm.get_sysvar::<Clock>().slot;
+
     let (channel, _) = Pubkey::find_program_address(
         &[
             b"channel",
@@ -84,6 +124,7 @@ pub fn open_channel(
             mint.as_ref(),
             authorized_signer.as_ref(),
             &salt.to_le_bytes(),
+            &open_slot.to_le_bytes(),
         ],
         &PROGRAM_ID,
     );
@@ -97,6 +138,7 @@ pub fn open_channel(
     data.extend_from_slice(&salt.to_le_bytes());
     data.extend_from_slice(&deposit.to_le_bytes());
     data.extend_from_slice(&3_600u32.to_le_bytes());
+    data.extend_from_slice(&open_slot.to_le_bytes());
     data.extend_from_slice(&1u32.to_le_bytes());
     data.extend_from_slice(&[1u8; 32]);
     data.extend_from_slice(&5_000u16.to_le_bytes());
@@ -258,6 +300,8 @@ pub struct ChannelBuilder {
     payee: Pubkey,
     authorized_signer: Pubkey,
     mint: Pubkey,
+    rent_payer: Pubkey,
+    open_slot: u64,
 }
 
 impl ChannelBuilder {
@@ -273,7 +317,14 @@ impl ChannelBuilder {
             payee: Pubkey::default(),
             authorized_signer: Pubkey::default(),
             mint: Pubkey::default(),
+            rent_payer: Pubkey::default(),
+            open_slot: 0,
         }
+    }
+
+    pub fn open_slot(mut self, open_slot: u64) -> Self {
+        self.open_slot = open_slot;
+        self
     }
 
     pub fn status(mut self, status: ChannelStatus) -> Self {
@@ -326,10 +377,15 @@ impl ChannelBuilder {
         self
     }
 
+    pub fn rent_payer(mut self, rent_payer: Pubkey) -> Self {
+        self.rent_payer = rent_payer;
+        self
+    }
+
     pub fn build(self) -> Vec<u8> {
         let mut data = vec![0u8; Channel::LEN];
         // SAFETY: `Channel` is `#[repr(C)]` with `align_of == 1`; a zeroed
-        // 216-byte `Vec<u8>` is a valid `Channel` for the purposes of
+        // 256-byte `Vec<u8>` is a valid `Channel` for the purposes of
         // initializing every field below.
         let ch = unsafe { &mut *(data.as_mut_ptr() as *mut Channel) };
         ch.discriminator = AccountDiscriminator::Channel as u8;
@@ -344,6 +400,8 @@ impl ChannelBuilder {
         ch.payee = Address::new_from_array(self.payee.to_bytes());
         ch.authorized_signer = Address::new_from_array(self.authorized_signer.to_bytes());
         ch.mint = Address::new_from_array(self.mint.to_bytes());
+        ch.rent_payer = Address::new_from_array(self.rent_payer.to_bytes());
+        ch.set_open_slot(self.open_slot);
         data
     }
 }

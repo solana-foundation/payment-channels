@@ -1,11 +1,12 @@
 pub mod distribute;
 pub mod emit_event;
-pub mod finalize;
 pub mod helpers;
 pub mod open;
+pub mod reclaim;
 pub mod request_close;
+pub mod seal;
 pub mod settle;
-pub mod settle_and_finalize;
+pub mod settle_and_seal;
 pub mod top_up;
 pub mod withdraw_payer;
 
@@ -15,9 +16,19 @@ use pinocchio::{Address, error::ProgramError};
 
 use crate::state::Transmutable;
 
+/// Domain-separation prefix of the voucher payload: a fixed tag byte
+/// (`'V'` = 0x56, constant across all payload versions) plus a
+/// format-version byte (`0x01`). Separation strength comes from the exact
+/// message-length pin plus the `channel_id` PDA binding, not tag entropy:
+/// the tag only needs to differ from the first byte of anything else an
+/// Ed25519 session key plausibly signs (legacy tx messages start with a
+/// small signature count, versioned txs with `0x80`, offchain messages
+/// with `0xff`). Two bytes buy that while keeping the payload compact.
+pub const VOUCHER_MAGIC: [u8; 2] = [0x56, 0x01];
+
 /// On-chain wire encoding of the voucher. Field order matches
-/// Borsh(`{ channel_id, cumulative_amount, expires_at }`), so the
-/// struct's raw bytes ARE the ed25519-signed payload — no repack.
+/// Borsh(`{ magic, channel_id, cumulative_amount, expires_at }`), so
+/// the struct's raw bytes ARE the ed25519-signed payload — no repack.
 /// Ed25519-only; signature verification is offloaded to a caller-bundled
 /// Ed25519 native-program ix whose message bytes are read back via the
 /// Instructions sysvar.
@@ -25,7 +36,12 @@ use crate::state::Transmutable;
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct VoucherArgs {
+    /// Must equal [`VOUCHER_MAGIC`] (`tag || version`).
+    pub magic: [u8; 2],
     /// Replay scope; must equal the [`Channel`](crate::Channel) PDA.
+    /// Because `open_slot` is a PDA seed, the address itself is
+    /// per-incarnation — binding it also binds the epoch, so no separate
+    /// epoch field is needed.
     pub channel_id: Address,
     /// Monotonic watermark. Must satisfy
     /// [`settled`](crate::Channel::settled) `< cumulative_amount ≤`
@@ -42,6 +58,7 @@ pub struct VoucherArgs {
 impl VoucherArgs {
     pub fn new(channel_id: Address, cumulative_amount: u64, expires_at: i64) -> Self {
         Self {
+            magic: VOUCHER_MAGIC,
             channel_id,
             cumulative_amount: cumulative_amount.to_le_bytes(),
             expires_at: expires_at.to_le_bytes(),
@@ -58,18 +75,22 @@ impl VoucherArgs {
     }
 }
 
-/// Byte length of the signed voucher payload — `channel_id (32) ||
-/// cumulative_amount (8 LE) || expires_at (8 LE)`, which is
-/// exactly the in-memory layout of [`VoucherArgs`]. Also the canonical
-/// `message_data_size` every Ed25519 precompile ix must declare; pinned
-/// against a layout where an attacker has the precompile verify a
+/// Byte length of the signed voucher payload — `magic (2) || channel_id
+/// (32) || cumulative_amount (8 LE) || expires_at (8 LE)`,
+/// which is exactly the in-memory layout of [`VoucherArgs`]. Also the
+/// canonical `message_data_size` every Ed25519 precompile ix must declare;
+/// pinned against a layout where an attacker has the precompile verify a
 /// truncated or extended message.
 pub const VOUCHER_PAYLOAD_SIZE: usize = core::mem::size_of::<VoucherArgs>();
 
 /// Pins [`VOUCHER_PAYLOAD_SIZE`] to the Ed25519 precompile's `u16`
 /// `message_data_size` field so the `as u16` casts at ix-build sites
-/// can't silently truncate.
-const _: () = assert!(VOUCHER_PAYLOAD_SIZE <= u16::MAX as usize);
+/// can't silently truncate, and pins the exact byte width the off-chain
+/// signer contract depends on.
+const _: () = {
+    assert!(VOUCHER_PAYLOAD_SIZE <= u16::MAX as usize);
+    assert!(VOUCHER_PAYLOAD_SIZE == 50);
+};
 
 unsafe impl Transmutable for VoucherArgs {
     const LEN: usize = VOUCHER_PAYLOAD_SIZE;
@@ -140,21 +161,21 @@ pub enum PaymentChannelsInstruction<'a> {
     )]
     TopUp(#[cfg_attr(feature = "idl", codama(name = "top_up_args"))] &'a top_up::TopUpArgs) = 3,
 
-    /// Merchant-signed cooperative close: optionally applies a final
-    /// voucher, locks the watermark, and moves to `FINALIZED`. `OPEN →
-    /// FINALIZED` leaves
+    /// Payee-signed cooperative close: optionally applies a final
+    /// voucher, locks the watermark, and moves to `SEALED`. `OPEN →
+    /// SEALED` leaves
     /// [`closure_started_at`](crate::Channel::closure_started_at) at 0;
-    /// `CLOSING → FINALIZED` is only valid mid-grace and resets
+    /// `CLOSING → SEALED` is only valid mid-grace and resets
     /// [`closure_started_at`](crate::Channel::closure_started_at) to 0.
     #[cfg_attr(
         feature = "idl",
-        codama(account(name = "merchant", signer)),
+        codama(account(name = "payee", signer)),
         codama(account(name = "channel", writable)),
         codama(account(name = "instructions_sysvar"))
     )]
-    SettleAndFinalize(
-        #[cfg_attr(feature = "idl", codama(name = "settle_and_finalize_args"))]
-        &'a settle_and_finalize::SettleAndFinalizeArgs,
+    SettleAndSeal(
+        #[cfg_attr(feature = "idl", codama(name = "settle_and_seal_args"))]
+        &'a settle_and_seal::SettleAndSealArgs,
     ) = 4,
 
     /// Payer-signed: starts the grace period by setting
@@ -168,10 +189,10 @@ pub enum PaymentChannelsInstruction<'a> {
     RequestClose = 5,
 
     /// Permissionless post-grace crank: freezes the watermark and moves
-    /// `CLOSING → FINALIZED` once the grace has elapsed; resets
+    /// `CLOSING → SEALED` once the grace has elapsed; resets
     /// [`closure_started_at`](crate::Channel::closure_started_at) to 0.
     #[cfg_attr(feature = "idl", codama(account(name = "channel", writable)))]
-    Finalize = 6,
+    Seal = 6,
 
     /// Permissionless crank. Verifies the committed preimage and pays
     /// cumulative floor deltas between
@@ -180,11 +201,13 @@ pub enum PaymentChannelsInstruction<'a> {
     /// payee's implicit remainder share. In `OPEN`, residual dust remains
     /// claimable by future cumulative deltas while
     /// [`payout_watermark`](crate::Channel::payout_watermark) advances to
-    /// [`settled`](crate::Channel::settled). From `FINALIZED`, final floor
+    /// [`settled`](crate::Channel::settled). From `SEALED`, final floor
     /// residual is swept to treasury, the payer receives the unspent
     /// [`deposit`](crate::Channel::deposit) `−`
     /// [`settled`](crate::Channel::settled) headroom (if not already
-    /// withdrawn) and tombstones the escrow ATA + the Channel PDA.
+    /// withdrawn), closes the escrow ATA, and closes the Channel PDA
+    /// (deallocated in place past the epoch window, else marked
+    /// [`Distributed`](crate::ChannelStatus::Distributed) for `reclaim`).
     /// Recipient token accounts are appended as remaining accounts in the
     /// same order as the`DistributionEntry`s in the preimage.
     #[cfg_attr(
@@ -207,9 +230,9 @@ pub enum PaymentChannelsInstruction<'a> {
     ) = 7,
 
     /// Payer-signed one-shot refund of [`deposit`](crate::Channel::deposit)
-    /// `−` [`settled`](crate::Channel::settled) during `FINALIZED`;
+    /// `−` [`settled`](crate::Channel::settled) during `SEALED`;
     /// records [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at)
-    /// `= now`. Does not tombstone.
+    /// `= now`. Does not close the PDA.
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "payer", signer)),
@@ -220,6 +243,18 @@ pub enum PaymentChannelsInstruction<'a> {
         codama(account(name = "token_program"))
     )]
     WithdrawPayer = 8,
+
+    /// Permissionless crank: deallocates a fully-drained
+    /// [`Distributed`](crate::ChannelStatus::Distributed) channel PDA and returns all
+    /// its lamports to the recorded `rent_payer`, once
+    /// `clock.slot > open_slot + OPEN_SLOT_WINDOW`. Two accounts, no
+    /// signers — batch many per sweep transaction.
+    #[cfg_attr(
+        feature = "idl",
+        codama(account(name = "channel", writable)),
+        codama(account(name = "rent_payer", writable))
+    )]
+    Reclaim = 9,
 
     /// Self-CPI target for the event pipeline; not part of the public
     /// instruction set. `228 = EVENT_IX_TAG_LE[0]`: self-CPI event data
@@ -243,11 +278,12 @@ impl<'a> PaymentChannelsInstruction<'a> {
             Self::Open(_) => "open",
             Self::Settle => "settle",
             Self::TopUp(_) => "top_up",
-            Self::SettleAndFinalize(_) => "settle_and_finalize",
+            Self::SettleAndSeal(_) => "settle_and_seal",
             Self::RequestClose => "request_close",
-            Self::Finalize => "finalize",
+            Self::Seal => "seal",
             Self::Distribute(_) => "distribute",
             Self::WithdrawPayer => "withdraw_payer",
+            Self::Reclaim => "reclaim",
             Self::EmitEvent => "emit_event",
         }
     }
@@ -261,15 +297,16 @@ impl<'a> PaymentChannelsInstruction<'a> {
             open::DISCRIMINATOR => Ok(Self::Open(open::OpenArgs::load(rest)?)),
             settle::DISCRIMINATOR => Ok(Self::Settle),
             top_up::DISCRIMINATOR => Ok(Self::TopUp(top_up::TopUpArgs::load(rest)?)),
-            settle_and_finalize::DISCRIMINATOR => Ok(Self::SettleAndFinalize(
-                settle_and_finalize::SettleAndFinalizeArgs::load(rest)?,
+            settle_and_seal::DISCRIMINATOR => Ok(Self::SettleAndSeal(
+                settle_and_seal::SettleAndSealArgs::load(rest)?,
             )),
             request_close::DISCRIMINATOR => Ok(Self::RequestClose),
-            finalize::DISCRIMINATOR => Ok(Self::Finalize),
+            seal::DISCRIMINATOR => Ok(Self::Seal),
             distribute::DISCRIMINATOR => {
                 Ok(Self::Distribute(distribute::DistributeArgs::load(rest)?))
             }
             withdraw_payer::DISCRIMINATOR => Ok(Self::WithdrawPayer),
+            reclaim::DISCRIMINATOR => Ok(Self::Reclaim),
             emit_event::DISCRIMINATOR => Ok(Self::EmitEvent),
             _ => Err(ProgramError::InvalidInstructionData),
         }
@@ -290,9 +327,9 @@ mod tests {
     #[test]
     fn discriminators_match_variants() {
         let top_up: top_up::TopUpArgs = unsafe { core::mem::zeroed() };
-        let saf: settle_and_finalize::SettleAndFinalizeArgs = unsafe { core::mem::zeroed() };
+        let saf: settle_and_seal::SettleAndSealArgs = unsafe { core::mem::zeroed() };
 
-        let open_data = [0u8; 20 + 4];
+        let open_data = [0u8; 28 + 4];
         let open = open::OpenArgs::load(&open_data).unwrap();
         let distribute_data = 0u32.to_le_bytes();
         let distribute = distribute::DistributeArgs::load(&distribute_data).unwrap();
@@ -310,17 +347,14 @@ mod tests {
             top_up::DISCRIMINATOR,
         );
         assert_eq!(
-            tag(&PaymentChannelsInstruction::SettleAndFinalize(&saf)),
-            settle_and_finalize::DISCRIMINATOR,
+            tag(&PaymentChannelsInstruction::SettleAndSeal(&saf)),
+            settle_and_seal::DISCRIMINATOR,
         );
         assert_eq!(
             tag(&PaymentChannelsInstruction::RequestClose),
             request_close::DISCRIMINATOR,
         );
-        assert_eq!(
-            tag(&PaymentChannelsInstruction::Finalize),
-            finalize::DISCRIMINATOR,
-        );
+        assert_eq!(tag(&PaymentChannelsInstruction::Seal), seal::DISCRIMINATOR,);
         assert_eq!(
             tag(&PaymentChannelsInstruction::Distribute(distribute)),
             distribute::DISCRIMINATOR,
@@ -328,6 +362,10 @@ mod tests {
         assert_eq!(
             tag(&PaymentChannelsInstruction::WithdrawPayer),
             withdraw_payer::DISCRIMINATOR,
+        );
+        assert_eq!(
+            tag(&PaymentChannelsInstruction::Reclaim),
+            reclaim::DISCRIMINATOR,
         );
         assert_eq!(
             tag(&PaymentChannelsInstruction::EmitEvent),

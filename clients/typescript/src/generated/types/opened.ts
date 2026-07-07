@@ -17,17 +17,24 @@ import {
   type FixedSizeDecoder,
   type FixedSizeEncoder,
 } from "@solana/kit";
+import { getU64Decoder, getU64Encoder } from "../../safe-codecs.js";
 
-export type Opened = { channel: Address };
+export type Opened = { channel: Address; openSlot: bigint };
 
-export type OpenedArgs = Opened;
+export type OpenedArgs = { channel: Address; openSlot: bigint };
 
 export function getOpenedEncoder(): FixedSizeEncoder<OpenedArgs> {
-  return getStructEncoder([["channel", getAddressEncoder()]]);
+  return getStructEncoder([
+    ["channel", getAddressEncoder()],
+    ["openSlot", getU64Encoder()],
+  ]);
 }
 
 export function getOpenedDecoder(): FixedSizeDecoder<Opened> {
-  return getStructDecoder([["channel", getAddressDecoder()]]);
+  return getStructDecoder([
+    ["channel", getAddressDecoder()],
+    ["openSlot", getU64Decoder()],
+  ]);
 }
 
 export function getOpenedCodec(): FixedSizeCodec<OpenedArgs, Opened> {

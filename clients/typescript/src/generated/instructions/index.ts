@@ -8,10 +8,11 @@
 
 export * from "./distribute";
 export * from "./emitEvent";
-export * from "./finalize";
 export * from "./open";
+export * from "./reclaim";
 export * from "./requestClose";
+export * from "./seal";
 export * from "./settle";
-export * from "./settleAndFinalize";
+export * from "./settleAndSeal";
 export * from "./topUp";
 export * from "./withdrawPayer";

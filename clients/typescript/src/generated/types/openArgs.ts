@@ -33,6 +33,7 @@ export type OpenArgs = {
   salt: bigint;
   deposit: bigint;
   gracePeriod: number;
+  openSlot: bigint;
   recipients: Array<DistributionEntry>;
 };
 
@@ -40,6 +41,7 @@ export type OpenArgsArgs = {
   salt: bigint;
   deposit: bigint;
   gracePeriod: number;
+  openSlot: bigint;
   recipients: Array<DistributionEntryArgs>;
 };
 
@@ -48,6 +50,7 @@ export function getOpenArgsEncoder(): Encoder<OpenArgsArgs> {
     ["salt", getU64Encoder()],
     ["deposit", getU64Encoder()],
     ["gracePeriod", getU32Encoder()],
+    ["openSlot", getU64Encoder()],
     ["recipients", getArrayEncoder(getDistributionEntryEncoder())],
   ]);
 }
@@ -57,6 +60,7 @@ export function getOpenArgsDecoder(): Decoder<OpenArgs> {
     ["salt", getU64Decoder()],
     ["deposit", getU64Decoder()],
     ["gracePeriod", getU32Decoder()],
+    ["openSlot", getU64Decoder()],
     ["recipients", getArrayDecoder(getDistributionEntryDecoder())],
   ]);
 }

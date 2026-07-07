@@ -1,11 +1,11 @@
-//! End-to-end validation of `finalize` against the compiled .so.
+//! End-to-end validation of `seal` against the compiled .so.
 
 #![allow(clippy::result_large_err)]
 
 use litesvm::LiteSVM;
 use payment_channels::PaymentChannelsError;
 use payment_channels::state::channel::ChannelStatus;
-use payment_channels_client::instructions::Finalize;
+use payment_channels_client::instructions::Seal;
 use solana_account::Account;
 use solana_clock::Clock;
 use solana_keypair::Keypair;
@@ -50,12 +50,12 @@ fn set_clock(svm: &mut LiteSVM, unix_timestamp: i64) {
     svm.set_sysvar::<Clock>(&clock);
 }
 
-fn send_finalize(
+fn send_seal(
     svm: &mut LiteSVM,
     channel: &Pubkey,
     fee_payer: &Keypair,
 ) -> Result<litesvm::types::TransactionMetadata, litesvm::types::FailedTransactionMetadata> {
-    let ix = Finalize { channel: *channel }.instruction();
+    let ix = Seal { channel: *channel }.instruction();
     let tx = Transaction::new_signed_with_payer(
         &[ix],
         Some(&fee_payer.pubkey()),
@@ -82,8 +82,8 @@ fn mid_grace_rejects() {
     set_clock(&mut svm, DEADLINE - 1); // one second before deadline
 
     expect_custom_err(
-        send_finalize(&mut svm, &channel, &fee_payer),
-        PaymentChannelsError::InvalidChannelStatus,
+        send_seal(&mut svm, &channel, &fee_payer),
+        PaymentChannelsError::SealGracePeriodNotElapsed,
     );
 }
 
@@ -103,10 +103,10 @@ fn at_exact_deadline_succeeds() {
     );
     set_clock(&mut svm, DEADLINE); // now == deadline
 
-    send_finalize(&mut svm, &channel, &fee_payer).expect("finalize at deadline ok");
+    send_seal(&mut svm, &channel, &fee_payer).expect("seal at deadline ok");
 
     read_channel(&svm, &channel, |ch| {
-        assert_eq!(ch.status, ChannelStatus::Finalized as u8);
+        assert_eq!(ch.status, ChannelStatus::Sealed as u8);
         assert_eq!(ch.closure_started_at(), 0i64);
     });
 }
@@ -127,10 +127,10 @@ fn post_grace_transitions_and_clears_timestamp() {
     );
     set_clock(&mut svm, DEADLINE + 1); // one second past deadline
 
-    send_finalize(&mut svm, &channel, &fee_payer).expect("finalize ok");
+    send_seal(&mut svm, &channel, &fee_payer).expect("seal ok");
 
     read_channel(&svm, &channel, |ch| {
-        assert_eq!(ch.status, ChannelStatus::Finalized as u8);
+        assert_eq!(ch.status, ChannelStatus::Sealed as u8);
         assert_eq!(ch.closure_started_at(), 0i64);
     });
 }

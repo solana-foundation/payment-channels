@@ -8,9 +8,9 @@ use crate::common::ChannelBuilder;
 
 use super::WithdrawPayerRun;
 
-fn finalized_channel(payer: Pubkey) -> Vec<u8> {
+fn sealed_channel(payer: Pubkey) -> Vec<u8> {
     ChannelBuilder::new()
-        .status(ChannelStatus::Finalized)
+        .status(ChannelStatus::Sealed)
         .payer(payer)
         .build()
 }
@@ -58,7 +58,7 @@ fn already_withdrawn_rejects() {
         WithdrawPayerRun::new(
             payer,
             ChannelBuilder::new()
-                .status(ChannelStatus::Finalized)
+                .status(ChannelStatus::Sealed)
                 .payer(payer)
                 .payer_withdrawn_at(1)
                 .build(),
@@ -76,7 +76,7 @@ fn unsigned_payer_rejects() {
     assert_eq!(
         WithdrawPayerRun {
             is_signer: false,
-            ..WithdrawPayerRun::new(payer, finalized_channel(payer))
+            ..WithdrawPayerRun::new(payer, sealed_channel(payer))
         }
         .run(),
         ProgramResult::Failure(ProgramError::Custom(
@@ -93,7 +93,7 @@ fn wrong_payer_rejects() {
         WithdrawPayerRun::new(
             bob,
             ChannelBuilder::new()
-                .status(ChannelStatus::Finalized)
+                .status(ChannelStatus::Sealed)
                 .payer(alice)
                 .build(),
         )
@@ -115,7 +115,7 @@ fn wrong_mint_rejects() {
             ..WithdrawPayerRun::new(
                 payer,
                 ChannelBuilder::new()
-                    .status(ChannelStatus::Finalized)
+                    .status(ChannelStatus::Sealed)
                     .payer(payer)
                     .mint(stored_mint)
                     .build(),
@@ -140,7 +140,7 @@ fn unknown_token_program_rejects() {
             ..WithdrawPayerRun::new(
                 payer,
                 ChannelBuilder::new()
-                    .status(ChannelStatus::Finalized)
+                    .status(ChannelStatus::Sealed)
                     .payer(payer)
                     .mint(mint)
                     .build(),
@@ -154,7 +154,12 @@ fn unknown_token_program_rejects() {
 }
 
 #[test]
-fn tombstoned_channel_rejects() {
+fn legacy_tombstone_account_rejects() {
+    // 1-byte accounts carrying the reserved `ClosedChannel` discriminator
+    // (= 2) are leftovers of the pre-launch deployment's tombstone close;
+    // the program no longer produces them — a fully closed channel is
+    // deallocated entirely. The 1-byte buffer fails `Channel::load_mut`'s
+    // length gate, so withdraw_payer rejects with `InvalidAccountData`.
     assert_eq!(
         WithdrawPayerRun::new(Pubkey::new_unique(), vec![2u8]).run(),
         ProgramResult::Failure(ProgramError::InvalidAccountData),

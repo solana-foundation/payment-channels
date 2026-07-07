@@ -150,7 +150,7 @@ fn off_curve_authorized_signer_rejected_before_mutation() {
         Pubkey::find_program_address(&[b"invalid-authorized-signer"], &PROGRAM_ID);
     let (payer, mint, payer_token_account) = setup_funded_svm(&mut svm, DEPOSIT);
     let (channel, channel_token_account) =
-        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
+        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT, 0);
 
     let ix = open_ix(
         &payer.pubkey(),
@@ -163,6 +163,7 @@ fn off_curve_authorized_signer_rejected_before_mutation() {
         SALT,
         DEPOSIT,
         GRACE,
+        0, // open_slot: fresh LiteSVM boots at slot 0
         1,
     );
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
@@ -251,7 +252,7 @@ fn channel_pda_recipient_rejected() {
     let payee = Pubkey::new_unique();
     let mint = Pubkey::new_unique();
     let authorized_signer = Keypair::new().pubkey();
-    let (channel, channel_ata) = derive_pdas(&payer, &payee, &mint, &authorized_signer, SALT);
+    let (channel, channel_ata) = derive_pdas(&payer, &payee, &mint, &authorized_signer, SALT, 0);
     assert_eq!(
         OpenRun {
             payer,
@@ -280,7 +281,7 @@ fn non_ata_payer_token_account_rejected() {
     let authorized_signer = Keypair::new().pubkey();
     let (payer, mint, _payer_ata) = setup_funded_svm(&mut svm, DEPOSIT);
     let (channel, channel_token_account) =
-        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT);
+        derive_pdas(&payer.pubkey(), &payee, &mint, &authorized_signer, SALT, 0);
 
     let non_ata = CreateAccount::new(&mut svm, &payer, &mint)
         .owner(&payer.pubkey())
@@ -299,6 +300,7 @@ fn non_ata_payer_token_account_rejected() {
         SALT,
         DEPOSIT,
         GRACE,
+        0, // open_slot: fresh LiteSVM boots at slot 0
         1,
     );
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
@@ -334,6 +336,7 @@ fn token_2022_allowed_mint_extensions_succeed() {
         &mint,
         &authorized_signer,
         SALT,
+        0, // open_slot seed: fresh LiteSVM boots at slot 0
         &TOKEN_2022,
     );
     let ix = open_ix_with_token_program(
@@ -348,6 +351,7 @@ fn token_2022_allowed_mint_extensions_succeed() {
         SALT,
         DEPOSIT,
         GRACE,
+        0, // open_slot: fresh LiteSVM boots at slot 0
         1,
     );
     let msg = Message::new(&[ix], Some(&payer.pubkey()));
@@ -379,6 +383,7 @@ fn unsupported_token_2022_mint_extensions_reject_before_channel_creation() {
             &mint,
             &authorized_signer,
             SALT,
+            0, // open_slot seed: fresh LiteSVM boots at slot 0
             &TOKEN_2022,
         );
         let ix = open_ix_with_token_program(
@@ -393,6 +398,7 @@ fn unsupported_token_2022_mint_extensions_reject_before_channel_creation() {
             SALT,
             DEPOSIT,
             GRACE,
+            0, // open_slot: fresh LiteSVM boots at slot 0
             1,
         );
         let msg = Message::new(&[ix], Some(&payer.pubkey()));
@@ -422,6 +428,7 @@ fn unsupported_token_2022_payer_account_extensions_reject_before_channel_creatio
             &mint,
             &authorized_signer,
             SALT,
+            0, // open_slot seed: fresh LiteSVM boots at slot 0
             &TOKEN_2022,
         );
         let ix = open_ix_with_token_program(
@@ -436,6 +443,7 @@ fn unsupported_token_2022_payer_account_extensions_reject_before_channel_creatio
             SALT,
             DEPOSIT,
             GRACE,
+            0, // open_slot: fresh LiteSVM boots at slot 0
             1,
         );
         let msg = Message::new(&[ix], Some(&payer.pubkey()));

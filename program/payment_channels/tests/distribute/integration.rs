@@ -67,13 +67,14 @@ fn wrong_mint_rejects() {
 }
 
 #[test]
-fn tombstoned_channel_rejects() {
-    // After FINALIZED `distribute` tombstones the PDA, the channel data
-    // shrinks to a 1-byte `ClosedChannel` payload (discriminator = 2).
-    // `Channel::load_mut` length-gates inside `unsafe load_mut::<Channel>`
-    // before any discriminator/version/status logic runs, so the program
-    // rejects with `InvalidAccountData` for any buffer whose length is
-    // not exactly `Channel::LEN` (216).
+fn legacy_tombstone_account_rejects() {
+    // 1-byte accounts carrying the reserved `ClosedChannel` discriminator
+    // (= 2) are leftovers of the pre-launch deployment's tombstone close;
+    // the program no longer produces them — a fully closed channel is
+    // deallocated entirely. `Channel::load_mut` length-gates inside
+    // `unsafe load_mut::<Channel>` before any discriminator/version/status
+    // logic runs, so the program rejects with `InvalidAccountData` for any
+    // buffer whose length is not exactly `Channel::LEN`.
     let payer = Pubkey::new_unique();
     let splits = one_split();
     assert_eq!(

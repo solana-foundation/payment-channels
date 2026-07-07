@@ -15,7 +15,7 @@ export * from "./opened";
 export * from "./payoutBeneficiary";
 export * from "./payoutRedirected";
 export * from "./redirectReason";
-export * from "./settleAndFinalizeArgs";
+export * from "./settleAndSealArgs";
 export * from "./settlementWatermarks";
 export * from "./topUpArgs";
 export * from "./voucherArgs";

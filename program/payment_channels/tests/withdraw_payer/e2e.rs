@@ -83,7 +83,7 @@ fn withdraw_transfers_correct_amount() {
     assert_eq!(token_balance(&svm, &channel_ata), deposit);
 
     mutate_channel(&mut svm, &channel, |ch| {
-        ch.status = ChannelStatus::Finalized as u8;
+        ch.status = ChannelStatus::Sealed as u8;
         ch.set_settled(settled);
     });
     set_clock(&mut svm, 1_000_000);
@@ -138,7 +138,7 @@ fn withdraw_zero_refund_stamps_timestamp() {
 
     // Fully settled: deposit == settled → refund = 0.
     mutate_channel(&mut svm, &channel, |ch| {
-        ch.status = ChannelStatus::Finalized as u8;
+        ch.status = ChannelStatus::Sealed as u8;
         ch.set_settled(deposit);
     });
     set_clock(&mut svm, 1_000_000);

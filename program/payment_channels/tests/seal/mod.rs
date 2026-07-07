@@ -2,22 +2,22 @@ mod e2e;
 mod integration;
 
 use mollusk_svm::{Mollusk, result::InstructionResult, result::ProgramResult};
-use payment_channels::instructions::finalize::DISCRIMINATOR;
+use payment_channels::instructions::seal::DISCRIMINATOR;
 use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
 use crate::common::{PROGRAM_ID, ProgramLoader};
 
-/// Execution descriptor for a single `finalize` Mollusk run.
+/// Execution descriptor for a single `seal` Mollusk run.
 ///
-/// Construct with [`FinalizeRun::new`] for the required fields; override any
-/// public field via struct update syntax before calling [`FinalizeRun::run`].
-pub(super) struct FinalizeRun {
+/// Construct with [`SealRun::new`] for the required fields; override any
+/// public field via struct update syntax before calling [`SealRun::run`].
+pub(super) struct SealRun {
     pub channel_blob: Vec<u8>,
 }
 
-impl FinalizeRun {
+impl SealRun {
     pub fn new(channel_blob: Vec<u8>) -> Self {
         Self { channel_blob }
     }

@@ -18,11 +18,9 @@ pub const CURRENT_CHANNEL_VERSION: u8 = 1;
 pub enum AccountDiscriminator {
     /// Active [`Channel`](crate::Channel) PDA.
     Channel = 1,
-    /// Tombstoned [`ClosedChannel`](crate::ClosedChannel) PDA. Distinct
-    /// discriminator so every existing `Channel::from_account_mut` load path
-    /// rejects a tombstoned account before any business logic runs, and the
-    /// system program refuses re-init at the same address (program-owned,
-    /// non-empty data).
+    /// Tombstone written by a previous deployment of this program id. The
+    /// program neither creates nor reads these accounts; the byte value is
+    /// kept so no future account shape aliases the on-chain leftovers.
     ClosedChannel = 2,
 }
 
