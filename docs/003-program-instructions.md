@@ -43,6 +43,8 @@ salt(u64 LE) || deposit(u64 LE) || grace_period(u32 LE) || open_slot(u64 LE) || 
 
 `entries[i] = recipient(32 bytes) || bps(u16 LE)`. Only active entries are encoded; there is no padding to `MAX_DISTRIBUTION_RECIPIENTS`.
 
+> **CU note.** Every on-chain derivation of the channel PDA or its escrow ATA (`open`'s address checks and the escrow-ATA validation in `topUp`, `distribute`, and `withdrawPayer`) costs ~1,500 CU per bump iteration below 255. Since `salt` is free to choose, CU-conscious clients SHOULD grind it until both the channel PDA and the escrow ATA land on bump 255 — a few tries on average, worth several thousand CU per instruction over an unlucky address.
+
 | Name | Type | Description |
 |---|---|---|
 | `salt` | `u64` | PDA disambiguator for concurrent channels with the same payer/payee/mint/signer tuple. |
@@ -308,6 +310,7 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | Code | Variant | Meaning |
 |---|---|---|
 | 2200 | `SealDeadlineOverflow` | `closure_started_at + grace_period` would overflow `i64`. |
+| 2201 | `SealGracePeriodNotElapsed` | Channel is `CLOSING` but `now < closure_started_at + grace_period`; retry once the grace deadline passes. |
 
 ### `withdrawPayer` (instruction 8)
 
@@ -332,7 +335,7 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | 2409 | `RecipientAccountCountMismatch` | Number of recipient ATAs in the account tail does not equal the preimage entry count. |
 | 2410 | `DistributePoolOverflow` | `settled - payout_watermark` underflowed (defensive: `payout_watermark <= settled`). |
 | 2411 | `DistributeBalanceCalculationOverflow` | Escrow/treasury arithmetic underflow. |
-| 2412 | `DistributePayerBalanceOverflow` | Rent-payer lamports `+ delta` would overflow `u64` during the close-time rent transfer. |
+| 2412 | `RentPayerBalanceOverflow` | Rent-payer lamports `+ delta` would overflow `u64` while deallocating the channel PDA (shared by `distribute`'s fast path and `reclaim`). |
 | 2413 | `DistributeTransferQueueOverflow` | Transfer queue capacity exceeded (defensive — distribute queues at most 35 payouts). |
 | 2414 | `ChannelCloseTooEarly` | `reclaim` attempted at `clock.slot ≤ open_slot + OPEN_SLOT_WINDOW`; retry once the window elapses. Never emitted by `distribute` (its fast path simply defers deallocation to `reclaim`). |
 
