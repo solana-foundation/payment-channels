@@ -31,7 +31,7 @@ Payer-signed initializer. Creates the active channel PDA, creates its escrow ATA
 
 Both creates are **prefund-tolerant**: lamports already sitting on the not-yet-opened channel PDA (the PDA is allocated with `Allocate` + `Assign` after topping up only the rent shortfall) and a pre-existing canonical escrow ATA (idempotent CPI) are accepted. A third-party prefund therefore cannot block the first `open` at a derived address. Surplus PDA lamports flow to `rent_payer` at full deallocation; the terminal `distribute` from `SEALED` sweeps tokens already on the escrow ATA to treasury through its residual calculation. See [Accounting authority](./001-payment-channel-state-machine.md#accounting-authority).
 
-> **Mint trust model.** `open` does not reject mints with a live freeze authority (or mint authority). A merchant accepting a channel denominated in mint `M` is implicitly accepting that `M`'s freeze authority can freeze the channel's escrow ATA and wedge `topUp`, `distribute`, and `withdrawPayer` until thawed. This is intentional so that mainstream stablecoins (USDC, USDT, PYUSD, …) remain usable; merchants are expected to vet the mint off-chain. See [ADR-001 → Mint trust model](./001-payment-channel-state-machine.md#mint-trust-model).
+> **Mint trust model.** `open` does not reject mints with a live freeze authority (or mint authority). A merchant accepting a channel denominated in mint `M` is implicitly accepting that `M`'s freeze authority can freeze the channel's escrow ATA and wedge `topUp`, `distribute`, and `withdrawPayer` until thawed. This is intentional so that mainstream stablecoins such as USDC and USDT remain usable; merchants are expected to vet the mint off-chain. Token-2022 mints must additionally pass the extension allow-list: PYUSD and USDG currently do not. See [ADR-001 → Mint trust model](./001-payment-channel-state-machine.md#mint-trust-model).
 
 **Args**
 
@@ -261,6 +261,7 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | 60 | `PayeeAccountMismatch` | Payee ATA is not `ATA(payee, token_program, mint)`. |
 | 61 | `InvalidPayeeTokenAccount` | Payee ATA fails state/owner/mint validation. |
 | 62 | `InvalidPayeeTokenExtensions` | Payee ATA carries a Token-2022 extension outside the allow-list. |
+| 63 | `UnsupportedMintTokenExtensions` | Token-2022 mint is well-formed but carries an extension outside the mint allow-list. |
 
 ### General object validation
 

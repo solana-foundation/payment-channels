@@ -82,6 +82,9 @@ pub enum PaymentChannelsError {
     /// 62 - Payee token account has invalid extensions
     #[error("Payee token account has invalid extensions")]
     InvalidPayeeTokenExtensions = 0x3E,
+    /// 63 - Token-2022 mint carries an unsupported extension
+    #[error("Token-2022 mint carries an unsupported extension")]
+    UnsupportedMintTokenExtensions = 0x3F,
     /// 200 - Deposit must be non-zero
     #[error("Deposit must be non-zero")]
     DepositMustBeNonZero = 0xC8,

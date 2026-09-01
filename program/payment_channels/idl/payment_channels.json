@@ -1793,6 +1793,12 @@
         "name": "invalidPayeeTokenExtensions"
       },
       {
+        "code": 63,
+        "kind": "errorNode",
+        "message": "Token-2022 mint carries an unsupported extension",
+        "name": "unsupportedMintTokenExtensions"
+      },
+      {
         "code": 200,
         "kind": "errorNode",
         "message": "Deposit must be non-zero",
