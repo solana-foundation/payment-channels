@@ -1,0 +1,20 @@
+[package]
+name = "zkchannel-zk-host"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+zkchannel-zk-methods = { path = "../methods" }
+zkchannel-zk-shared = { path = "../shared" }
+
+risc0-zkvm = {
+    version = "=3.0.3",
+    default-features = false,
+    features = ["prove"]
+}
+
+borsh = "=0.10.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"

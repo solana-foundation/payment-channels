@@ -1,0 +1,20 @@
+[package]
+name = "zkchannel-fixture-gen"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+payment_channels = { path = "../../../program/payment_channels" }
+payment_channels_client = { path = "../../../clients/rust" }
+
+borsh = "=1.6.1"
+hex = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+solana-address = "=2.6.0"
+solana-keypair = "=3.1.2"
+solana-signer = "=3.0.0"
+solana-signature = { version = "=3.4.0", features = ["verify"] }
+[workspace]

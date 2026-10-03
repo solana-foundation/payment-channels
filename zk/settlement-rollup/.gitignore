@@ -1,0 +1,27 @@
+# Circom outputs
+*.r1cs
+*.sym
+*.wtns
+
+# Groth16 setup/proving artifacts
+*.zkey
+*.ptau
+
+# snarkjs generated directories
+*_js/
+
+# Generated proofs and verifier data
+proof.json
+public.json
+verification_key.json
+
+# Temporary/generated artifacts
+artifacts/
+build/
+tmp/
+.cache/
+
+# Local JavaScript dependencies if used inside this workspace
+node_modules/
+
+target/
