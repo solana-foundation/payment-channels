@@ -456,7 +456,16 @@ pub fn process(
             .token_ctx
             .token_program
             .amount(&channel_ctx.channel_token_account.as_any())?;
-        crate::hooks::invoke(&channel_ctx.channel, hook_accounts, &context, 0)?;
+        crate::hook_guard::invoke(
+            &channel_ctx,
+            hook_accounts,
+            &context,
+            0,
+            crate::hook_guard::ProtectedAccounts {
+                payer: Some(&payer_ctx.payer_token_account),
+                ..Default::default()
+            },
+        )?;
         crate::hooks::revalidate(&channel_ctx, Some(&payer_ctx.payer_token_account), before)?;
         Some((context, before))
     } else {
@@ -496,7 +505,16 @@ pub fn process(
         Channel::from_account_mut(&mut channel_ctx.channel)?.set_deposit(deposit);
         hook_context.funding_transferred = deposit;
         hook_context.actual(&channel_ctx.channel)?;
-        crate::hooks::invoke(&channel_ctx.channel, hook_accounts, &hook_context, 1)?;
+        crate::hook_guard::invoke(
+            &channel_ctx,
+            hook_accounts,
+            &hook_context,
+            1,
+            crate::hook_guard::ProtectedAccounts {
+                payer: Some(&payer_ctx.payer_token_account),
+                ..Default::default()
+            },
+        )?;
         crate::hooks::revalidate(
             &channel_ctx,
             Some(&payer_ctx.payer_token_account),

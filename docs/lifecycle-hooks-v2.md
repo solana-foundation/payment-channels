@@ -84,6 +84,13 @@ settle-and-seal, request-close, seal and reclaim never invoke hooks.
 A pre/post error rolls back the whole transaction, including channel creation
 and changes made by callbacks. Transaction fees are not rolled back.
 
+Each callback is also surrounded by core-owned snapshots and postconditions.
+Channel state and escrow balance cannot change during the callback. Supplied
+beneficiary accounts cannot lose funds or change controls; payer refund recovery
+is bounded by the actual refund. Violations return `HookInvariantViolation`
+(2500). See the [callback safety contract](hook-safety-contract.md) for aliases,
+native-token lamports, delegated allowance and the exact protection boundary.
+
 ## Public immutable configuration
 
 The first 256 bytes retain V1 field offsets, except `version = 2`.

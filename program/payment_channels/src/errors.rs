@@ -169,4 +169,6 @@ pub enum PaymentChannelsError {
     DistributeTransferQueueOverflow = 2413,
     #[error("Channel cannot be fully closed until clock.slot > open_slot + OPEN_SLOT_WINDOW")]
     ChannelCloseTooEarly = 2414,
+    #[error("Lifecycle callback changed protected channel custody")]
+    HookInvariantViolation = 2500,
 }

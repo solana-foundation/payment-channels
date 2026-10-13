@@ -347,7 +347,18 @@ fn process_inner(
         {
             return Err(PaymentChannelsError::DistributeBalanceCalculationOverflow.into());
         }
-        crate::hooks::invoke(&channel_ctx.channel, hook_accounts, &context, 2)?;
+        crate::hook_guard::invoke(
+            &channel_ctx,
+            hook_accounts,
+            &context,
+            2,
+            crate::hook_guard::ProtectedAccounts {
+                payer: Some(&accs.payer_token_account),
+                payee: Some(&accs.payee_token_account),
+                treasury: Some(&treasury_token_account),
+                recipients: &accs.recipient_token_accounts,
+            },
+        )?;
         crate::hooks::revalidate(
             &channel_ctx,
             if hooked && refund > 0 {
@@ -495,7 +506,18 @@ fn process_inner(
             .token_ctx
             .token_program
             .amount(&channel_ctx.channel_token_account.as_any())?;
-        crate::hooks::invoke(&channel_ctx.channel, hook_accounts, &hook_context, 3)?;
+        crate::hook_guard::invoke(
+            &channel_ctx,
+            hook_accounts,
+            &hook_context,
+            3,
+            crate::hook_guard::ProtectedAccounts {
+                payer: Some(&accs.payer_token_account),
+                payee: Some(&accs.payee_token_account),
+                treasury: Some(&treasury_token_account),
+                recipients: &accs.recipient_token_accounts,
+            },
+        )?;
         crate::hooks::revalidate(
             &channel_ctx,
             if hooked && hook_context.refund_due > 0 {

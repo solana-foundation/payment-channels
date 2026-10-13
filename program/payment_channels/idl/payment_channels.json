@@ -2043,6 +2043,12 @@
         "kind": "errorNode",
         "message": "Channel cannot be fully closed until clock.slot > open_slot + OPEN_SLOT_WINDOW",
         "name": "channelCloseTooEarly"
+      },
+      {
+        "code": 2500,
+        "kind": "errorNode",
+        "message": "Lifecycle callback changed protected channel custody",
+        "name": "hookInvariantViolation"
       }
     ],
     "events": [

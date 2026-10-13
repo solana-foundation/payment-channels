@@ -55,6 +55,8 @@ fn process(id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramRe
         return Err(ProgramError::Custom(700 + phase as u32));
     }
     let mode = record[2];
+    let attack_phase = record[3];
+    let amount = u32::from_le_bytes(record[4..8].try_into().unwrap()) as u64;
     drop(record);
     if mode == 1 {
         let program = &extras[1];
@@ -81,6 +83,67 @@ fn process(id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramRe
             },
             &[mint, program],
         )?;
+    } else if mode >= 3 && phase == attack_phase {
+        // Exactly four descriptor accounts: recorder, source, destination (or
+        // mint), token program. The scoped capability is a real SPL delegate,
+        // close authority or freeze authority installed by the test owner.
+        let [source, destination, program] = extras else {
+            return Err(ProgramError::NotEnoughAccountKeys);
+        };
+        use pinocchio::instruction::{InstructionAccount as Meta, InstructionView};
+        let mut payload = [0u8; 35];
+        let length = match mode {
+            3 => {
+                payload[0] = 3; // Transfer
+                payload[1..9].copy_from_slice(&amount.to_le_bytes());
+                9
+            }
+            4 => {
+                payload[0] = 6; // SetAuthority(CloseAccount)
+                payload[1] = 3;
+                payload[2] = 1;
+                payload[3..35].copy_from_slice(destination.address().as_ref());
+                35
+            }
+            5 => {
+                payload[0] = 10;
+                1
+            } // FreezeAccount
+            6 => {
+                payload[0] = 9;
+                1
+            } // CloseAccount
+            _ => return Err(ProgramError::InvalidInstructionData),
+        };
+        let metas = [
+            Meta::writable(source.address()),
+            if mode == 5 {
+                Meta::readonly(destination.address())
+            } else {
+                Meta::writable(destination.address())
+            },
+            Meta::readonly_signer(authority.address()),
+        ];
+        if mode == 4 {
+            pinocchio::cpi::invoke(
+                &InstructionView {
+                    program_id: program.address(),
+                    accounts: &[metas[0].clone(), metas[2].clone()],
+                    data: &payload[..length],
+                },
+                &[source, &*authority, program],
+            )?;
+        } else {
+            pinocchio::cpi::invoke(
+                &InstructionView {
+                    program_id: program.address(),
+                    accounts: &metas,
+                    data: &payload[..length],
+                },
+                &[source, destination, &*authority, program],
+            )?;
+        }
+        // No self-rejection: parent invariants must reject AFTER this success.
     }
     Ok(())
 }

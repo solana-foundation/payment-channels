@@ -39,6 +39,7 @@ pub use instructions::*;
 pub mod state;
 pub use state::*;
 
+mod hook_guard;
 pub mod hooks;
 
 #[cfg(not(feature = "devnet-deployment"))]
