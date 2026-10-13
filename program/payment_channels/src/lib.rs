@@ -39,12 +39,11 @@ pub use instructions::*;
 pub mod state;
 pub use state::*;
 
-#[cfg(feature = "v2")]
 pub mod hooks;
 
-#[cfg(not(feature = "v2"))]
+#[cfg(not(feature = "devnet-deployment"))]
 declare_id!("CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX");
-#[cfg(feature = "v2")]
+#[cfg(feature = "devnet-deployment")]
 declare_id!("CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ");
 
 #[cfg_attr(feature = "no-entrypoint", allow(dead_code))]
@@ -55,10 +54,21 @@ fn process_instruction(
 ) -> ProgramResult {
     // Check all supplied channel accounts, including aliases. Internal operation
     // code can load guarded state, but no callback may start another entrypoint.
-    #[cfg(feature = "v2")]
     hooks::check_entry(accounts)?;
     match PaymentChannelsInstruction::from_bytes(instruction_data)? {
         PaymentChannelsInstruction::Open(args) => open::process(program_id, accounts, &args),
+        PaymentChannelsInstruction::OpenWithHooks(args) => {
+            open::process(program_id, accounts, &args)
+        }
+        PaymentChannelsInstruction::TopUpWithHooks(args) => {
+            top_up::process_with_hooks(program_id, accounts, args)
+        }
+        PaymentChannelsInstruction::DistributeWithHooks(args) => {
+            distribute::process_with_hooks(program_id, accounts, &args)
+        }
+        PaymentChannelsInstruction::WithdrawPayerWithHooks => {
+            withdraw_payer::process_with_hooks(program_id, accounts)
+        }
         PaymentChannelsInstruction::Settle => settle::process(program_id, accounts),
         PaymentChannelsInstruction::TopUp(args) => top_up::process(program_id, accounts, args),
         PaymentChannelsInstruction::SettleAndSeal(args) => {

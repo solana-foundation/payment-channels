@@ -23,6 +23,10 @@ fn process(id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramRe
         return Err(ProgramError::InvalidAccountData);
     }
     let phase = data[9];
+    // The outer instruction tags are 10–13; callback economic tags stay stable.
+    if !matches!((phase, data[10]), (0 | 1, 1 | 3) | (2 | 3, 7 | 8)) {
+        return Err(ProgramError::InvalidInstructionData);
+    }
     let (expected, _) = Address::find_program_address(
         &[
             b"channel_hook",
@@ -36,9 +40,11 @@ fn process(id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramRe
     if authority.address() != &expected || &data[12..44] != channel.address().as_ref() {
         return Err(ProgramError::InvalidSeeds);
     }
-    if channel.try_borrow()?.get(256) != Some(&1) {
+    let channel_data = channel.try_borrow()?;
+    if channel_data.len() != 1121 || channel_data.get(256) != Some(&1) {
         return Err(ProgramError::InvalidAccountData);
     }
+    drop(channel_data);
     let mut record = recorder.try_borrow_mut()?;
     let count = record[1] as usize;
     let start = 8 + count * 428;

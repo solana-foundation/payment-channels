@@ -1,10 +1,9 @@
 // Independently spell out the documented compact bytes, not generated codecs.
 // Both generated clients consume this fixture. Run explicitly when intentionally
 // changing the V2 ABI.
-import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-const require = createRequire(new URL('../clients/typescript-v2/package.json', import.meta.url));
+const require = createRequire(new URL('../clients/typescript/package.json', import.meta.url));
 const { getAddressEncoder } = require('@solana/kit');
 const target = getAddressEncoder().encode('BPFLoaderUpgradeab1e11111111111111111111111');
 const compact = Array.from({ length: 5 }, (_, count) =>
@@ -20,7 +19,7 @@ const compact = Array.from({ length: 5 }, (_, count) =>
   ]).toString('hex'),
 );
 const open = Buffer.alloc(37); // discriminator + 28-byte header + u32 count + four slots
-open[0] = 1;
+open[0] = 10;
 open.writeBigUInt64LE(1n, 1);
 open.writeBigUInt64LE(2n, 9);
 open.writeUInt32LE(3, 17);
@@ -37,13 +36,6 @@ const fixture = {
   compact,
   unhookedOpen: open.toString('hex'),
   callbackContext: context.toString('hex'),
-  v1IdlSha256: createHash('sha256')
-    .update(
-      readFileSync(
-        new URL('../program/payment_channels/idl/payment_channels.json', import.meta.url),
-      ),
-    )
-    .digest('hex'),
 };
 mkdirSync(new URL('../fixtures/', import.meta.url), { recursive: true });
 writeFileSync(

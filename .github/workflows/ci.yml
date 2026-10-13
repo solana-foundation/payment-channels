@@ -109,8 +109,8 @@ jobs:
           rust-cache-key: "v2-test"
           save-rust-cache: "true"
 
-      # Separate process and artifacts: never unify v2 into the V1 test workspace.
-      # The recipe pins tools v1.58 / SBPFv3 and asserts both loaded ELF versions.
+      # Exercise the hooked ABI on the same dual-version runtime. The recipe
+      # pins tools v1.58 / SBPFv3 and asserts both loaded ELF versions.
       - name: Test V2 SBF callbacks
         run: just test-v2-hooks
 

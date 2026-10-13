@@ -17,10 +17,12 @@ localnet     = []
 devnet       = []
 testnet      = []
 mainnet-beta = []
-v2 = []
-# Reuse state/ABI without a second entrypoint. On SBF this library still owns
-# the allocator/panic handler; consumers must not define duplicates. Host-only
-# library consumers link std because this package also builds a cdylib.
+# Alternate deployed devnet address only; both targets support V1 and V2.
+devnet-deployment = []
+# Retained for host integration harnesses that inspect the full core state.
+# On-chain consumers use payment-channel-interface instead. On SBF this program
+# still owns its allocator/panic handler; host library consumers link std because
+# this package also builds a cdylib.
 no-entrypoint = []
 # Enables codama derives + raw build.rs IDL emission. Host-only; must NOT
 # be enabled for `cargo build-sbf` (see `compile_error!` guard in
@@ -33,6 +35,7 @@ codama = { version = "0.9.1", optional = true }
 serde_json = { version = "1", optional = true }
 
 [dependencies]
+payment-channel-interface         = { path = "../../crates/interface" }
 pinocchio                          = { version = "0.11.1", features = ["cpi", "copy", "account-resize"] }
 solana-address                     = { version = "2", features = ["curve25519", "borsh"] }
 pinocchio-associated-token-account = "0.4.0"

@@ -145,15 +145,12 @@ pub fn hook_tail(
         "only the two configured phases are supported"
     );
     let state = hook_state(program, owner, mint);
-    let authority = Address::find_program_address(
-        &[
-            payment_channels::hooks::AUTHORITY_SEED,
-            channel.as_ref(),
-            &state.commitment,
-            &[phase],
-            program.as_ref(),
-        ],
-        &payment_channels::ID,
+    let authority = payment_channel_interface::hooks::hook_authority(
+        &payment_channel_interface::ID,
+        channel,
+        &state.commitment,
+        payment_channel_interface::hooks::Phase::try_from(phase).unwrap(),
+        program,
     )
     .0;
     let mut accounts = vec![meta(*program, false, false), meta(authority, false, false)];

@@ -660,7 +660,7 @@ impl<'a> Fixture<'a> {
         )
     }
     fn open(&self, amount: u64) -> Instruction {
-        let mut data = vec![1];
+        let mut data = vec![10];
         data.extend(self.auth.salt.to_le_bytes());
         data.extend(amount.to_le_bytes());
         data.extend(3_600u32.to_le_bytes());
@@ -697,7 +697,7 @@ impl<'a> Fixture<'a> {
         }
     }
     fn top_up(&self, amount: u64) -> Instruction {
-        let mut data = vec![3];
+        let mut data = vec![11];
         data.extend(amount.to_le_bytes());
         let mut accounts = vec![
             signer(self.owner.pubkey(), true),
@@ -715,7 +715,7 @@ impl<'a> Fixture<'a> {
         }
     }
     fn distribute(&self) -> Instruction {
-        let mut data = vec![7];
+        let mut data = vec![12];
         data.extend(1u32.to_le_bytes());
         data.extend(self.payee.pubkey().to_bytes());
         data.extend(10_000u16.to_le_bytes());
@@ -753,7 +753,7 @@ impl<'a> Fixture<'a> {
         Instruction {
             program_id: channel_program(),
             accounts,
-            data: vec![8],
+            data: vec![13],
         }
     }
     fn seal(&self, amount: u64) {

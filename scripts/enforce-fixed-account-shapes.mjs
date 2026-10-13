@@ -28,7 +28,11 @@ if (!Array.isArray(instructions) || instructions.length === 0) {
   throw new Error('enforce-fixed-account-shapes: committed IDL has no instructions');
 }
 
-const hasTail = (ix) => Array.isArray(ix.remainingAccounts) && ix.remainingAccounts.length > 0;
+// Hook tails require explicit mixed-privilege metas, not an address-only IDL
+// argument. Preserve the generated remaining-accounts API for these instructions.
+const hasTail = (ix) =>
+  ix.name.endsWith('WithHooks') ||
+  (Array.isArray(ix.remainingAccounts) && ix.remainingAccounts.length > 0);
 const fixedShape = instructions.filter((ix) => !hasTail(ix));
 const tailNames = instructions.filter(hasTail).map((ix) => ix.name);
 if (!tailNames.includes('distribute')) {

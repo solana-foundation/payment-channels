@@ -7,22 +7,30 @@ custodian, security certification, or endorsement of any provider.
 
 ## Build
 
-From the repository root, use the same target directory for both programs:
+From the repository root, keep the executable channel and provider dependency
+builds in separate target directories:
 
 ```sh
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target}"
-cargo build-sbf --manifest-path program/payment_channels/Cargo.toml \
-  --features v2 --arch v3 --tools-version v1.58
-cargo build-sbf --manifest-path examples/credit-provider/Cargo.toml \
-  --arch v3 --tools-version v1.58
+CARGO_TARGET_DIR="$CARGO_TARGET_DIR/channel-sbf" cargo build-sbf \
+  --manifest-path program/payment_channels/Cargo.toml \
+  --sbf-out-dir "$PWD/target/deploy-v2" --arch v3 --tools-version v1.58
+CARGO_TARGET_DIR="$CARGO_TARGET_DIR/provider-sbf" cargo build-sbf \
+  --manifest-path examples/credit-provider/Cargo.toml \
+  --sbf-out-dir "$PWD/target/deploy" --arch v3 --tools-version v1.58
 cargo test --manifest-path examples/credit-provider/Cargo.toml --features client
 ```
 
-The example has its own small Cargo workspace. Its program dependency enables
-`v2` and `no-entrypoint`: it imports the real channel state, program ID, operation
+The example has its own small Cargo workspace. Its program dependency enables only
+`no-entrypoint`: it imports the real channel state, canonical program ID, operation
 discriminators, hook descriptor types and callback context, without linking a
 second entrypoint. Token and associated-token IDs come from the same Pinocchio
 crates used by the channel program. No devnet deployment is needed.
+
+The default channel runtime supports both ordinary 256-byte channels and hooked
+1121-byte channels. Hooked funding and refund instructions use outer tags 10–13;
+callbacks retain economic operation tags 1/3/7/8. The example deliberately does
+not enable `devnet-deployment`, which selects an alternate program address.
 
 `no-entrypoint` suppresses only the channel entrypoint on SBF; the channel library
 still supplies its no-allocation runtime and panic handler. An SBF consumer must

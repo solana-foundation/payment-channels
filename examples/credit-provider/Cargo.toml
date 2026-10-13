@@ -15,7 +15,7 @@ no-entrypoint = []
 client = ["no-entrypoint", "dep:solana-instruction"]
 
 [dependencies]
-payment_channels = { path = "../../program/payment_channels", features = ["v2", "no-entrypoint"] }
+payment-channel-interface = { path = "../../crates/interface" }
 pinocchio = { version = "0.11.1", features = ["cpi"] }
 pinocchio-token = "0.6.0"
 pinocchio-system = "0.6.0"

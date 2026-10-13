@@ -1,5 +1,9 @@
 use borsh::{BorshDeserialize, BorshSerialize};
-use payment_channels::{Channel, ChannelStatus, hooks::HookContext, instructions};
+use payment_channel_interface::{
+    channel::{ChannelStatus, channel_address},
+    hooks::{HookContext, Operation},
+    validation::{CallbackExpectations, validate_callback},
+};
 use pinocchio::{
     AccountView, Address, ProgramResult,
     cpi::{Seed, Signer},
@@ -235,7 +239,8 @@ pub fn authorize(
     )?;
     drop(p);
     let mint = Address::new_from_array(ledger.mint);
-    ledger.channel = *Channel::find_pda(
+    ledger.channel = *channel_address(
+        &payment_channel_interface::ID,
         owner.address(),
         &Address::new_from_array(authorization.payee),
         &mint,
@@ -254,87 +259,49 @@ pub fn authorize(
     store(ledger_account, &ledger)
 }
 
-pub fn callback(program: &Address, accounts: &mut [AccountView], c: &HookContext) -> ProgramResult {
-    let [authority, channel, ledger_account, vault, payer, token] = accounts else {
-        return Err(ProgramError::NotEnoughAccountKeys);
-    };
-    require(
-        authority.is_signer()
-            && !authority.is_writable()
-            && !channel.is_signer()
-            && !channel.is_writable()
-            && [&*ledger_account, &*vault, &*payer, &*token]
-                .iter()
-                .all(|a| !a.is_signer()),
-    )?;
+pub fn callback(program: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
+    let ledger_account = accounts.get(2).ok_or(ProgramError::NotEnoughAccountKeys)?;
     let mut ledger = load(program, ledger_account)?;
     require(ledger.active)?;
+    let expected = hook_state(
+        program,
+        &Address::new_from_array(ledger.owner),
+        &Address::new_from_array(ledger.mint),
+    );
+    let validated = validate_callback(
+        accounts,
+        data,
+        &CallbackExpectations {
+            channel_program: &payment_channel_interface::ID,
+            callback_program: program,
+            channel: &Address::new_from_array(ledger.channel),
+            token_program: &pinocchio_token::ID,
+            descriptors: &expected.descriptors,
+        },
+    )?;
+    let c = &validated.context;
+    let [_, _, ledger_account, vault, payer, token] = accounts else {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    };
     custody(ledger_account, &ledger, vault, payer, token)?;
     let a = &ledger.authorization;
-    let ch = Channel::from_account(channel)?;
-    let expected_channel = Channel::find_pda(
-        &ch.payer,
-        &ch.payee,
-        &ch.mint,
-        &ch.authorized_signer,
-        ch.salt(),
-        ch.open_slot(),
-    )
-    .0;
+    // SDK validation proves callback provenance, not the issuer's credit policy.
+    // Keep authorization, expiry, cap, custody and durable replay checks here.
     require(
-        channel.address() == &expected_channel
-            && channel.address().as_array() == &ledger.channel
-            && c.channel == ledger.channel
+        c.channel == ledger.channel
             && c.open_slot == a.open_slot
-            && ch.open_slot() == a.open_slot
-            && ch.salt() == a.salt
+            && validated.salt == a.salt
             && c.payer == ledger.owner
-            && ch.payer.as_array() == &ledger.owner
             && c.mint == ledger.mint
-            && ch.mint.as_array() == &ledger.mint
             && c.payee == a.payee
-            && ch.payee.as_array() == &a.payee
             && c.authorized_signer == a.authorized_signer
-            && ch.authorized_signer.as_array() == &a.authorized_signer
             && c.distribution_hash == a.distribution_hash
-            && ch.distribution_hash == a.distribution_hash
-            && c.token_program == *pinocchio_token::ID.as_array()
             && c.configuration == ledger.configuration
-            && ch.hooks.commitment == ledger.configuration
-            && ch.hooks.in_progress == 1
-            && c.sequence == u64::from_le_bytes(ch.hooks.sequence)
             && c.sequence > ledger.last_sequence
             && c.refund_destination == *payer.address().as_array(),
     )?;
-    let expected_authority = Address::find_program_address(
-        &[
-            payment_channels::hooks::AUTHORITY_SEED,
-            channel.address().as_ref(),
-            &ledger.configuration,
-            &[c.phase],
-            program.as_ref(),
-        ],
-        &payment_channels::ID,
-    )
-    .0;
-    require(*authority.address() == expected_authority)?;
-    // Verify descriptors themselves, not only the stored commitment.
-    let expected = hook_state(program, &ch.payer, &ch.mint);
-    for (actual, expected) in ch.hooks.descriptors.iter().zip(expected.descriptors.iter()) {
-        require(
-            actual.program == expected.program
-                && actual.entrypoint == expected.entrypoint
-                && actual.account_count == expected.account_count
-                && actual.static_len == expected.static_len
-                && actual.static_context == expected.static_context,
-        )?;
-        for (actual, expected) in actual.accounts.iter().zip(expected.accounts.iter()) {
-            require(actual.address == expected.address && actual.writable == expected.writable)?;
-        }
-    }
-    let status = ChannelStatus::try_from(ch.status)?;
-    let deposit = ch.deposit();
-    drop(ch);
+    let status = validated.status;
+    let deposit = validated.deposit;
     match c.phase {
         0 => pre_fund(
             program,
@@ -440,15 +407,15 @@ pub fn pre_fund(
             && c.redirected_principal == 0
             && Clock::get()?.slot <= ledger.authorization.expires_at_slot,
     )?;
-    match c.operation {
-        instructions::open::DISCRIMINATOR => require(
+    match Operation::try_from(c.operation)? {
+        Operation::Open => require(
             ledger.funded == 0
                 && ledger.last_sequence == 0
                 && c.sequence == 1
                 && deposit == 0
                 && c.deposit_before == deposit,
         )?,
-        instructions::top_up::DISCRIMINATOR => {
+        Operation::TopUp => {
             require(ledger.funded > 0 && deposit == ledger.funded && c.deposit_before == deposit)?
         }
         _ => return Err(ProgramError::InvalidInstructionData),
@@ -515,12 +482,12 @@ pub fn post_distribute(
             && c.redirected_principal == 0
             && c.refund_transferred_to_payer == c.refund_due,
     )?;
-    let terminal = match c.operation {
-        instructions::withdraw_payer::DISCRIMINATOR => {
+    let terminal = match Operation::try_from(c.operation)? {
+        Operation::WithdrawPayer => {
             require(status == ChannelStatus::Sealed)?;
             false
         }
-        instructions::distribute::DISCRIMINATOR => {
+        Operation::Distribute => {
             require(matches!(
                 status,
                 ChannelStatus::Open | ChannelStatus::Sealed

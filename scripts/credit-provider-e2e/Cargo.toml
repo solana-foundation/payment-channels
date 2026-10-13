@@ -8,7 +8,7 @@ publish = false
 
 [dependencies]
 credit_provider = { path = "../../examples/credit-provider", features = ["client"] }
-payment_channels = { path = "../../program/payment_channels", features = ["v2", "no-entrypoint"] }
+payment_channels = { path = "../../program/payment_channels", features = ["no-entrypoint"] }
 pinocchio = "0.11.1"
 borsh = "1"
 base64 = "0.22"

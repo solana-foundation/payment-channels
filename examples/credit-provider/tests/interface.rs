@@ -4,7 +4,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use credit_provider::{
     Authorization, CALLBACK_ENTRYPOINT, Ledger, client, decode_callback, hook_state,
 };
-use payment_channels::hooks::HookContext;
+use payment_channel_interface::hooks::HookContext;
 use pinocchio::Address;
 
 #[test]
@@ -82,7 +82,7 @@ fn configuration_matches_core_memory_commitment_and_four_extra_limit() {
     assert_eq!(client::hook_config(&program, &owner, &mint).len(), 352);
     assert_eq!(
         state.descriptors[0].account_count as usize,
-        payment_channels::hooks::MAX_HOOK_ACCOUNTS
+        payment_channel_interface::hooks::MAX_HOOK_ACCOUNTS
     );
     assert!(!state.descriptors[1].enabled() && !state.descriptors[2].enabled());
     for phase in [0, 3] {

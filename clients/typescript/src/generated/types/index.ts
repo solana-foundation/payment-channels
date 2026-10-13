@@ -7,11 +7,20 @@
  */
 
 export * from "./accountDiscriminator";
+export * from "./channelHeader";
 export * from "./channelStatus";
+export * from "./compactHookAccounts";
+export * from "./compactHookDescriptor";
 export * from "./distributeArgs";
 export * from "./distributionEntry";
+export * from "./hookConfig";
+export * from "./hookContext";
+export * from "./hookDescriptor";
+export * from "./hookMeta";
+export * from "./hookState";
 export * from "./openArgs";
 export * from "./opened";
+export * from "./openWithHooksArgs";
 export * from "./payoutBeneficiary";
 export * from "./payoutRedirected";
 export * from "./redirectReason";

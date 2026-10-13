@@ -6,8 +6,7 @@
     "clients/*"
   ],
   "scripts": {
-    "generate": "codama run js rust && node scripts/narrow-codama-types.mjs && node scripts/enforce-fixed-account-shapes.mjs",
-    "generate:v2": "GENERATE_IDL=$(date +%s)-$$ cargo build -p payment_channels --features idl,v2 && codama -c codama-v2.js -i program/payment_channels/idl/payment_channels_v2.raw.json run idl && codama -c codama-v2.js run js rust",
+    "generate": "codama run js rust && node scripts/narrow-codama-types.mjs && node scripts/enforce-fixed-account-shapes.mjs && node scripts/enforce-channel-account-decoders.mjs",
     "format": "biome format --write .",
     "format:check": "biome format ."
   },

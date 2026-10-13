@@ -1,27 +1,33 @@
 # Lifecycle hooks V2 ABI
 
 V2 adds four immutable optional callbacks inside channel funding and distribution.
-This is an experimental program ABI deployed on devnet; see the
-[deployment record](devnet-v2-deployment.md). A successful build is not proof of
-issuer integration. There is no Coinflow production adapter or issuer ABI in
-this implementation.
+This revision is an experimental, same-address dual-version runtime. It has not
+been deployed. The [deployment record](devnet-v2-deployment.md) describes the
+earlier separate-address prototype, not this instruction ABI. A successful build
+is not proof of production issuer integration.
 
-## Select a deployment explicitly
+## Account versions and deployment addresses
 
-| Build | Program ID | Channel bytes |
+| Build | Program ID | Accepted channel bytes |
 | --- | --- | --- |
-| Default V1 | `CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX` | 256 |
-| Feature `v2` | `CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ` | 1121 |
+| Default | `CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX` | V1: 256; V2: 1121 |
+| Feature `devnet-deployment` | `CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ` | V1: 256; V2: 1121 |
+
+The deployment feature selects only the address. It does not select account
+layout or disable either ABI. Existing V1 accounts remain V1, with unchanged
+addresses, instruction encodings and voucher bytes. There is no automatic
+conversion or migration instruction.
 
 ```sh
 just build-v2-localnet
-cargo test -p payment_channels --lib --features v2
+cargo test -p payment_channels --lib
 just build-v2-devnet
 ```
 
-Localnet V2 artifacts go to `target/deploy-v2/payment_channels.so`; devnet V2
-uses `target/deploy-v2-devnet/payment_channels.so`. Default recipes continue
-to build V1. Devnet uses the existing devnet treasury owner
+The local hook-test artifact goes to `target/deploy-v2/payment_channels.so`;
+the alternate devnet-address artifact uses
+`target/deploy-v2-devnet/payment_channels.so`. Both support both account versions.
+Devnet uses the existing devnet treasury owner
 `4zTeC5mVqWLruDexgU2mV66p9t5vCA9JyiZqdGDUspap`. Localnet keeps its test sentinel.
 These commands do not deploy anything.
 
@@ -32,10 +38,30 @@ instruction set, separate from channel ABI V2 and callback ABI 1. The default
 Run `just test-v2-hooks` to execute the v3 artifacts, not only native unit tests.
 The test runtime uses LiteSVM 0.13.1 or later to support this v3 ELF format.
 
-V2 retains instruction discriminators, channel PDA seeds, and voucher bytes.
-The different program ID separates channel addresses and therefore vouchers.
-V1 rejects the V2 owner/layout; V2 rejects V1 owner/layout. V2 `open` requires
-explicit configuration bytes even when all four slots are disabled.
+## Explicit hook instructions
+
+| V1 instruction | Discriminator | Hooked V2 instruction | Discriminator |
+| --- | --- | --- | --- |
+| `open` | 1 | `openWithHooks` | 10 |
+| `topUp` | 3 | `topUpWithHooks` | 11 |
+| `distribute` | 7 | `distributeWithHooks` | 12 |
+| `withdrawPayer` | 8 | `withdrawPayerWithHooks` | 13 |
+
+The original variants operate only on V1; the hooked variants operate only on
+V2. This includes V2 accounts with all hook slots disabled: account version
+selects the ABI, not whether a particular descriptor is enabled. The hooked
+opening instruction includes configuration bytes even for four disabled slots.
+The other hooked instructions retain the corresponding V1 argument encoding,
+with committed callback account tails.
+
+Settlement, sealing, close requests and reclaim retain their discriminators and
+validate the account version at runtime. They do not execute callbacks. Unsupported
+versions and version/size mismatches fail before typed account access.
+
+Channel PDA seeds and voucher bytes remain unchanged. The first release does not
+attach hooks to existing funded channels; finish the V1 channel normally and open
+a new hooked channel with explicit authorization. See
+[same-address compatibility](versioning-and-upgrades.md).
 
 ## Lifecycle boundaries
 
@@ -45,6 +71,10 @@ explicit configuration bytes even when all four slots are disabled.
 | `postFund` | 1 | Same, after transfer and deposit accounting |
 | `preDistribute` | 2 | `distribute` (7), `withdrawPayer` (8), before transfers |
 | `postDistribute` | 3 | Same, after transfers/accounting, before escrow cleanup |
+
+These context operation bytes identify the economic operation, not its outer
+instruction discriminator. They remain 1/3/7/8 when the outer instruction is
+10/11/12/13.
 
 Configured hooks run on eligible zero-refund operations too. Open and top-up
 amounts must remain positive. Duplicate withdrawals and open-channel

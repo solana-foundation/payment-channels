@@ -8,12 +8,17 @@ extern crate alloc;
 extern crate std;
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use payment_channels::hooks::{HookContext, HookDescriptor, HookMeta, HookState};
+use payment_channel_interface::hooks::{
+    HookContext, HookDescriptor, HookMeta, HookState, descriptor_commitment,
+};
 use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};
 
 #[cfg(not(feature = "no-entrypoint"))]
 pinocchio::program_entrypoint!(process_instruction);
-// The no_std channel dependency supplies the SBF allocator/panic handler.
+#[cfg(target_os = "solana")]
+pinocchio::no_allocator!();
+#[cfg(target_os = "solana")]
+pinocchio::nostd_panic_handler!();
 
 #[cfg(feature = "client")]
 pub mod client;
@@ -107,79 +112,14 @@ pub fn hook_state(program: &Address, owner: &Address, mint: &Address) -> HookSta
     let mut state = HookState::EMPTY;
     state.descriptors[0] = descriptor;
     state.descriptors[3] = descriptor;
-    // Canonical serialization of the actual core descriptor type, including
-    // disabled slots and all zero padding (not the sparse open encoding).
-    let mut bytes = [0; core::mem::size_of::<[HookDescriptor; 4]>()];
-    let mut out = &mut bytes[..];
-    for d in &state.descriptors {
-        d.program.serialize(&mut out).unwrap();
-        d.entrypoint.serialize(&mut out).unwrap();
-        d.account_count.serialize(&mut out).unwrap();
-        d.static_len.serialize(&mut out).unwrap();
-        d.static_context.serialize(&mut out).unwrap();
-        for meta in &d.accounts {
-            meta.address.serialize(&mut out).unwrap();
-            meta.writable.serialize(&mut out).unwrap();
-        }
-    }
-    #[cfg(target_os = "solana")]
-    {
-        state.commitment = payment_channels::helpers::hash::sha256(&bytes);
-    }
-    #[cfg(not(target_os = "solana"))]
-    {
-        state.commitment = const_crypto::sha2::Sha256::new().update(&bytes).finalize();
-    }
+    state.commitment = descriptor_commitment(&state.descriptors);
     state
 }
 
-/// Decode into the core ABI type itself, rather than interpreting magic offsets.
-/// The core currently exposes serialization but not Borsh deserialization.
-pub fn decode_callback(mut data: &[u8]) -> Result<HookContext, ProgramError> {
-    if data.get(..8) != Some(&CALLBACK_ENTRYPOINT) {
-        return Err(ProgramError::InvalidInstructionData);
-    }
-    data = &data[8..];
-    macro_rules! field {
-        () => {
-            BorshDeserialize::deserialize(&mut data)
-                .map_err(|_| ProgramError::InvalidInstructionData)?
-        };
-    }
-    let context = HookContext {
-        abi_version: field!(),
-        phase: field!(),
-        operation: field!(),
-        executed: field!(),
-        channel: field!(),
-        sequence: field!(),
-        open_slot: field!(),
-        payer: field!(),
-        payee: field!(),
-        mint: field!(),
-        token_program: field!(),
-        configuration: field!(),
-        authorized_signer: field!(),
-        distribution_hash: field!(),
-        deposit_before: field!(),
-        settled_before: field!(),
-        payout_before: field!(),
-        withdrawn_before: field!(),
-        funding_requested: field!(),
-        merchant_due: field!(),
-        refund_due: field!(),
-        funding_transferred: field!(),
-        merchant_transferred: field!(),
-        refund_transferred_to_payer: field!(),
-        redirected_principal: field!(),
-        treasury_surplus: field!(),
-        deposit_after: field!(),
-        payout_after: field!(),
-        withdrawn_after: field!(),
-        refund_destination: field!(),
-    };
-    // The canonical configuration has exactly zero static-context bytes.
-    if data != [0] || context.abi_version != 1 || !matches!(context.phase, 0 | 3) {
+/// Decode the shared ABI; the processor additionally validates CPI provenance.
+pub fn decode_callback(data: &[u8]) -> Result<HookContext, ProgramError> {
+    let context = HookContext::decode_callback(data, &CALLBACK_ENTRYPOINT, &[])?;
+    if !matches!(context.phase, 0 | 3) {
         return Err(ProgramError::InvalidInstructionData);
     }
     Ok(context)
@@ -191,7 +131,7 @@ pub fn process_instruction(
     data: &[u8],
 ) -> ProgramResult {
     if data.starts_with(&CALLBACK_ENTRYPOINT) {
-        return processor::callback(program, accounts, &decode_callback(data)?);
+        return processor::callback(program, accounts, data);
     }
     match data.split_first() {
         Some((&INITIALIZE, [])) => processor::initialize(program, accounts),

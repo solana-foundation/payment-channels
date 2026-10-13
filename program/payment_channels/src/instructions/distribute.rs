@@ -18,6 +18,7 @@ use crate::helpers::accounts::view::{
     PayeeTokenAccountView, PayerAccountView, PayerTokenAccountView, PayoutBeneficiary,
     RecipientTokenAccountsView, TokenContext, TokenProgramAccountView, TreasuryTokenAccountView,
 };
+use crate::hooks::HookContextRuntime;
 #[cfg(feature = "idl")]
 use crate::instructions::helpers::DistributionEntry;
 use crate::instructions::helpers::{
@@ -27,6 +28,7 @@ use crate::state::channel::{Channel, ChannelStatus};
 
 /// Instruction discriminator byte for `distribute`.
 pub const DISCRIMINATOR: u8 = 7;
+pub const WITH_HOOKS_DISCRIMINATOR: u8 = 12;
 
 #[derive(Debug, Clone, Copy)]
 pub struct DistributeArgs<'a> {
@@ -175,14 +177,36 @@ pub fn process(
     accounts: &mut [AccountView],
     args: &DistributeArgs<'_>,
 ) -> ProgramResult {
-    #[cfg(feature = "v2")]
+    process_inner(program_id, accounts, args, false)
+}
+
+pub fn process_with_hooks(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    args: &DistributeArgs<'_>,
+) -> ProgramResult {
+    process_inner(program_id, accounts, args, true)
+}
+
+fn process_inner(
+    program_id: &Address,
+    accounts: &mut [AccountView],
+    args: &DistributeArgs<'_>,
+    with_hooks: bool,
+) -> ProgramResult {
+    let split = if with_hooks {
+        11 + args.recipients.entries.len()
+    } else {
+        accounts.len()
+    };
     let (accounts, hook_accounts) = accounts
-        .split_at_mut_checked(11 + args.recipients.entries.len())
+        .split_at_mut_checked(split)
         .ok_or(ProgramError::NotEnoughAccountKeys)?;
     let accs = DistributeAccounts::try_from(accounts)?;
 
     // Owner / discriminator / version checks.
     let ch = Channel::from_account(&accs.channel)?;
+    ch.require_hooks(with_hooks)?;
 
     // Status gate. A `Distributed` channel is fully drained and rejects here;
     // only `reclaim` acts on it.
@@ -261,10 +285,11 @@ pub fn process(
     // Release the data borrow before token CPIs and the later state update.
     drop(ch);
 
-    #[cfg(feature = "v2")]
-    let (mut hook_context, hooked) = {
+    let mut hook_state = if with_hooks {
         use crate::helpers::accounts::validation::AccountValidator;
-        let hooked = Channel::from_account(&channel_ctx.channel)?.hooks.enabled();
+        let hooked = crate::ChannelWithHooks::from_account(&channel_ctx.channel)?
+            .hooks
+            .enabled();
         let refund = if is_sealed && payer_withdrawn_at == 0 {
             deposit
                 .checked_sub(settled)
@@ -336,7 +361,9 @@ pub fn process(
         treasury_token_account
             .validate_as_ata_checked(&crate::TREASURY_OWNER, &channel_ctx.token_ctx)
             .map_err(|_| ProgramError::InvalidAccountData)?;
-        (context, hooked)
+        Some((context, hooked))
+    } else {
+        None
     };
 
     let signer_seeds = channel_signer_seeds(
@@ -374,11 +401,12 @@ pub fn process(
             accs.self_program,
             &channel_address,
         )?;
-        #[cfg(feature = "v2")]
-        if destination.address() == recipient_account.address() {
-            hook_context.merchant_transferred += amount;
-        } else {
-            hook_context.redirected_principal += amount;
+        if let Some((hook_context, _)) = &mut hook_state {
+            if destination.address() == recipient_account.address() {
+                hook_context.merchant_transferred += amount;
+            } else {
+                hook_context.redirected_principal += amount;
+            }
         }
         transfer.push(destination, amount)?;
     }
@@ -395,11 +423,12 @@ pub fn process(
         accs.self_program,
         &channel_address,
     )?;
-    #[cfg(feature = "v2")]
-    if payee_destination.address() == accs.payee_token_account.address() {
-        hook_context.merchant_transferred += payee_share;
-    } else {
-        hook_context.redirected_principal += payee_share;
+    if let Some((hook_context, _)) = &mut hook_state {
+        if payee_destination.address() == accs.payee_token_account.address() {
+            hook_context.merchant_transferred += payee_share;
+        } else {
+            hook_context.redirected_principal += payee_share;
+        }
     }
     transfer.push(payee_destination, payee_share)?;
 
@@ -421,11 +450,10 @@ pub fn process(
                 accs.self_program,
                 &channel_address,
             )?;
-            #[cfg(feature = "v2")]
-            {
+            if let Some((hook_context, hooked)) = &mut hook_state {
                 if payer_destination.address() == accs.payer_token_account.address() {
                     hook_context.refund_transferred_to_payer = payer_refund;
-                } else if hooked {
+                } else if *hooked {
                     return Err(ProgramError::InvalidAccountData);
                 } else {
                     hook_context.redirected_principal += payer_refund;
@@ -445,8 +473,7 @@ pub fn process(
         let treasury_sweep = escrow_at_entry
             .checked_sub(transfer.scheduled_outflow())
             .ok_or(PaymentChannelsError::DistributeBalanceCalculationOverflow)?;
-        #[cfg(feature = "v2")]
-        {
+        if let Some((hook_context, _)) = &mut hook_state {
             hook_context.treasury_surplus = treasury_sweep;
         }
         transfer.push(&treasury_token_account, treasury_sweep)?;
@@ -455,8 +482,7 @@ pub fn process(
     // Execute every queued transfer (direct CPI or batched SPL `Batch`).
     transfer.flush()?;
 
-    #[cfg(feature = "v2")]
-    {
+    if let Some((mut hook_context, hooked)) = hook_state {
         {
             let mut ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
             ch.settlement_mut().mark_as_settled();
@@ -507,9 +533,9 @@ pub fn process(
         } else {
             let mut ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
             ch.status = ChannelStatus::Distributed as u8;
-            #[cfg(feature = "v2")]
-            {
-                ch.hooks.in_progress = 0;
+            drop(ch);
+            if with_hooks {
+                crate::hooks::finish(&mut channel_ctx.channel)?;
             }
         }
     } else {
@@ -517,9 +543,9 @@ pub fn process(
         // future cumulative deltas only cover newly settled amounts.
         let mut ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
         ch.settlement_mut().mark_as_settled();
-        #[cfg(feature = "v2")]
-        {
-            ch.hooks.in_progress = 0;
+        drop(ch);
+        if with_hooks {
+            crate::hooks::finish(&mut channel_ctx.channel)?;
         }
     }
 

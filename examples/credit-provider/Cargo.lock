@@ -77,7 +77,7 @@ version = "0.0.0"
 dependencies = [
  "borsh",
  "const-crypto",
- "payment_channels",
+ "payment-channel-interface",
  "pinocchio",
  "pinocchio-associated-token-account",
  "pinocchio-system",
@@ -276,18 +276,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
 
 [[package]]
-name = "payment_channels"
+name = "payment-channel-interface"
 version = "0.1.0"
 dependencies = [
  "borsh",
  "const-crypto",
  "pinocchio",
- "pinocchio-associated-token-account",
- "pinocchio-system",
- "pinocchio-token",
- "pinocchio-token-2022",
  "solana-address",
- "thiserror",
 ]
 
 [[package]]
@@ -330,18 +325,6 @@ name = "pinocchio-token"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "825f59c8348e5c2d3fd56432ef927f5819542b3b05fae4f5b6869801113e775e"
-dependencies = [
- "solana-account-view",
- "solana-address",
- "solana-instruction-view",
- "solana-program-error",
-]
-
-[[package]]
-name = "pinocchio-token-2022"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57dbab5718ab6ae446b2217c47598fabd29173a09bd32b05344f031739db92b8"
 dependencies = [
  "solana-account-view",
  "solana-address",

@@ -1,8 +1,9 @@
-# Experimental V2 generated bindings
+# Dual-version generated bindings
 
-V2 outputs are separate from the default V1 IDL and clients. They target
-`CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ`; they do not describe a deployed
-or audited program.
+The primary IDL and clients describe both account versions at canonical
+`CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX`. Original instruction names retain
+their wire encodings; explicit `WithHooks` variants are additive. The runtime
+revision is experimental and is not the older separate-address devnet deployment.
 
 ## Generate and check
 
@@ -10,30 +11,29 @@ From the repository root:
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm run generate:v2
-pnpm --filter @payment-channels/client-v2 build
-pnpm --filter @payment-channels/client-v2 typecheck
-pnpm --filter @payment-channels/client-v2 test
-cargo test --manifest-path clients/rust-v2/Cargo.toml
+just generate-client
+pnpm --filter @payment-channels/client build
+pnpm --filter @payment-channels/client typecheck
+pnpm --filter @payment-channels/client test
+cargo test -p payment_channels_client
 ```
 
 | Output | Path |
 | --- | --- |
-| Codama IDL | `program/payment_channels/idl/payment_channels_v2.json` |
-| TypeScript | `clients/typescript-v2/src/generated` |
-| Rust | `clients/rust-v2/src/generated` |
+| Codama IDL | `program/payment_channels/idl/payment_channels.json` |
+| TypeScript | `clients/typescript/src/generated` |
+| Rust | `clients/rust/src/generated` |
 | Shared parity vectors | `fixtures/lifecycle-v2.json` |
 
-The Rust V2 client has its own workspace and lockfile. This prevents its
-parity-test dependency on the V2 program from enabling V2 in the default
-workspace's V1 tests. It is a wire-only, unpublished crate; optional generated
-Anchor and RPC integrations are not exposed.
+The separate unpublished V2 packages are replaced by additive primary bindings.
+`Channel` decodes only a complete V1 account; `ChannelWithHooks` decodes only a
+complete V2 account. Its nested header is a structural type, not a shortcut for
+treating the full account as V1. Account-boundary decoding checks exact length,
+discriminator and version.
 
-`pnpm run generate` and the existing `just generate-client` remain V1 commands.
 Codama reads Rust syntax without expanding `cfg`, so `build.rs` explicitly
-selects the program ID and strips V2 channel storage from V1. The V2 visitor
-extracts the simple fixed wire structs directly from `hooks.rs`; unsupported
-new Rust declarations stop generation rather than silently omitting fields.
+selects the deployment ID. The lifecycle visitor extracts the fixed ABI structs;
+unsupported declarations stop generation rather than silently omitting fields.
 
 ## Compact configuration is representable, but not as an ordinary vector
 
@@ -51,8 +51,9 @@ by the program. A conventional `Vec<HookMeta>` would put its length in the
 wrong position. Rust generation uses `spl-collections` with its `borsh`
 feature for the one-byte-prefixed static context.
 
-`OpenArgs.hookConfig` (Rust: `hook_config`) is required. Four disabled slots
-encode as `00 00 00 00`, not as an omitted suffix.
+`OpenWithHooksArgs.hookConfig` (Rust: `hook_config`) is required. Four disabled
+slots encode as `00 00 00 00`, not as an omitted suffix. V1 `OpenArgs` has no
+hook configuration.
 
 Generated codecs describe wire encoding, not the complete admission policy.
 Callers must still enforce the 32-byte static-context limit, canonical padding,
@@ -80,7 +81,7 @@ tail as uniformly writable or forward outer signer privileges.
 ## Parity evidence and limits
 
 The shared vectors cover all five account counts, sparse enabled slots,
-nonempty static context, a complete unhooked `open`, and a callback context
+nonempty static context, a complete empty-hook `openWithHooks`, and a callback context
 with nonzero and signed accounting values. Regenerate them only for an
 intentional ABI change:
 
@@ -89,7 +90,7 @@ node scripts/generate-v2-fixtures.mjs
 ```
 
 TypeScript tests compare generated encodings with independently assembled
-bytes, fixed sizes, V1 discriminators, and the V1 IDL hash. Rust tests decode
+bytes, fixed sizes, original discriminators, and frozen V1 IDL-node hashes. Rust tests decode
 and re-encode the same vectors, compare real program storage with generated
 types, and compare the real callback context's Borsh bytes.
 

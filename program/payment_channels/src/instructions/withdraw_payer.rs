@@ -10,11 +10,13 @@ use crate::helpers::accounts::view::{
     ChannelAccountView, ChannelContext, ChannelTokenAccountView, MintAccountView, PayerAccountView,
     PayerContext, PayerTokenAccountView, TokenContext, TokenProgramAccountView,
 };
+use crate::hooks::HookContextRuntime;
 use crate::instructions::helpers::channel_signer_seeds;
 use crate::state::channel::{Channel, ChannelStatus};
 
 /// Instruction discriminator byte for `withdrawPayer`.
 pub const DISCRIMINATOR: u8 = 8;
+pub const WITH_HOOKS_DISCRIMINATOR: u8 = 13;
 
 pub struct WithdrawPayerAccounts<'a> {
     /// Must equal [`Channel::payer`](crate::Channel::payer) and be a signer.
@@ -59,15 +61,22 @@ impl<'a> TryFrom<&'a mut [AccountView]> for WithdrawPayerAccounts<'a> {
 /// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `= now` and
 /// does **not** close the PDA.
 pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
-    #[cfg(feature = "v2")]
+    process_inner(accounts, false)
+}
+
+pub fn process_with_hooks(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
+    process_inner(accounts, true)
+}
+
+fn process_inner(accounts: &mut [AccountView], with_hooks: bool) -> ProgramResult {
+    let split = if with_hooks { 6 } else { accounts.len() };
     let (accounts, hook_accounts) = accounts
-        .split_at_mut_checked(6)
+        .split_at_mut_checked(split)
         .ok_or(ProgramError::NotEnoughAccountKeys)?;
     let accs = WithdrawPayerAccounts::try_from(accounts)?;
     let now = Clock::get()?.unix_timestamp;
     // Zero is the "not withdrawn" sentinel, including on local validators.
-    #[cfg(feature = "v2")]
-    let now = now.max(1);
+    let now = if with_hooks { now.max(1) } else { now };
 
     // Signer check before any account reads.
     if !accs.payer.is_signer() {
@@ -76,6 +85,7 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
 
     // Owner / discriminator / version checks.
     let ch = Channel::from_account(&accs.channel)?;
+    ch.require_hooks(with_hooks)?;
 
     // Status gate: SEALED only.
     if ch.status != ChannelStatus::Sealed as u8 {
@@ -125,8 +135,7 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
     let refund = deposit
         .checked_sub(settled)
         .ok_or(PaymentChannelsError::RefundCalculationOverflow)?;
-    #[cfg(feature = "v2")]
-    let (mut hook_context, escrow_before) = {
+    let hook_state = if with_hooks {
         crate::hooks::validate_tail(&channel_ctx.channel, hook_accounts, 2)?;
         let context = crate::hooks::HookContext::begin(
             &mut channel_ctx.channel,
@@ -142,7 +151,9 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
             .amount(&channel_ctx.channel_token_account.as_any())?;
         crate::hooks::invoke(&channel_ctx.channel, hook_accounts, &context, 2)?;
         crate::hooks::revalidate(&channel_ctx, Some(&payer_ctx.payer_token_account), before)?;
-        (context, before)
+        Some((context, before))
+    } else {
+        None
     };
     channel_ctx.transfer_checked_signed(
         &payer_ctx.payer_token_account.as_any(),
@@ -151,8 +162,7 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
     )?;
     Channel::from_account_mut(&mut channel_ctx.channel)?.set_payer_withdrawn_at(now);
 
-    #[cfg(feature = "v2")]
-    {
+    if let Some((mut hook_context, escrow_before)) = hook_state {
         hook_context.refund_transferred_to_payer = refund;
         hook_context.actual(&channel_ctx.channel)?;
         crate::hooks::invoke(&channel_ctx.channel, hook_accounts, &hook_context, 3)?;

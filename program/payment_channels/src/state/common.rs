@@ -4,10 +4,9 @@ use pinocchio::error::ProgramError;
 
 use crate::errors::PaymentChannelsError;
 
-/// Schema version stamped into [`Channel::version`](crate::Channel::version)
-/// at `open`. Bump when the PDA layout changes; [`Channel`](crate::Channel)
-/// refuses any other value on load, so migrations must be explicit.
-pub const CURRENT_CHANNEL_VERSION: u8 = if cfg!(feature = "v2") { 2 } else { 1 };
+/// Frozen V1 version stamped by `open`. Hooked opens use version 2 without
+/// converting existing accounts; both layouts remain supported at runtime.
+pub const CURRENT_CHANNEL_VERSION: u8 = 1;
 
 /// Byte-0 tag for this program's account shapes. Starts at 1 so
 /// zero-initialized bytes fail the [`Channel`](crate::Channel) load check

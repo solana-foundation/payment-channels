@@ -1,5 +1,4 @@
 //! Real SBF channel -> SBF callback integration, deliberately independent of generated V2 clients.
-#![cfg(feature = "v2")]
 #![allow(clippy::result_large_err)]
 
 mod common;
@@ -33,6 +32,29 @@ fn ata(owner: Pubkey, mint: Pubkey) -> Pubkey {
 }
 fn u64_at(bytes: &[u8], offset: usize) -> u64 {
     u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
+}
+
+fn read_hooked_channel<R>(
+    svm: &LiteSVM,
+    channel: &Pubkey,
+    f: impl FnOnce(&payment_channels::ChannelWithHooks) -> R,
+) -> R {
+    let account = svm.get_account(channel).expect("channel exists");
+    f(payment_channels::ChannelWithHooks::from_bytes(&account.data).expect("hooked channel"))
+}
+
+fn mutate_hooked_channel(
+    svm: &mut LiteSVM,
+    channel: &Pubkey,
+    f: impl FnOnce(&mut payment_channels::ChannelWithHooks),
+) {
+    let mut account = svm.get_account(channel).expect("channel exists");
+    f(
+        payment_channels::ChannelWithHooks::from_bytes_mut(&mut account.data)
+            .expect("hooked channel"),
+    );
+    svm.set_account(*channel, account)
+        .expect("overwrite channel");
 }
 
 fn add_v3_program(svm: &mut LiteSVM, program_id: Pubkey, path: &std::path::Path) {
@@ -219,7 +241,7 @@ impl Fixture {
         metas
     }
     fn open_ix(&self) -> Instruction {
-        let mut data = vec![1];
+        let mut data = vec![10];
         data.extend_from_slice(&1u64.to_le_bytes());
         data.extend_from_slice(&1_000u64.to_le_bytes());
         data.extend_from_slice(&3_600u32.to_le_bytes());
@@ -252,7 +274,13 @@ impl Fixture {
         }
     }
     fn operation(&self, op: u8) -> Instruction {
-        let mut data = vec![op];
+        // Callback operation tags retain the original economic instruction IDs.
+        let mut data = vec![match op {
+            3 => 11,
+            7 => 12,
+            8 => 13,
+            _ => unreachable!(),
+        }];
         let mut accounts = match op {
             3 => {
                 data.extend_from_slice(&200u64.to_le_bytes());
@@ -304,7 +332,7 @@ impl Fixture {
     fn send(&mut self, ix: Instruction) -> Result<TransactionMetadata, FailedTransactionMetadata> {
         // Permissionless distribute pays fees with an unrelated signer.
         let operation = ix.data[0];
-        let signer = if ix.data[0] == 7 {
+        let signer = if matches!(ix.data[0], 7 | 12) {
             &self.stranger
         } else {
             &self.payer
@@ -344,7 +372,7 @@ impl Fixture {
     }
     fn accounting(&mut self, settled: u64, sealed: bool) {
         // State setup only: the operation under test and every hook execute SBF.
-        mutate_channel(&mut self.svm, &self.channel, |ch| {
+        mutate_hooked_channel(&mut self.svm, &self.channel, |ch| {
             ch.set_settled(settled);
             ch.status = if sealed { 1 } else { 0 };
         });
@@ -387,6 +415,66 @@ impl Fixture {
 }
 
 #[test]
+fn sbf_original_instructions_reject_hooked_channels_without_side_effects() {
+    for op in [1, 3, 7, 8] {
+        let mut f = Fixture::new(if op <= 3 { &[0, 1] } else { &[2, 3] });
+        f.open();
+        if op >= 7 {
+            f.accounting(400, true);
+        }
+        let mut ix = if op == 1 {
+            f.open_ix()
+        } else {
+            f.operation(op)
+        };
+        ix.data[0] = op;
+        // Use the original ABI, not a malformed instruction or a missing tail.
+        if op == 1 {
+            ix.data.truncate(67);
+        }
+        ix.accounts.truncate(match op {
+            1 => 14,
+            7 => 12,
+            _ => 6,
+        });
+        let before = f.snapshot();
+        assert!(f.send(ix).is_err(), "original operation {op} accepted V2");
+        assert_eq!(f.snapshot(), before, "original operation {op}");
+    }
+}
+
+#[test]
+fn sbf_hooked_instructions_reject_v1_channels_without_side_effects() {
+    for op in [1, 3, 7, 8] {
+        let mut f = Fixture::new(&[]);
+        let mut open = f.open_ix();
+        open.data[0] = 1;
+        open.data.truncate(67);
+        f.send(open).unwrap();
+        assert_eq!(f.svm.get_account(&f.channel).unwrap().data.len(), 256);
+        // V1 remains operational in the very same SBF runtime.
+        let mut top_up = f.operation(3);
+        top_up.data[0] = 3;
+        f.send(top_up).unwrap();
+        assert_eq!(token_balance(&f.svm, &f.escrow), 1_200);
+        if op >= 7 {
+            mutate_channel(&mut f.svm, &f.channel, |ch| {
+                ch.set_settled(400);
+                ch.status = 1;
+            });
+        }
+        let ix = if op == 1 {
+            f.open_ix()
+        } else {
+            f.operation(op)
+        };
+        let before = f.snapshot();
+        assert!(f.send(ix).is_err(), "hooked operation {op} accepted V1");
+        assert_eq!(f.snapshot(), before, "hooked operation {op}");
+    }
+}
+
+#[test]
 fn sbf_funding_callbacks_and_signer_attenuation() {
     let mut f = Fixture::new(&[0, 1]);
     f.open();
@@ -395,7 +483,10 @@ fn sbf_funding_callbacks_and_signer_attenuation() {
     f.send(f.operation(3)).unwrap();
     f.assert_pair(3, 2);
     assert_eq!(token_balance(&f.svm, &f.escrow), 1_200);
-    assert_eq!(read_channel(&f.svm, &f.channel, |c| c.hooks.in_progress), 0);
+    assert_eq!(
+        read_hooked_channel(&f.svm, &f.channel, |c| c.hooks.in_progress),
+        0
+    );
 }
 
 #[test]
@@ -596,8 +687,8 @@ fn sbf_indirect_reentry_is_rejected_and_rolls_back_open() {
 fn sbf_guard_rejects_every_entrypoint_before_dispatch() {
     let mut f = Fixture::new(&[]);
     f.open();
-    mutate_channel(&mut f.svm, &f.channel, |c| c.hooks.in_progress = 1);
-    for discriminator in (1..=9).chain([payment_channels::event_engine::EMIT_EVENT_IX_DISC]) {
+    mutate_hooked_channel(&mut f.svm, &f.channel, |c| c.hooks.in_progress = 1);
+    for discriminator in (1..=13).chain([payment_channels::event_engine::EMIT_EVENT_IX_DISC]) {
         let before = f.snapshot();
         let error = f
             .send(Instruction {

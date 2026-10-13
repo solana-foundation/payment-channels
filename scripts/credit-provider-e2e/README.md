@@ -17,8 +17,8 @@ target directories. This prevents the provider's `no-entrypoint` channel
 dependency from overwriting the executable channel build. Both ELFs must have
 SBPF v3 flags and a nonempty executable section containing their entrypoint.
 
-The harness starts its own offline Surfpool on loopback, preloads the fixed
-V2 channel program ID, and deploys the provider with a new local upgrade
+The harness starts its own offline Surfpool on loopback, preloads the canonical
+dual-runtime channel program ID, and deploys the provider with a new local upgrade
 authority. All mint, custody, authorization, voucher and channel operations
 use signed transactions. No production wallet configuration is used.
 `--skip-feature-verify` bypasses the CLI's cluster-feature precheck for local
@@ -28,6 +28,8 @@ SBPF v3 deployment, not transaction signatures or program execution.
 SBF cache subdirectories remain separate. `CREDIT_E2E_PORT` defaults to 18899.
 `PAYMENT_CHANNELS_V2_SO` and `CREDIT_PROVIDER_SO` are diagnostic artifact
 overrides; leave both unset to validate the recipe's own builds.
+The `V2` artifact label separates SBPF v3 hook tests from the Mollusk regression
+binary; it does not select a separate runtime or program ID.
 Ephemeral key files are created mode 0600 beneath ignored `target/` and removed
 on exit. Surfpool logs remain there for diagnosis.
 
@@ -40,5 +42,6 @@ unfunded cancellation, and a fresh authorization after cancellation.
 Negative cases assert the intended instruction error and unchanged financial
 accounts. Fee-payer SOL is excluded because rejected transactions pay fees.
 
-This verifies the current V2 ABI; it does not test a same-pubkey upgrade from V1
+This verifies hooked channels on the default dual runtime, using outer instruction
+tags 10–13 and economic callback tags 1/3/7/8. It does not test a same-pubkey upgrade from V1
 or authorize a deployment to a public network.

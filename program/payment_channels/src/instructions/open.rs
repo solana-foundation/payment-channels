@@ -25,6 +25,7 @@ use crate::helpers::accounts::view::PayerContext;
 use crate::helpers::accounts::view::PayerTokenAccountView;
 use crate::helpers::accounts::view::TokenContext;
 use crate::helpers::accounts::view::TokenProgramAccountView;
+use crate::hooks::HookContextRuntime;
 use crate::state::{Channel, Transmutable, load};
 
 use crate::event_engine::EventSerialize;
@@ -37,6 +38,7 @@ use crate::instructions::helpers::{DistributionPreimage, channel_signer_seeds};
 
 /// Instruction discriminator byte for `open`.
 pub const DISCRIMINATOR: u8 = 1;
+pub const WITH_HOOKS_DISCRIMINATOR: u8 = 10;
 
 /// Init payload. The distribution plan is hashed on-chain with `sha256` and
 /// the digest stored in
@@ -50,8 +52,7 @@ pub const DISCRIMINATOR: u8 = 1;
 pub struct OpenArgs<'a> {
     header: &'a OpenArgsHeader,
     pub recipients: DistributionPreimage<'a>,
-    #[cfg(feature = "v2")]
-    pub hook_config: &'a [u8],
+    pub hook_config: Option<&'a [u8]>,
 }
 
 #[repr(transparent)]
@@ -120,6 +121,18 @@ pub struct OpenArgsWire {
     pub recipients: Vec<DistributionEntry>,
 }
 
+#[cfg(feature = "idl")]
+#[allow(dead_code)]
+#[derive(CodamaType)]
+#[codama(name = "open_with_hooks_args")]
+pub struct OpenWithHooksArgsWire {
+    pub salt: u64,
+    pub deposit: u64,
+    pub grace_period: u32,
+    pub open_slot: u64,
+    pub recipients: Vec<DistributionEntry>,
+}
+
 impl<'a> OpenArgs<'a> {
     #[inline(always)]
     pub fn salt(&self) -> u64 {
@@ -142,14 +155,21 @@ impl<'a> OpenArgs<'a> {
     }
 
     pub fn load(data: &'a [u8]) -> Result<Self, ProgramError> {
+        Self::load_inner(data, false)
+    }
+
+    pub fn load_with_hooks(data: &'a [u8]) -> Result<Self, ProgramError> {
+        Self::load_inner(data, true)
+    }
+
+    fn load_inner(data: &'a [u8], with_hooks: bool) -> Result<Self, ProgramError> {
         if data.len() < OpenArgsHeader::LEN {
             return Err(ProgramError::InvalidInstructionData);
         }
         let (header_bytes, recipients_bytes) = data.split_at(OpenArgsHeader::LEN);
         let header = unsafe { load::<OpenArgsHeader>(header_bytes) }
             .map_err(|_| ProgramError::InvalidInstructionData)?;
-        #[cfg(feature = "v2")]
-        let (recipients_bytes, hook_config) = {
+        let (recipients_bytes, hook_config) = if with_hooks {
             let count_bytes = recipients_bytes
                 .get(..4)
                 .ok_or(ProgramError::InvalidInstructionData)?;
@@ -161,13 +181,16 @@ impl<'a> OpenArgs<'a> {
             if recipients_bytes.len() < end {
                 return Err(ProgramError::InvalidInstructionData);
             }
-            recipients_bytes.split_at(end)
+            let (recipients, config) = recipients_bytes.split_at(end);
+            crate::hooks::HookState::parse_for_program(config, &crate::ID)?;
+            (recipients, Some(config))
+        } else {
+            (recipients_bytes, None)
         };
         let recipients = DistributionPreimage::load(recipients_bytes)?;
         Ok(Self {
             header,
             recipients,
-            #[cfg(feature = "v2")]
             hook_config,
         })
     }
@@ -266,9 +289,10 @@ pub fn process(
     accounts: &mut [AccountView],
     args: &OpenArgs<'_>,
 ) -> ProgramResult {
-    #[cfg(feature = "v2")]
+    let with_hooks = args.hook_config.is_some();
+    let split = if with_hooks { 14 } else { accounts.len() };
     let (accounts, hook_accounts) = accounts
-        .split_at_mut_checked(14)
+        .split_at_mut_checked(split)
         .ok_or(ProgramError::NotEnoughAccountKeys)?;
     let accs = OpenAccounts::try_from(accounts)?;
 
@@ -362,7 +386,12 @@ pub fn process(
     // `lamports == 0`): after a channel at these seeds is fully closed,
     // a griefer donating lamports to the dead address must not block a
     // legitimate reopen. Surplus lamports refund to `rent_payer` at close.
-    let min_rent = Rent::from_account_view(accs.rent)?.try_minimum_balance(Channel::LEN)?;
+    let channel_len = if with_hooks {
+        crate::ChannelWithHooks::LEN
+    } else {
+        Channel::LEN
+    };
+    let min_rent = Rent::from_account_view(accs.rent)?.try_minimum_balance(channel_len)?;
     let pending_balance = min_rent.saturating_sub(channel_ctx.channel.lamports());
     if pending_balance > 0 {
         SystemTransfer {
@@ -374,7 +403,7 @@ pub fn process(
     }
     Allocate {
         account: &channel_ctx.channel,
-        space: Channel::LEN as u64,
+        space: channel_len as u64,
     }
     .invoke_signed(&signers)?;
     Assign {
@@ -396,10 +425,9 @@ pub fn process(
     }
     .invoke()?;
 
-    #[cfg(feature = "v2")]
-    let (mut hook_context, escrow_before) = {
+    let hook_state = if let Some(config) = args.hook_config {
         Channel::init_at(
-            &mut channel_ctx.channel.try_borrow_mut()?,
+            &mut channel_ctx.channel.try_borrow_mut()?[..Channel::LEN],
             bump,
             args.salt(),
             0,
@@ -412,8 +440,9 @@ pub fn process(
             *accs.rent_payer.address(),
             open_slot,
         )?;
-        Channel::from_account_mut(&mut channel_ctx.channel)?.hooks =
-            crate::hooks::HookState::parse(args.hook_config)?;
+        channel_ctx.channel.try_borrow_mut()?[1] = 2;
+        crate::ChannelWithHooks::from_account_mut(&mut channel_ctx.channel)?.hooks =
+            crate::hooks::HookState::parse_for_program(config, &crate::ID)?;
         crate::hooks::validate_tail(&channel_ctx.channel, hook_accounts, 0)?;
         let context = crate::hooks::HookContext::begin(
             &mut channel_ctx.channel,
@@ -429,7 +458,9 @@ pub fn process(
             .amount(&channel_ctx.channel_token_account.as_any())?;
         crate::hooks::invoke(&channel_ctx.channel, hook_accounts, &context, 0)?;
         crate::hooks::revalidate(&channel_ctx, Some(&payer_ctx.payer_token_account), before)?;
-        (context, before)
+        Some((context, before))
+    } else {
+        None
     };
 
     // Transfer the deposit from payer to escrow.
@@ -444,24 +475,24 @@ pub fn process(
     }
     .invoke()?;
 
-    #[cfg(not(feature = "v2"))]
-    Channel::init_at(
-        &mut channel_ctx.channel.try_borrow_mut()?,
-        bump,
-        args.salt(),
-        deposit,
-        args.grace_period(),
-        distribution_hash,
-        *payer_ctx.payer.address(),
-        *accs.payee.address(),
-        *accs.authorized_signer.address(),
-        *channel_ctx.token_ctx.mint.address(),
-        *accs.rent_payer.address(),
-        open_slot,
-    )?;
+    if !with_hooks {
+        Channel::init_at(
+            &mut channel_ctx.channel.try_borrow_mut()?,
+            bump,
+            args.salt(),
+            deposit,
+            args.grace_period(),
+            distribution_hash,
+            *payer_ctx.payer.address(),
+            *accs.payee.address(),
+            *accs.authorized_signer.address(),
+            *channel_ctx.token_ctx.mint.address(),
+            *accs.rent_payer.address(),
+            open_slot,
+        )?;
+    }
 
-    #[cfg(feature = "v2")]
-    {
+    if let Some((mut hook_context, escrow_before)) = hook_state {
         Channel::from_account_mut(&mut channel_ctx.channel)?.set_deposit(deposit);
         hook_context.funding_transferred = deposit;
         hook_context.actual(&channel_ctx.channel)?;

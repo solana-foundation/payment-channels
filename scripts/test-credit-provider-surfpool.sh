@@ -5,6 +5,7 @@ cd "$(dirname "$0")/.."
 export CARGO_INCREMENTAL=0
 export CARGO_NET_OFFLINE=true
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target/credit-provider-e2e}"
+# V2 labels the hook-test artifact, not a separate runtime or program ID.
 export PAYMENT_CHANNELS_V2_SO="${PAYMENT_CHANNELS_V2_SO:-$PWD/target/deploy-v2/payment_channels.so}"
 export CREDIT_PROVIDER_SO="${CREDIT_PROVIDER_SO:-$PWD/target/deploy/credit_provider.so}"
 # SBPF v3 deployment requires a recent Agave CLI; do not alter the global install.

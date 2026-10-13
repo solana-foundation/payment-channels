@@ -265,6 +265,71 @@ pub enum PaymentChannelsInstruction<'a> {
         codama(account(name = "event_authority", signer, default_value = pda("eventAuthority")))
     )]
     EmitEvent = 228,
+
+    /// Creates a V2 channel with immutable callback configuration.
+    #[cfg_attr(
+        feature = "idl",
+        codama(account(name = "payer", signer, writable)),
+        codama(account(name = "rent_payer", signer, writable)),
+        codama(account(name = "payee")),
+        codama(account(name = "mint")),
+        codama(account(name = "authorized_signer")),
+        codama(account(name = "channel", writable)),
+        codama(account(name = "payer_token_account", writable)),
+        codama(account(name = "channel_token_account", writable)),
+        codama(account(name = "token_program")),
+        codama(account(name = "system_program", default_value = program("system"))),
+        codama(account(name = "rent")),
+        codama(account(name = "associated_token_program")),
+        codama(account(name = "event_authority", default_value = pda("eventAuthority"))),
+        codama(account(name = "self_program"))
+    )]
+    OpenWithHooks(
+        #[cfg_attr(feature = "idl", codama(name = "open_with_hooks_args"))] open::OpenArgs<'a>,
+    ) = 10,
+    /// Funds a V2 channel with its mandatory funding callbacks.
+    #[cfg_attr(
+        feature = "idl",
+        codama(account(name = "payer", signer, writable)),
+        codama(account(name = "channel", writable)),
+        codama(account(name = "payer_token_account", writable)),
+        codama(account(name = "channel_token_account", writable)),
+        codama(account(name = "mint")),
+        codama(account(name = "token_program"))
+    )]
+    TopUpWithHooks(
+        #[cfg_attr(feature = "idl", codama(name = "top_up_args"))] &'a top_up::TopUpArgs,
+    ) = 11,
+    /// Distributes a V2 channel with its mandatory payout callbacks.
+    #[cfg_attr(
+        feature = "idl",
+        codama(account(name = "channel", writable)),
+        codama(account(name = "payer", writable)),
+        codama(account(name = "rent_payer", writable)),
+        codama(account(name = "channel_token_account", writable)),
+        codama(account(name = "payer_token_account", writable)),
+        codama(account(name = "payee_token_account", writable)),
+        codama(account(name = "treasury_token_account", writable)),
+        codama(account(name = "mint")),
+        codama(account(name = "token_program")),
+        codama(account(name = "event_authority", default_value = pda("eventAuthority"))),
+        codama(account(name = "self_program"))
+    )]
+    DistributeWithHooks(
+        #[cfg_attr(feature = "idl", codama(name = "distribute_args"))]
+        distribute::DistributeArgs<'a>,
+    ) = 12,
+    /// Refunds a V2 payer with its mandatory payout callbacks.
+    #[cfg_attr(
+        feature = "idl",
+        codama(account(name = "payer", signer)),
+        codama(account(name = "channel", writable)),
+        codama(account(name = "channel_token_account", writable)),
+        codama(account(name = "payer_token_account", writable)),
+        codama(account(name = "mint")),
+        codama(account(name = "token_program"))
+    )]
+    WithdrawPayerWithHooks = 13,
 }
 
 impl<'a> PaymentChannelsInstruction<'a> {
@@ -285,6 +350,10 @@ impl<'a> PaymentChannelsInstruction<'a> {
             Self::WithdrawPayer => "withdraw_payer",
             Self::Reclaim => "reclaim",
             Self::EmitEvent => "emit_event",
+            Self::OpenWithHooks(_) => "open_with_hooks",
+            Self::TopUpWithHooks(_) => "top_up_with_hooks",
+            Self::DistributeWithHooks(_) => "distribute_with_hooks",
+            Self::WithdrawPayerWithHooks => "withdraw_payer_with_hooks",
         }
     }
 
@@ -308,6 +377,18 @@ impl<'a> PaymentChannelsInstruction<'a> {
             withdraw_payer::DISCRIMINATOR => Ok(Self::WithdrawPayer),
             reclaim::DISCRIMINATOR => Ok(Self::Reclaim),
             emit_event::DISCRIMINATOR => Ok(Self::EmitEvent),
+            open::WITH_HOOKS_DISCRIMINATOR => {
+                Ok(Self::OpenWithHooks(open::OpenArgs::load_with_hooks(rest)?))
+            }
+            top_up::WITH_HOOKS_DISCRIMINATOR => {
+                Ok(Self::TopUpWithHooks(top_up::TopUpArgs::load(rest)?))
+            }
+            distribute::WITH_HOOKS_DISCRIMINATOR => Ok(Self::DistributeWithHooks(
+                distribute::DistributeArgs::load(rest)?,
+            )),
+            withdraw_payer::WITH_HOOKS_DISCRIMINATOR if rest.is_empty() => {
+                Ok(Self::WithdrawPayerWithHooks)
+            }
             _ => Err(ProgramError::InvalidInstructionData),
         }
     }
