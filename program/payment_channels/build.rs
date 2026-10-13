@@ -26,11 +26,28 @@ fn generate_idl() -> BuildResult<()> {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR")?;
     let crate_path = Path::new(&manifest_dir).join("src");
     let codama = Codama::load(&crate_path)?;
-    let idl_json = codama.get_json_idl()?;
+    // Codama parses source syntax rather than rustc's cfg-expanded tree.
+    // Deployment selection changes the address only: both account versions
+    // and the additive hooked instructions belong to the same runtime ABI.
+    let mut idl: serde_json::Value = serde_json::from_str(&codama.get_json_idl()?)?;
+    let devnet = env::var_os("CARGO_FEATURE_DEVNET_DEPLOYMENT").is_some();
+    idl["program"]["publicKey"] = serde_json::Value::String(
+        if devnet {
+            "CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ"
+        } else {
+            "CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX"
+        }
+        .into(),
+    );
+    let idl_json = serde_json::to_string_pretty(&idl)?;
 
     let idl_dir = Path::new(&manifest_dir).join("idl");
     fs::create_dir_all(&idl_dir)?;
-    let idl_path = idl_dir.join("payment_channels.raw.json");
+    let idl_path = idl_dir.join(if devnet {
+        "payment_channels_devnet.raw.json"
+    } else {
+        "payment_channels.raw.json"
+    });
     fs::write(&idl_path, idl_json)?;
 
     println!("cargo:warning=Raw IDL written to: {}", idl_path.display());

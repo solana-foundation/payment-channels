@@ -6,5 +6,7 @@
 //!
 
 pub(crate) mod r#channel;
+pub(crate) mod r#channel_with_hooks;
 
 pub use self::r#channel::*;
+pub use self::r#channel_with_hooks::*;

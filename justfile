@@ -8,6 +8,11 @@ program_id    := "CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX"
 idl_file      := program_dir / "idl/payment_channels.json"
 raw_idl_file  := program_dir / "idl/payment_channels.raw.json"
 
+# Preserve the compiler/ISA used by the existing Mollusk regression suite and
+# baseline benchmarks. This selects an ISA, not an account ABI.
+v1_sbf_args := "--tools-version v1.52 --arch v0"
+runtime_sbf_args := "--tools-version v1.58 --arch v3"
+
 default:
     @just --list
 
@@ -37,23 +42,36 @@ program-id:
 build: build-program build-client
 
 build-program:
-    cd {{program_dir}} && cargo build-sbf
+    cd {{program_dir}} && cargo build-sbf {{runtime_sbf_args}}
     @echo "✓ program built"
+
+# The canonical-address runtime supports both V1 and hooked accounts.
+build-v2-localnet:
+    cd {{program_dir}} && cargo build-sbf {{runtime_sbf_args}} --sbf-out-dir ../../target/deploy-v2
+
+# Intentionally subject to the existing devnet treasury-owner release gate.
+build-v2-devnet:
+    cd {{program_dir}} && cargo build-sbf {{runtime_sbf_args}} --no-default-features --features devnet-deployment,devnet --sbf-out-dir ../../target/deploy-v2-devnet
+
+# Test-only adapter is never included in a deployment recipe.
+test-v2-hooks: build-v2-localnet
+    cargo build-sbf --tools-version v1.58 --arch v3 --manifest-path {{program_dir}}/tests/hook-adapter/Cargo.toml --sbf-out-dir target/deploy-v2
+    cargo test -p payment_channels --test hooks_v2 -- --nocapture
 
 # Cluster builds select the per-cluster TREASURY_OWNER (see src/constants.rs) and
 # enable the build-time guard: they fail to compile until that cluster's real owner
 # replaces the 0xBEEF placeholder. `--no-default-features` drops the localnet default
 # so only the target cluster feature is active.
 build-devnet:
-    cd {{program_dir}} && cargo build-sbf --no-default-features --features devnet
+    cd {{program_dir}} && cargo build-sbf {{runtime_sbf_args}} --no-default-features --features devnet
     @echo "✓ devnet program built"
 
 build-testnet:
-    cd {{program_dir}} && cargo build-sbf --no-default-features --features testnet
+    cd {{program_dir}} && cargo build-sbf {{runtime_sbf_args}} --no-default-features --features testnet
     @echo "✓ testnet program built"
 
 build-mainnet-beta:
-    cd {{program_dir}} && cargo build-sbf --no-default-features --features mainnet-beta
+    cd {{program_dir}} && cargo build-sbf {{runtime_sbf_args}} --no-default-features --features mainnet-beta
     @echo "✓ mainnet-beta program built"
 
 # Raw IDL is emitted by build.rs, gated on the `idl` feature so plain
@@ -78,11 +96,24 @@ build-client: generate-client
 
 test: test-program test-client
 
-test-program: generate-client
-    cd {{program_dir}} && cargo test-sbf
+test-program: generate-client test-v2-hooks
+    cd {{program_dir}} && cargo test-sbf {{v1_sbf_args}}
 
 test-client: generate-client
     cd {{ts_client_dir}} && pnpm run test
+
+test-v2-client:
+    pnpm --filter @payment-channels/client typecheck
+    pnpm --filter @payment-channels/client test
+
+# Builds must complete before the offline RPC harness starts; no concurrent cargo targets.
+test-same-address-upgrade:
+    bash scripts/v1-v2-upgrade-e2e/run.sh
+
+test-credit-provider-surfpool:
+    CARGO_INCREMENTAL=0 CARGO_NET_OFFLINE=true CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target}/credit-e2e-channel-sbf" cargo build-sbf --tools-version v1.58 --arch v3 --manifest-path program/payment_channels/Cargo.toml --sbf-out-dir target/deploy-v2
+    CARGO_INCREMENTAL=0 CARGO_NET_OFFLINE=true CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target}/credit-e2e-provider-sbf" cargo build-sbf --tools-version v1.58 --arch v3 --manifest-path examples/credit-provider/Cargo.toml --sbf-out-dir target/deploy
+    bash scripts/test-credit-provider-surfpool.sh
 
 # Run the parameterized CU benchmark scenarios and emit bench_report.md
 # next to Cargo.toml. `--test-threads=1` keeps logs interleaved-free and
@@ -91,13 +122,13 @@ test-client: generate-client
 bench: generate-client
     cd {{program_dir}} && \
         BENCH=1 BENCH_DATE="$(date -u +%Y-%m-%d)" \
-        cargo test-sbf --test instructions benchmark::scenarios:: -- --test-threads=1
+        cargo test-sbf {{v1_sbf_args}} --test instructions benchmark::scenarios:: -- --test-threads=1
 
 # Focused event-engine end-to-end run (litesvm). Loads the compiled .so
 # and exercises the self-CPI Anchor-event wire format via the `open`
 # instruction plus the `emit_event` validation surface.
 events-e2e:
-    cd {{program_dir}} && cargo test-sbf --test instructions event_engine_e2e::
+    cd {{program_dir}} && cargo test-sbf {{v1_sbf_args}} --test instructions event_engine_e2e::
 
 # ---------- quality ----------
 

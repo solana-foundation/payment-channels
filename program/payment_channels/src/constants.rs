@@ -77,8 +77,8 @@ mod cluster {
 
 #[cfg(all(feature = "devnet", not(feature = "mainnet-beta")))]
 mod cluster {
-    use super::*;
-    pub const TREASURY_OWNER: [u8; 32] = TREASURY_OWNER_SENTINEL; // TODO: real devnet owner
+    pub const TREASURY_OWNER: [u8; 32] =
+        const_crypto::bs58::decode_pubkey("4zTeC5mVqWLruDexgU2mV66p9t5vCA9JyiZqdGDUspap");
 }
 
 #[cfg(all(
