@@ -194,7 +194,7 @@ escrow balances. Direct donations outside protocol funding remain surplus.
 Any configured hook makes positive payer refunds strict: an unusable canonical
 payer ATA fails instead of redirecting principal to treasury. Merchant payout
 redirects retain the existing policy and are represented separately in context.
-No hook-skipping flag or legacy V2 instruction bypass exists.
+No hook-skipping flag or alternate instruction bypass exists.
 
 A scoped signer is a capability, not proof of an immediate caller. An adapter
 must verify its exact authority, context bindings and replay domain; a nested

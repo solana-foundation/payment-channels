@@ -548,7 +548,7 @@ fn sbf_final_zero_refund_after_withdrawal_still_requires_both_hooks() {
 }
 
 #[test]
-// Pinocchio's NotEnoughAccountKeys maps to this legacy runtime variant.
+// Pinocchio's NotEnoughAccountKeys maps to this deprecated runtime variant.
 #[allow(deprecated)]
 fn sbf_no_operation_can_omit_mandatory_hooks() {
     for op in [1, 3, 7, 8] {
