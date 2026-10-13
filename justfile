@@ -8,6 +8,10 @@ program_id    := "CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX"
 idl_file      := program_dir / "idl/payment_channels.json"
 raw_idl_file  := program_dir / "idl/payment_channels.raw.json"
 
+# Preserve the V1 compiler/ISA used by CLI 3.1.13 and the baseline benchmarks.
+# Newer CLI defaults select v3, which the V1 Mollusk runtime cannot load.
+v1_sbf_args := "--tools-version v1.52 --arch v0"
+
 default:
     @just --list
 
@@ -37,7 +41,7 @@ program-id:
 build: build-program build-client
 
 build-program:
-    cd {{program_dir}} && cargo build-sbf
+    cd {{program_dir}} && cargo build-sbf {{v1_sbf_args}}
     @echo "✓ program built"
 
 # V2 is explicit and never changes the default V1 build/client address.
@@ -58,15 +62,15 @@ test-v2-hooks: build-v2-localnet
 # replaces the 0xBEEF placeholder. `--no-default-features` drops the localnet default
 # so only the target cluster feature is active.
 build-devnet:
-    cd {{program_dir}} && cargo build-sbf --no-default-features --features devnet
+    cd {{program_dir}} && cargo build-sbf {{v1_sbf_args}} --no-default-features --features devnet
     @echo "✓ devnet program built"
 
 build-testnet:
-    cd {{program_dir}} && cargo build-sbf --no-default-features --features testnet
+    cd {{program_dir}} && cargo build-sbf {{v1_sbf_args}} --no-default-features --features testnet
     @echo "✓ testnet program built"
 
 build-mainnet-beta:
-    cd {{program_dir}} && cargo build-sbf --no-default-features --features mainnet-beta
+    cd {{program_dir}} && cargo build-sbf {{v1_sbf_args}} --no-default-features --features mainnet-beta
     @echo "✓ mainnet-beta program built"
 
 # Raw IDL is emitted by build.rs, gated on the `idl` feature so plain
@@ -92,10 +96,14 @@ build-client: generate-client
 test: test-program test-client
 
 test-program: generate-client
-    cd {{program_dir}} && cargo test-sbf
+    cd {{program_dir}} && cargo test-sbf {{v1_sbf_args}}
 
 test-client: generate-client
     cd {{ts_client_dir}} && pnpm run test
+
+test-v2-client:
+    pnpm --filter @payment-channels/client-v2 typecheck
+    pnpm --filter @payment-channels/client-v2 test
 
 # Run the parameterized CU benchmark scenarios and emit bench_report.md
 # next to Cargo.toml. `--test-threads=1` keeps logs interleaved-free and
@@ -104,13 +112,13 @@ test-client: generate-client
 bench: generate-client
     cd {{program_dir}} && \
         BENCH=1 BENCH_DATE="$(date -u +%Y-%m-%d)" \
-        cargo test-sbf --test instructions benchmark::scenarios:: -- --test-threads=1
+        cargo test-sbf {{v1_sbf_args}} --test instructions benchmark::scenarios:: -- --test-threads=1
 
 # Focused event-engine end-to-end run (litesvm). Loads the compiled .so
 # and exercises the self-CPI Anchor-event wire format via the `open`
 # instruction plus the `emit_event` validation surface.
 events-e2e:
-    cd {{program_dir}} && cargo test-sbf --test instructions event_engine_e2e::
+    cd {{program_dir}} && cargo test-sbf {{v1_sbf_args}} --test instructions event_engine_e2e::
 
 # ---------- quality ----------
 

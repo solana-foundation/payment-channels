@@ -29,7 +29,8 @@ jobs:
 
       - uses: ./.github/actions/setup
         with:
-          solana-version: "stable"
+          # Use the pinned default CLI for BOTH revisions, including base recipes
+          # that predate explicit --tools-version / --arch arguments.
           rust-cache-key: "benchmark"
           save-rust-cache: "true"
 

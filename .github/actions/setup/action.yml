@@ -3,9 +3,9 @@ description: Install Rust, optionally Solana, and pnpm; optionally prime a share
 
 inputs:
   solana-version:
-    description: Anza CLI channel or version to install (e.g. "stable", "1.18.22").
+    description: Anza CLI version; the default preserves V1 SBPFv0 baseline builds.
     required: false
-    default: stable
+    default: "v3.1.13"
   install-solana:
     description: Install the Solana/Anza CLI. Set to "false" for pure-lint jobs.
     required: false
@@ -40,6 +40,14 @@ runs:
       run: |
         sh -c "$(curl -sSfL https://release.anza.xyz/${{ inputs.solana-version }}/install)"
         echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+    - name: Record SBF toolchain
+      if: inputs.install-solana == 'true'
+      shell: bash
+      run: |
+        solana --version
+        cargo build-sbf --version
+        cargo test-sbf --version
 
     - name: Rust cache
       if: inputs.enable-rust-cache == 'true'
