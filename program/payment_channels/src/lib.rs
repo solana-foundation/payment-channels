@@ -33,13 +33,23 @@ pub use instructions::*;
 pub mod state;
 pub use state::*;
 
+#[cfg(feature = "v2")]
+pub mod hooks;
+
+#[cfg(not(feature = "v2"))]
 declare_id!("CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX");
+#[cfg(feature = "v2")]
+declare_id!("CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ");
 
 fn process_instruction(
     program_id: &Address,
     accounts: &mut [AccountView],
     instruction_data: &[u8],
 ) -> ProgramResult {
+    // Check all supplied channel accounts, including aliases. Internal operation
+    // code can load guarded state, but no callback may start another entrypoint.
+    #[cfg(feature = "v2")]
+    hooks::check_entry(accounts)?;
     match PaymentChannelsInstruction::from_bytes(instruction_data)? {
         PaymentChannelsInstruction::Open(args) => open::process(program_id, accounts, &args),
         PaymentChannelsInstruction::Settle => settle::process(program_id, accounts),

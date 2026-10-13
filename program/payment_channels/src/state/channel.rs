@@ -153,6 +153,8 @@ pub struct Channel {
     /// never settle against it.
     #[cfg_attr(feature = "idl", codama(type = number(u64)))]
     open_slot: [u8; 8],
+    #[cfg(feature = "v2")]
+    pub hooks: crate::hooks::HookState,
 }
 
 impl Channel {
@@ -315,6 +317,10 @@ impl Channel {
         ch.mint = mint;
         ch.rent_payer = rent_payer;
         ch.open_slot = open_slot.to_le_bytes();
+        #[cfg(feature = "v2")]
+        {
+            ch.hooks = crate::hooks::HookState::EMPTY;
+        }
         Ok(())
     }
 
@@ -346,7 +352,7 @@ unsafe impl Transmutable for Channel {
 }
 
 const _: () = {
-    assert!(Channel::LEN == 256);
+    assert!(Channel::LEN == if cfg!(feature = "v2") { 1121 } else { 256 });
 };
 
 /// Cumulative settlement watermarks stored inside [`Channel`].
@@ -482,7 +488,7 @@ mod tests {
 
     #[test]
     fn size_is_256_bytes() {
-        assert_eq!(core::mem::size_of::<Channel>(), 256);
+        assert_eq!(core::mem::size_of::<Channel>(), Channel::LEN);
     }
 
     #[test]

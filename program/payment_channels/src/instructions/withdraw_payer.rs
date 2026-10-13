@@ -59,8 +59,15 @@ impl<'a> TryFrom<&'a mut [AccountView]> for WithdrawPayerAccounts<'a> {
 /// [`payer_withdrawn_at`](crate::Channel::payer_withdrawn_at) `= now` and
 /// does **not** close the PDA.
 pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
+    #[cfg(feature = "v2")]
+    let (accounts, hook_accounts) = accounts
+        .split_at_mut_checked(6)
+        .ok_or(ProgramError::NotEnoughAccountKeys)?;
     let accs = WithdrawPayerAccounts::try_from(accounts)?;
     let now = Clock::get()?.unix_timestamp;
+    // Zero is the "not withdrawn" sentinel, including on local validators.
+    #[cfg(feature = "v2")]
+    let now = now.max(1);
 
     // Signer check before any account reads.
     if !accs.payer.is_signer() {
@@ -104,12 +111,6 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
     let payer_ctx =
         PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)?;
 
-    // Stamp before CPI — runtime rolls back on failure.
-    {
-        let mut ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
-        ch.set_payer_withdrawn_at(now);
-    }
-
     let signer_seeds = channel_signer_seeds(
         &payer_bytes,
         &payee_bytes,
@@ -124,11 +125,46 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramRe
     let refund = deposit
         .checked_sub(settled)
         .ok_or(PaymentChannelsError::RefundCalculationOverflow)?;
+    #[cfg(feature = "v2")]
+    let (mut hook_context, escrow_before) = {
+        crate::hooks::validate_tail(&channel_ctx.channel, hook_accounts, 2)?;
+        let context = crate::hooks::HookContext::begin(
+            &mut channel_ctx.channel,
+            channel_ctx.token_ctx.token_program.address(),
+            DISCRIMINATOR,
+            0,
+            0,
+            refund,
+        )?;
+        let before = channel_ctx
+            .token_ctx
+            .token_program
+            .amount(&channel_ctx.channel_token_account.as_any())?;
+        crate::hooks::invoke(&channel_ctx.channel, hook_accounts, &context, 2)?;
+        crate::hooks::revalidate(&channel_ctx, Some(&payer_ctx.payer_token_account), before)?;
+        (context, before)
+    };
     channel_ctx.transfer_checked_signed(
         &payer_ctx.payer_token_account.as_any(),
         refund,
         &signers,
     )?;
+    Channel::from_account_mut(&mut channel_ctx.channel)?.set_payer_withdrawn_at(now);
+
+    #[cfg(feature = "v2")]
+    {
+        hook_context.refund_transferred_to_payer = refund;
+        hook_context.actual(&channel_ctx.channel)?;
+        crate::hooks::invoke(&channel_ctx.channel, hook_accounts, &hook_context, 3)?;
+        crate::hooks::revalidate(
+            &channel_ctx,
+            Some(&payer_ctx.payer_token_account),
+            escrow_before
+                .checked_sub(refund)
+                .ok_or(ProgramError::ArithmeticOverflow)?,
+        )?;
+        crate::hooks::finish(&mut channel_ctx.channel)?;
+    }
 
     Ok(())
 }

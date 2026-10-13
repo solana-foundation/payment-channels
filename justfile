@@ -40,6 +40,19 @@ build-program:
     cd {{program_dir}} && cargo build-sbf
     @echo "✓ program built"
 
+# V2 is explicit and never changes the default V1 build/client address.
+build-v2-localnet:
+    cd {{program_dir}} && cargo build-sbf --tools-version v1.58 --arch v3 --features v2 --sbf-out-dir ../../target/deploy-v2
+
+# Intentionally subject to the existing devnet treasury-owner release gate.
+build-v2-devnet:
+    cd {{program_dir}} && cargo build-sbf --tools-version v1.58 --arch v3 --no-default-features --features v2,devnet --sbf-out-dir ../../target/deploy-v2-devnet
+
+# Test-only adapter is never included in a deployment recipe.
+test-v2-hooks: build-v2-localnet
+    cargo build-sbf --tools-version v1.58 --arch v3 --manifest-path {{program_dir}}/tests/hook-adapter/Cargo.toml --sbf-out-dir target/deploy-v2
+    cargo test -p payment_channels --features v2 --test hooks_v2 -- --nocapture
+
 # Cluster builds select the per-cluster TREASURY_OWNER (see src/constants.rs) and
 # enable the build-time guard: they fail to compile until that cluster's real owner
 # replaces the 0xBEEF placeholder. `--no-default-features` drops the localnet default

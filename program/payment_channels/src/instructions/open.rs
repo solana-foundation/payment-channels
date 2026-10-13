@@ -50,6 +50,8 @@ pub const DISCRIMINATOR: u8 = 1;
 pub struct OpenArgs<'a> {
     header: &'a OpenArgsHeader,
     pub recipients: DistributionPreimage<'a>,
+    #[cfg(feature = "v2")]
+    pub hook_config: &'a [u8],
 }
 
 #[repr(transparent)]
@@ -146,8 +148,28 @@ impl<'a> OpenArgs<'a> {
         let (header_bytes, recipients_bytes) = data.split_at(OpenArgsHeader::LEN);
         let header = unsafe { load::<OpenArgsHeader>(header_bytes) }
             .map_err(|_| ProgramError::InvalidInstructionData)?;
+        #[cfg(feature = "v2")]
+        let (recipients_bytes, hook_config) = {
+            let count_bytes = recipients_bytes
+                .get(..4)
+                .ok_or(ProgramError::InvalidInstructionData)?;
+            let count = u32::from_le_bytes(count_bytes.try_into().unwrap()) as usize;
+            let end = count
+                .checked_mul(34)
+                .and_then(|n| n.checked_add(4))
+                .ok_or(ProgramError::InvalidInstructionData)?;
+            if recipients_bytes.len() < end {
+                return Err(ProgramError::InvalidInstructionData);
+            }
+            recipients_bytes.split_at(end)
+        };
         let recipients = DistributionPreimage::load(recipients_bytes)?;
-        Ok(Self { header, recipients })
+        Ok(Self {
+            header,
+            recipients,
+            #[cfg(feature = "v2")]
+            hook_config,
+        })
     }
 }
 
@@ -244,6 +266,10 @@ pub fn process(
     accounts: &mut [AccountView],
     args: &OpenArgs<'_>,
 ) -> ProgramResult {
+    #[cfg(feature = "v2")]
+    let (accounts, hook_accounts) = accounts
+        .split_at_mut_checked(14)
+        .ok_or(ProgramError::NotEnoughAccountKeys)?;
     let accs = OpenAccounts::try_from(accounts)?;
 
     if !accs.payer.is_signer() {
@@ -370,6 +396,42 @@ pub fn process(
     }
     .invoke()?;
 
+    #[cfg(feature = "v2")]
+    let (mut hook_context, escrow_before) = {
+        Channel::init_at(
+            &mut channel_ctx.channel.try_borrow_mut()?,
+            bump,
+            args.salt(),
+            0,
+            args.grace_period(),
+            distribution_hash,
+            *payer_ctx.payer.address(),
+            *accs.payee.address(),
+            *accs.authorized_signer.address(),
+            *channel_ctx.token_ctx.mint.address(),
+            *accs.rent_payer.address(),
+            open_slot,
+        )?;
+        Channel::from_account_mut(&mut channel_ctx.channel)?.hooks =
+            crate::hooks::HookState::parse(args.hook_config)?;
+        crate::hooks::validate_tail(&channel_ctx.channel, hook_accounts, 0)?;
+        let context = crate::hooks::HookContext::begin(
+            &mut channel_ctx.channel,
+            channel_ctx.token_ctx.token_program.address(),
+            DISCRIMINATOR,
+            deposit,
+            0,
+            0,
+        )?;
+        let before = channel_ctx
+            .token_ctx
+            .token_program
+            .amount(&channel_ctx.channel_token_account.as_any())?;
+        crate::hooks::invoke(&channel_ctx.channel, hook_accounts, &context, 0)?;
+        crate::hooks::revalidate(&channel_ctx, Some(&payer_ctx.payer_token_account), before)?;
+        (context, before)
+    };
+
     // Transfer the deposit from payer to escrow.
     TransferChecked {
         from: &payer_ctx.payer_token_account,
@@ -382,6 +444,7 @@ pub fn process(
     }
     .invoke()?;
 
+    #[cfg(not(feature = "v2"))]
     Channel::init_at(
         &mut channel_ctx.channel.try_borrow_mut()?,
         bump,
@@ -396,6 +459,22 @@ pub fn process(
         *accs.rent_payer.address(),
         open_slot,
     )?;
+
+    #[cfg(feature = "v2")]
+    {
+        Channel::from_account_mut(&mut channel_ctx.channel)?.set_deposit(deposit);
+        hook_context.funding_transferred = deposit;
+        hook_context.actual(&channel_ctx.channel)?;
+        crate::hooks::invoke(&channel_ctx.channel, hook_accounts, &hook_context, 1)?;
+        crate::hooks::revalidate(
+            &channel_ctx,
+            Some(&payer_ctx.payer_token_account),
+            escrow_before
+                .checked_add(deposit)
+                .ok_or(ProgramError::ArithmeticOverflow)?,
+        )?;
+        crate::hooks::finish(&mut channel_ctx.channel)?;
+    }
 
     let event = Opened {
         channel: *channel_ctx.channel.address(),
