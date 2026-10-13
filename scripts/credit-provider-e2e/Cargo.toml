@@ -1,0 +1,27 @@
+[package]
+name = "credit-provider-surfpool-e2e"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+credit_provider = { path = "../../examples/credit-provider", features = ["client"] }
+payment_channels = { path = "../../program/payment_channels", features = ["v2", "no-entrypoint"] }
+pinocchio = "0.11.1"
+borsh = "1"
+base64 = "0.22"
+bincode = "1"
+const-crypto = "0.3"
+hex = "0.4"
+serde_json = "1"
+solana-instruction = "3"
+solana-keypair = "3"
+solana-pubkey = "3"
+solana-signer = "3"
+solana-transaction = { version = "3", features = ["bincode"] }
+
+[profile.dev]
+debug = 0
+incremental = false

@@ -105,6 +105,12 @@ test-v2-client:
     pnpm --filter @payment-channels/client-v2 typecheck
     pnpm --filter @payment-channels/client-v2 test
 
+# Builds must complete before the offline RPC harness starts; no concurrent cargo targets.
+test-credit-provider-surfpool:
+    CARGO_INCREMENTAL=0 CARGO_NET_OFFLINE=true CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target}/credit-e2e-channel-sbf" cargo build-sbf --tools-version v1.58 --arch v3 --manifest-path program/payment_channels/Cargo.toml --features v2 --sbf-out-dir target/deploy-v2
+    CARGO_INCREMENTAL=0 CARGO_NET_OFFLINE=true CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target}/credit-e2e-provider-sbf" cargo build-sbf --tools-version v1.58 --arch v3 --manifest-path examples/credit-provider/Cargo.toml --sbf-out-dir target/deploy
+    bash scripts/test-credit-provider-surfpool.sh
+
 # Run the parameterized CU benchmark scenarios and emit bench_report.md
 # next to Cargo.toml. `--test-threads=1` keeps logs interleaved-free and
 # avoids contention; bench scenarios themselves only push to a Mutex so
