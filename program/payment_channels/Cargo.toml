@@ -35,7 +35,7 @@ codama = { version = "0.9.1", optional = true }
 serde_json = { version = "1", optional = true }
 
 [dependencies]
-payment-channel-interface         = { path = "../../crates/interface" }
+payment-channel-interface         = { version = "0.1.0", path = "../../crates/interface" }
 pinocchio                          = { version = "0.11.1", features = ["cpi", "copy", "account-resize"] }
 solana-address                     = { version = "2", features = ["curve25519", "borsh"] }
 pinocchio-associated-token-account = "0.4.0"
