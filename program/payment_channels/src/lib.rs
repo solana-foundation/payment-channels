@@ -5,6 +5,9 @@
 
 #![no_std]
 
+#[cfg(all(feature = "no-entrypoint", not(target_os = "solana")))]
+extern crate std;
+
 #[cfg(feature = "idl")]
 extern crate alloc;
 
@@ -13,8 +16,11 @@ compile_error!("the `idl` feature is host-only; do not enable it for SBF builds"
 
 use pinocchio::{AccountView, Address, ProgramResult, address::declare_id};
 
+#[cfg(not(feature = "no-entrypoint"))]
 pinocchio::program_entrypoint!(process_instruction);
+#[cfg(any(not(feature = "no-entrypoint"), target_os = "solana"))]
 pinocchio::no_allocator!();
+#[cfg(any(not(feature = "no-entrypoint"), target_os = "solana"))]
 pinocchio::nostd_panic_handler!();
 
 pub mod constants;
@@ -41,6 +47,7 @@ declare_id!("CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX");
 #[cfg(feature = "v2")]
 declare_id!("CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ");
 
+#[cfg_attr(feature = "no-entrypoint", allow(dead_code))]
 fn process_instruction(
     program_id: &Address,
     accounts: &mut [AccountView],

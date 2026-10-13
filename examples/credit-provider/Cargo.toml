@@ -1,0 +1,36 @@
+[package]
+name = "credit_provider"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["lib", "cdylib"]
+
+[features]
+default = []
+no-entrypoint = []
+client = ["no-entrypoint", "dep:solana-instruction"]
+
+[dependencies]
+payment_channels = { path = "../../program/payment_channels", features = ["v2", "no-entrypoint"] }
+pinocchio = { version = "0.11.1", features = ["cpi"] }
+pinocchio-token = "0.6.0"
+pinocchio-system = "0.6.0"
+pinocchio-associated-token-account = "0.4.0"
+solana-address = { version = "2", features = ["curve25519", "borsh"] }
+borsh = { version = "1", default-features = false, features = ["derive"] }
+solana-instruction = { version = "3", optional = true }
+
+[target.'cfg(not(target_os = "solana"))'.dependencies]
+const-crypto = "0.3"
+
+[profile.release]
+overflow-checks = true
+lto = true
+codegen-units = 1
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

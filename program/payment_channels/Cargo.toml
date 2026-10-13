@@ -18,6 +18,10 @@ devnet       = []
 testnet      = []
 mainnet-beta = []
 v2 = []
+# Reuse state/ABI without a second entrypoint. On SBF this library still owns
+# the allocator/panic handler; consumers must not define duplicates. Host-only
+# library consumers link std because this package also builds a cdylib.
+no-entrypoint = []
 # Enables codama derives + raw build.rs IDL emission. Host-only; must NOT
 # be enabled for `cargo build-sbf` (see `compile_error!` guard in
 # src/lib.rs). Use `just generate-idl` to apply Codama visitors and write
