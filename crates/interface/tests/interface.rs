@@ -1,7 +1,7 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use payment_channel_interface::{
     HookContext, HookDescriptor, HookMeta, HookState, ID,
-    channel::{CHANNEL_V1_LEN, CHANNEL_V2_LEN, ChannelView, channel_address},
+    channel::{CHANNEL_V1_LEN, CHANNEL_V2_LEN, ChannelAccountView, ChannelView, channel_address},
     hooks::{HOOK_CONTEXT_LEN, Operation, Phase, descriptor_commitment, hook_authority},
     validation::{CallbackExpectations, ValidatedCallback, validate_callback},
 };
@@ -121,7 +121,7 @@ fn version_readers_reject_every_short_layout_and_cross_version_cast() {
 #[repr(C)]
 struct TestAccount {
     raw: RuntimeAccount,
-    data: [u8; CHANNEL_V2_LEN],
+    data: [u8; CHANNEL_V2_LEN + 1],
 }
 
 impl TestAccount {
@@ -142,7 +142,7 @@ impl TestAccount {
                 data_len: data.len() as u64,
                 ..RuntimeAccount::default()
             },
-            data: [0; CHANNEL_V2_LEN],
+            data: [0; CHANNEL_V2_LEN + 1],
         });
         account.data[..data.len()].copy_from_slice(data);
         account
@@ -153,6 +153,115 @@ impl TestAccount {
         // tests keep the Box alive and never resize it while views exist.
         unsafe { AccountView::new_unchecked(&mut self.raw) }
     }
+}
+
+#[test]
+fn account_facade_checks_owner_layout_and_exact_version() {
+    for version in [1, 2] {
+        let len = if version == 1 {
+            CHANNEL_V1_LEN
+        } else {
+            CHANNEL_V2_LEN
+        };
+        let mut data = vec![0; len];
+        data[..2].copy_from_slice(&[1, version]);
+        let mut account = TestAccount::new(address(8), ID, false, true, &data);
+        let view = account.view();
+        let mut alias = account.view();
+        let facade = ChannelAccountView::new(&view, &ID).unwrap();
+        assert_eq!(facade.with_v1(|_| Ok(())).is_ok(), version == 1);
+        assert_eq!(facade.with_v2(|_| Ok(())).is_ok(), version == 2);
+        assert!(matches!(
+            ChannelAccountView::new(&view, &address(9)),
+            Err(ProgramError::InvalidAccountOwner)
+        ));
+        for (offset, value) in [(0, 0), (1, 0), (1, 3), (1, 255), (3, 4), (3, 255)] {
+            alias.try_borrow_mut().unwrap()[offset] = value;
+            assert!(matches!(
+                ChannelAccountView::new(&view, &ID),
+                Err(ProgramError::InvalidAccountData)
+            ));
+            assert_eq!(
+                facade.with_v1(|_| Ok(())),
+                Err(ProgramError::InvalidAccountData)
+            );
+            assert_eq!(
+                facade.with_v2(|_| Ok(())),
+                Err(ProgramError::InvalidAccountData)
+            );
+            alias.try_borrow_mut().unwrap()[offset] = data[offset];
+        }
+    }
+    // Includes zero, truncated headers, every short layout and mismatched sizes.
+    for len in 0..=CHANNEL_V2_LEN + 1 {
+        for version in [1, 2] {
+            let mut data = vec![0; len];
+            if len > 0 {
+                data[0] = 1;
+            }
+            if len > 1 {
+                data[1] = version;
+            }
+            let mut account = TestAccount::new(address(8), ID, false, true, &data);
+            let view = account.view();
+            let valid =
+                (version == 1 && len == CHANNEL_V1_LEN) || (version == 2 && len == CHANNEL_V2_LEN);
+            assert_eq!(ChannelAccountView::new(&view, &ID).is_ok(), valid);
+        }
+    }
+}
+
+#[test]
+fn account_facade_releases_borrows_and_observes_changes() {
+    let mut data = [0; CHANNEL_V2_LEN];
+    data[..2].copy_from_slice(&[1, 2]);
+    let mut account = TestAccount::new(address(8), ID, false, true, &data);
+    let view = account.view();
+    let mut alias = account.view();
+    let facade = ChannelAccountView::new(&view, &ID).unwrap();
+    {
+        let _borrow = alias.try_borrow_mut().unwrap();
+        assert!(matches!(
+            ChannelAccountView::new(&view, &ID),
+            Err(ProgramError::AccountBorrowFailed)
+        ));
+        assert_eq!(
+            facade.with_v2(|_| Ok(())),
+            Err(ProgramError::AccountBorrowFailed)
+        );
+    }
+    assert_eq!(
+        facade.with_v2(|ch| {
+            assert!(alias.try_borrow_mut().is_err());
+            Ok(ch.deposit())
+        }),
+        Ok(0)
+    );
+    alias.try_borrow_mut().unwrap()[12..20].copy_from_slice(&42u64.to_le_bytes());
+    assert_eq!(facade.with_v2(|ch| Ok(ch.deposit())), Ok(42));
+    assert_eq!(
+        facade.with_v2::<()>(|_| Err(ProgramError::InvalidArgument)),
+        Err(ProgramError::InvalidArgument)
+    );
+    assert!(alias.try_borrow_mut().is_ok());
+    assert_eq!(
+        facade.with_v1(|_| Ok(())),
+        Err(ProgramError::InvalidAccountData)
+    );
+    assert!(alias.try_borrow_mut().is_ok());
+    // SAFETY: no references to the owner are retained; simulates a CPI owner change.
+    unsafe {
+        alias.assign(&address(9));
+    }
+    assert_eq!(
+        facade.with_v2(|_| Ok(())),
+        Err(ProgramError::InvalidAccountOwner)
+    );
+    // SAFETY: same as above.
+    unsafe {
+        alias.assign(&ID);
+    }
+    assert_eq!(facade.with_v2(|ch| Ok(ch.deposit())), Ok(42));
 }
 
 struct Fixture {
@@ -256,8 +365,8 @@ impl Fixture {
         data: &[u8],
         program: Address,
     ) -> Result<ValidatedCallback, ProgramError> {
-        let accounts = self.accounts.each_mut().map(|a| a.view());
-        validate_callback(
+        let mut accounts = self.accounts.each_mut().map(|a| a.view());
+        let result = validate_callback(
             &accounts,
             data,
             &CallbackExpectations {
@@ -267,7 +376,10 @@ impl Fixture {
                 token_program: &self.token,
                 descriptors: &self.descriptors,
             },
-        )
+        );
+        // Success and every rejection path must release the callback data borrow.
+        assert!(accounts[1].try_borrow_mut().is_ok());
+        result
     }
 
     fn validate(&mut self) -> Result<ValidatedCallback, ProgramError> {

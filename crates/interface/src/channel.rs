@@ -1,6 +1,6 @@
 //! Read-only readers for the two frozen account layouts. These readers never
 //! interpret a V1 account as V2 and never expose mutable accounting state.
-use pinocchio::{Address, error::ProgramError};
+use pinocchio::{AccountView, Address, error::ProgramError};
 
 use crate::HookState;
 
@@ -31,8 +31,95 @@ impl TryFrom<u8> for ChannelStatus {
     }
 }
 
+/// A read-only account facade whose reads recheck ownership and layout.
+///
+/// Supply the program ID from trusted policy, not from the account's owner.
+/// Construction checks either supported layout but does not hash or check the
+/// canonical PDA; use [`ChannelView::find_pda`] when that is required.
+/// The facade holds no data borrow and can survive CPI. Each closure holds a
+/// short-lived shared borrow: copy out a snapshot before CPI, never invoke CPI
+/// inside the closure. Reads do not confer provider or issuer authorization.
+///
+/// Copy an owned accounting value out of a V2 account:
+/// ```
+/// use payment_channel_interface::channel::ChannelAccountView;
+/// use pinocchio::{AccountView, Address, error::ProgramError};
+///
+/// fn read_deposit(
+///     account: &AccountView,
+///     trusted_channel_program: &Address,
+/// ) -> Result<u64, ProgramError> {
+///     ChannelAccountView::new(account, trusted_channel_program)?
+///         .with_v2(|view| Ok(view.deposit()))
+/// }
+/// ```
+///
+/// Borrowed readers and hook references cannot escape a closure:
+/// ```compile_fail
+/// use payment_channel_interface::channel::ChannelAccountView;
+/// fn escape(account: &ChannelAccountView<'_>) {
+///     let view = account.with_v2(|view| Ok(view));
+/// }
+/// ```
+/// ```compile_fail
+/// use payment_channel_interface::channel::ChannelAccountView;
+/// fn escape(account: &ChannelAccountView<'_>) {
+///     let hooks = account.with_v2(|view| view.hooks());
+/// }
+/// ```
+pub struct ChannelAccountView<'a> {
+    account: &'a AccountView,
+    expected_program: Address,
+}
+
+impl<'a> ChannelAccountView<'a> {
+    pub fn new(account: &'a AccountView, expected_program: &Address) -> Result<Self, ProgramError> {
+        let view = Self {
+            account,
+            expected_program: Address::new_from_array(*expected_program.as_array()),
+        };
+        view.check_owner()?;
+        {
+            let bytes = account.try_borrow()?;
+            match bytes.get(1) {
+                Some(1) => ChannelView::v1(&bytes)?,
+                Some(2) => ChannelView::v2(&bytes)?,
+                _ => return Err(ProgramError::InvalidAccountData),
+            };
+        }
+        Ok(view)
+    }
+
+    fn check_owner(&self) -> Result<(), ProgramError> {
+        if !self.account.owned_by(&self.expected_program) {
+            return Err(ProgramError::InvalidAccountOwner);
+        }
+        Ok(())
+    }
+
+    /// Read exactly V1; rejects V2 rather than interpreting its prefix as V1.
+    pub fn with_v1<R>(
+        &self,
+        read: impl for<'data> FnOnce(ChannelView<'data>) -> Result<R, ProgramError>,
+    ) -> Result<R, ProgramError> {
+        self.check_owner()?;
+        let bytes = self.account.try_borrow()?;
+        read(ChannelView::v1(&bytes)?)
+    }
+
+    /// Read exactly V2; rejects V1 rather than silently downgrading.
+    pub fn with_v2<R>(
+        &self,
+        read: impl for<'data> FnOnce(ChannelView<'data>) -> Result<R, ProgramError>,
+    ) -> Result<R, ProgramError> {
+        self.check_owner()?;
+        let bytes = self.account.try_borrow()?;
+        read(ChannelView::v2(&bytes)?)
+    }
+}
+
 /// A checked byte view, not a Rust-layout cast. Raw readers check layout only;
-/// callers must verify ownership (the callback validator does this).
+/// on-chain callers should use [`ChannelAccountView`] to also check ownership.
 #[derive(Debug, Clone, Copy)]
 pub struct ChannelView<'a> {
     bytes: &'a [u8],
