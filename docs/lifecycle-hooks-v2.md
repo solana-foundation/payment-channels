@@ -1,9 +1,10 @@
 # Lifecycle hooks V2 ABI
 
 V2 adds four immutable optional callbacks inside channel funding and distribution.
-This is an experimental, undeployed program ABI. A successful build is not a
-security review or proof of issuer integration. There is no Coinflow production
-adapter or issuer ABI in this implementation.
+This is an experimental program ABI deployed on devnet; see the
+[deployment record](devnet-v2-deployment.md). A successful build is not proof of
+issuer integration. There is no Coinflow production adapter or issuer ABI in
+this implementation.
 
 ## Select a deployment explicitly
 
