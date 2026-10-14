@@ -15,6 +15,7 @@ use crate::state::{Channel, Transmutable, load};
 
 /// Instruction discriminator byte for `topUp`.
 pub const DISCRIMINATOR: u8 = 3;
+#[cfg(feature = "hooks")]
 pub const WITH_HOOKS_DISCRIMINATOR: u8 = 11;
 
 /// Extends an `OPEN` channel's escrow. The full amount is transferred from
@@ -97,6 +98,7 @@ pub fn process(
     process_inner(accounts, args, false)
 }
 
+#[cfg(feature = "hooks")]
 pub fn process_with_hooks(
     _program_id: &Address,
     accounts: &mut [AccountView],

@@ -8,17 +8,13 @@ license = "MIT"
 crate-type = ["lib", "cdylib"]
 
 [features]
-default = ["localnet"]
-# Treasury owner selection per cluster (see src/constants.rs). `localnet` keeps the
-# 0xBEEF placeholder with the release gate off; `devnet`/`testnet`/`mainnet-beta` turn
-# the gate on and require their real owner committed in constants.rs before the build
-# compiles.
-localnet     = []
-devnet       = []
-testnet      = []
-mainnet-beta = []
-# Alternate deployed devnet address only; both targets support V1 and V2.
-devnet-deployment = []
+# Deployment selection (program id, treasury owner) lives in ../../Solex.toml
+# and is chosen per build with SOLEX_CHANNEL; see `solex channels`. There are
+# no cluster features anymore.
+default = []
+# V2 lifecycle hooks. Channel-managed: Solex.toml [features.hooks] decides
+# which channels enable it; `solex build`/`solex test` pass --features.
+hooks = []
 # Retained for host integration harnesses that inspect the full core state.
 # On-chain consumers use payment-channel-interface instead. On SBF this program
 # still owns its allocator/panic handler; host library consumers link std because
@@ -33,10 +29,12 @@ idl = ["dep:codama", "dep:serde_json"]
 [build-dependencies]
 codama = { version = "0.9.1", optional = true }
 serde_json = { version = "1", optional = true }
+solex-types = { version = "0.2.0", default-features = false, features = ["toml"] }
 
 [dependencies]
 payment-channel-interface         = { version = "0.1.0", path = "../../crates/interface" }
 pinocchio                          = { version = "0.11.1", features = ["cpi", "copy", "account-resize"] }
+solex-lang                         = { version = "0.2.0", default-features = false, features = ["pinocchio"] }
 solana-address                     = { version = "2", features = ["curve25519", "borsh"] }
 pinocchio-associated-token-account = "0.4.0"
 pinocchio-system                   = "0.6.0"

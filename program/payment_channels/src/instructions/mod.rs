@@ -267,6 +267,7 @@ pub enum PaymentChannelsInstruction<'a> {
     EmitEvent = 228,
 
     /// Creates a V2 channel with immutable callback configuration.
+    #[cfg(feature = "hooks")]
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "payer", signer, writable)),
@@ -288,6 +289,7 @@ pub enum PaymentChannelsInstruction<'a> {
         #[cfg_attr(feature = "idl", codama(name = "open_with_hooks_args"))] open::OpenArgs<'a>,
     ) = 10,
     /// Funds a V2 channel with its mandatory funding callbacks.
+    #[cfg(feature = "hooks")]
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "payer", signer, writable)),
@@ -301,6 +303,7 @@ pub enum PaymentChannelsInstruction<'a> {
         #[cfg_attr(feature = "idl", codama(name = "top_up_args"))] &'a top_up::TopUpArgs,
     ) = 11,
     /// Distributes a V2 channel with its mandatory payout callbacks.
+    #[cfg(feature = "hooks")]
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "channel", writable)),
@@ -320,6 +323,7 @@ pub enum PaymentChannelsInstruction<'a> {
         distribute::DistributeArgs<'a>,
     ) = 12,
     /// Refunds a V2 payer with its mandatory payout callbacks.
+    #[cfg(feature = "hooks")]
     #[cfg_attr(
         feature = "idl",
         codama(account(name = "payer", signer)),
@@ -350,9 +354,13 @@ impl<'a> PaymentChannelsInstruction<'a> {
             Self::WithdrawPayer => "withdraw_payer",
             Self::Reclaim => "reclaim",
             Self::EmitEvent => "emit_event",
+            #[cfg(feature = "hooks")]
             Self::OpenWithHooks(_) => "open_with_hooks",
+            #[cfg(feature = "hooks")]
             Self::TopUpWithHooks(_) => "top_up_with_hooks",
+            #[cfg(feature = "hooks")]
             Self::DistributeWithHooks(_) => "distribute_with_hooks",
+            #[cfg(feature = "hooks")]
             Self::WithdrawPayerWithHooks => "withdraw_payer_with_hooks",
         }
     }
@@ -377,15 +385,19 @@ impl<'a> PaymentChannelsInstruction<'a> {
             withdraw_payer::DISCRIMINATOR => Ok(Self::WithdrawPayer),
             reclaim::DISCRIMINATOR => Ok(Self::Reclaim),
             emit_event::DISCRIMINATOR => Ok(Self::EmitEvent),
+            #[cfg(feature = "hooks")]
             open::WITH_HOOKS_DISCRIMINATOR => {
                 Ok(Self::OpenWithHooks(open::OpenArgs::load_with_hooks(rest)?))
             }
+            #[cfg(feature = "hooks")]
             top_up::WITH_HOOKS_DISCRIMINATOR => {
                 Ok(Self::TopUpWithHooks(top_up::TopUpArgs::load(rest)?))
             }
+            #[cfg(feature = "hooks")]
             distribute::WITH_HOOKS_DISCRIMINATOR => Ok(Self::DistributeWithHooks(
                 distribute::DistributeArgs::load(rest)?,
             )),
+            #[cfg(feature = "hooks")]
             withdraw_payer::WITH_HOOKS_DISCRIMINATOR if rest.is_empty() => {
                 Ok(Self::WithdrawPayerWithHooks)
             }

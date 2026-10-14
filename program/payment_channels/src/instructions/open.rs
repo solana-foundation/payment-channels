@@ -38,6 +38,7 @@ use crate::instructions::helpers::{DistributionPreimage, channel_signer_seeds};
 
 /// Instruction discriminator byte for `open`.
 pub const DISCRIMINATOR: u8 = 1;
+#[cfg(feature = "hooks")]
 pub const WITH_HOOKS_DISCRIMINATOR: u8 = 10;
 
 /// Init payload. The distribution plan is hashed on-chain with `sha256` and
@@ -158,6 +159,7 @@ impl<'a> OpenArgs<'a> {
         Self::load_inner(data, false)
     }
 
+    #[cfg(feature = "hooks")]
     pub fn load_with_hooks(data: &'a [u8]) -> Result<Self, ProgramError> {
         Self::load_inner(data, true)
     }

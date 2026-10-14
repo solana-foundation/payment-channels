@@ -28,6 +28,7 @@ use crate::state::channel::{Channel, ChannelStatus};
 
 /// Instruction discriminator byte for `distribute`.
 pub const DISCRIMINATOR: u8 = 7;
+#[cfg(feature = "hooks")]
 pub const WITH_HOOKS_DISCRIMINATOR: u8 = 12;
 
 #[derive(Debug, Clone, Copy)]
@@ -180,6 +181,7 @@ pub fn process(
     process_inner(program_id, accounts, args, false)
 }
 
+#[cfg(feature = "hooks")]
 pub fn process_with_hooks(
     program_id: &Address,
     accounts: &mut [AccountView],

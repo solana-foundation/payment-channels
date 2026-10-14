@@ -1,0 +1,34 @@
+# Release channels for the payment channels program (https://github.com/lgalabru/solex).
+#
+# A channel is a deployment: program id, cluster(s) and per-deployment
+# constants. `stable` is the audited V1 surface on mainnet. `nightly` includes
+# stable and adds the `hooks` feature, deployed on devnet under its own
+# address. Code gates on features with plain #[cfg(feature = "hooks")];
+# `solex build --channel nightly` passes `--features hooks`. Local hook tests
+# enable the feature by hand on the stable channel (see `just test-v2-hooks`),
+# which keeps the canonical address the generated client embeds.
+#
+# `vars.treasury_owner` replaces the per-cluster `mod cluster` blocks and the
+# 0xBEEF release gate: a channel without the var does not compile.
+default_channel = "stable"
+program_path = "program/payment_channels"
+
+[build]
+args = ["--tools-version", "v1.58", "--arch", "v3"]
+
+[channels.stable]
+description = "V1 instruction set, the audited surface"
+program_id = "CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX"
+cluster = "mainnet-beta"
+vars = { treasury_owner = "Cs2zdfUNonRdRGsiZUQQLdTxzxVvJZmgiX2mpLYKuEqP" }
+
+[channels.nightly]
+description = "stable plus the hooks feature"
+includes = ["stable"]
+program_id = "CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ"
+cluster = "devnet"
+vars = { treasury_owner = "4zTeC5mVqWLruDexgU2mV66p9t5vCA9JyiZqdGDUspap" }
+
+[features.hooks]
+description = "V2 lifecycle hooks: openWithHooks, topUpWithHooks, distributeWithHooks, withdrawPayerWithHooks"
+channels = ["nightly"]

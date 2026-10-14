@@ -2761,6 +2761,8 @@ checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.0",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -3673,6 +3675,8 @@ dependencies = [
  "solana-system-interface 3.1.0",
  "solana-transaction",
  "solana-transaction-error",
+ "solex-lang",
+ "solex-types",
  "spl-token-2022-interface",
  "tabled",
  "thiserror 2.0.18",
@@ -4591,6 +4595,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "serde_yaml"
+version = "0.9.34+deprecated"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
+dependencies = [
+ "indexmap",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
 ]
 
 [[package]]
@@ -7146,6 +7163,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "solex-lang"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "565b0ab81b261d11b05b30e6216daa240fdfdb64b5cfd9247ecb19c12d59910f"
+dependencies = [
+ "pinocchio",
+ "solana-address 2.9.0",
+ "solex-macros",
+]
+
+[[package]]
+name = "solex-macros"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "423b87d9bfbf3dd97bb876d9aaa57534e641870e0e7e167cda7c7d83e15d4633"
+dependencies = [
+ "bs58",
+ "proc-macro2",
+ "quote",
+ "solex-types",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "solex-types"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc8502181403f149b4e1cc85cb17557103d4896ea14c3188643d2ccf6eb86d82"
+dependencies = [
+ "indexmap",
+ "proc-macro2",
+ "serde",
+ "serde_yaml",
+ "syn 2.0.117",
+ "thiserror 2.0.18",
+ "toml",
+]
+
+[[package]]
 name = "spinning_top"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7888,6 +7944,12 @@ checksum = "382810877fe448991dfc7f0dd6e3ae5d58088fd0ea5e35189655f84e6814fa56"
 dependencies = [
  "void",
 ]
+
+[[package]]
+name = "unsafe-libyaml"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "untrusted"
