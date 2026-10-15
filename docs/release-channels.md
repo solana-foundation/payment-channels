@@ -5,12 +5,12 @@ The program is built per channel with [solex](https://github.com/lgalabru/solex)
 
 | Channel | Program id | Clusters | Features | Treasury owner |
 | --- | --- | --- | --- | --- |
-| `stable` | `CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX` | mainnet-beta | none (V1 surface) | `Cs2zdf…` |
+| `stable` | `CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX` | mainnet | none (V1 surface) | `Cs2zdf…` |
 | `canary` | `CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ` | devnet | `hooks` | `4zTeC5…` |
-| `canary` | `5qZ4RaY5TQr2VF3ZKBzrCb4U4F9xDPbB5PqFtpS8H6SN` | mainnet-beta | `hooks` | `Cs2zdf…` |
+| `canary` | `5qZ4RaY5TQr2VF3ZKBzrCb4U4F9xDPbB5PqFtpS8H6SN` | mainnet | `hooks` | `Cs2zdf…` |
 
 `canary` includes `stable`. It is one channel on two clusters: the
-`[channels.canary.mainnet-beta]` override gives the mainnet deployment its own
+`[channels.canary.mainnet]` override gives the mainnet deployment its own
 address (the devnet keypair is not held in this repository) and the mainnet
 treasury. `solex build --canary` therefore produces one artifact per cluster
 under `target/solex/canary/<cluster>/`, each embedding only its own program id
@@ -20,7 +20,7 @@ the program keeps the canonical address the generated client embeds.
 
 ## What replaced the cargo features
 
-- `localnet` / `devnet` / `testnet` / `mainnet-beta` selected `TREASURY_OWNER`
+- `localnet` / `devnet` / `testnet` / `mainnet` selected `TREASURY_OWNER`
   through mutually exclusive `mod cluster` blocks and a `0xBEEF` compile-time
   gate. The owner now comes from `vars.treasury_owner` on the channel via
   `solex::var!("treasury_owner")`; a channel without it does not compile.
@@ -39,7 +39,7 @@ the program keeps the canonical address the generated client embeds.
 ```sh
 solex channels                      # deployments and what each ships
 solex features --check              # the hooks feature against both channels
-solex build --canary                # target/solex/canary/{devnet,mainnet-beta}/payment_channels.so, --features hooks
+solex build --canary                # target/solex/canary/{devnet,mainnet}/payment_channels.so, --features hooks
 solex build --channel stable        # target/solex/stable/payment_channels.so
 just test-v2-hooks                  # stable + hooks at the canonical address
 SOLEX_CHANNEL=stable cargo build-sbf --tools-version v1.58 --arch v3
@@ -54,7 +54,7 @@ Any `cargo build-sbf` or `cargo test` invocation selects a channel by exporting
 `solex deploy --canary` lists the channel's clusters as a checklist and runs
 `solana program deploy` for each one picked, with that cluster's program id,
 artifact and keypair. The first mainnet deploy signs with
-`keys/canary-mainnet-beta.json` (gitignored; keep a copy) and needs a funded
+`keys/canary-mainnet.json` (gitignored; keep a copy) and needs a funded
 payer: the program account alone is rent-exempt at about 1.01 SOL for this
 artifact, plus the buffer during upload. `solex deploy --canary --dry-run`
 prints the exact commands.

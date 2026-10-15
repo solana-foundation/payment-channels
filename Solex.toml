@@ -19,21 +19,21 @@ args = ["--tools-version", "v1.58", "--arch", "v3"]
 [channels.stable]
 description = "V1 instruction set, the audited surface"
 program_id = "CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX"
-cluster = "mainnet-beta"
+cluster = "mainnet"
 vars = { treasury_owner = "Cs2zdfUNonRdRGsiZUQQLdTxzxVvJZmgiX2mpLYKuEqP" }
 
 [channels.canary]
 description = "stable plus the hooks feature"
 includes = ["stable"]
 program_id = "CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ"
-cluster = ["devnet", "mainnet-beta"]
+cluster = ["devnet", "mainnet"]
 vars = { treasury_owner = "4zTeC5mVqWLruDexgU2mV66p9t5vCA9JyiZqdGDUspap" }
 
 # The mainnet canary is a separate deployment of the same channel: its own
 # address (the devnet keypair is not held here) and the mainnet treasury.
-[channels.canary.mainnet-beta]
+[channels.canary.mainnet]
 program_id = "5qZ4RaY5TQr2VF3ZKBzrCb4U4F9xDPbB5PqFtpS8H6SN"
-keypair = "keys/canary-mainnet-beta.json"
+keypair = "keys/canary-mainnet.json"
 vars = { treasury_owner = "Cs2zdfUNonRdRGsiZUQQLdTxzxVvJZmgiX2mpLYKuEqP" }
 
 [features.hooks]
