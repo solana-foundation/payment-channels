@@ -11,6 +11,11 @@ fn main() -> BuildResult<()> {
     println!("cargo:rerun-if-changed=src/");
     println!("cargo:rerun-if-env-changed=GENERATE_IDL");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_IDL");
+    // Solex macros read the channel at expansion time; re-expand when it changes.
+    println!("cargo:rerun-if-env-changed=SOLEX_CHANNEL");
+    println!("cargo:rerun-if-env-changed=SOLEX_MANIFEST");
+    println!("cargo:rerun-if-env-changed=SOLEX_CLUSTER");
+    println!("cargo:rerun-if-changed=../../Solex.toml");
 
     // Only generate the raw IDL when the `idl` feature is active. With it off,
     // codama derives are cfg'd out of the source and Codama::load would see
@@ -26,25 +31,20 @@ fn generate_idl() -> BuildResult<()> {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR")?;
     let crate_path = Path::new(&manifest_dir).join("src");
     let codama = Codama::load(&crate_path)?;
-    // Codama parses source syntax rather than rustc's cfg-expanded tree.
-    // Deployment selection changes the address only: both account versions
-    // and the additive hooked instructions belong to the same runtime ABI.
+    // Codama parses source syntax rather than rustc's cfg-expanded tree, so
+    // the raw IDL lists every instruction regardless of channel; the visitors
+    // in codama.js split V1/V2. The program id follows the channel being built.
     let mut idl: serde_json::Value = serde_json::from_str(&codama.get_json_idl()?)?;
-    let devnet = env::var_os("CARGO_FEATURE_DEVNET_DEPLOYMENT").is_some();
-    idl["program"]["publicKey"] = serde_json::Value::String(
-        if devnet {
-            "CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ"
-        } else {
-            "CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX"
-        }
-        .into(),
-    );
+    let loaded = solex_types::discover(Path::new(&manifest_dir))?;
+    let channel = loaded.channels().resolve(None)?;
+    let program_id = loaded.channels().program_id(&channel)?;
+    idl["program"]["publicKey"] = serde_json::Value::String(program_id.into());
     let idl_json = serde_json::to_string_pretty(&idl)?;
 
     let idl_dir = Path::new(&manifest_dir).join("idl");
     fs::create_dir_all(&idl_dir)?;
-    let idl_path = idl_dir.join(if devnet {
-        "payment_channels_devnet.raw.json"
+    let idl_path = idl_dir.join(if channel == "canary" {
+        "payment_channels_canary.raw.json"
     } else {
         "payment_channels.raw.json"
     });
