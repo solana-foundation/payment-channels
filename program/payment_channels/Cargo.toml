@@ -29,12 +29,12 @@ idl = ["dep:codama", "dep:serde_json"]
 [build-dependencies]
 codama = { version = "0.9.1", optional = true }
 serde_json = { version = "1", optional = true }
-solex-types = { version = "0.2.0", default-features = false, features = ["toml"] }
+solex-types = { version = "0.2.1", default-features = false, features = ["toml"] }
 
 [dependencies]
 payment-channel-interface         = { version = "0.1.0", path = "../../crates/interface" }
 pinocchio                          = { version = "0.11.1", features = ["cpi", "copy", "account-resize"] }
-solex-lang                         = { version = "0.2.0", default-features = false, features = ["pinocchio"] }
+solex-lang                         = { version = "0.2.1", default-features = false, features = ["pinocchio"] }
 solana-address                     = { version = "2", features = ["curve25519", "borsh"] }
 pinocchio-associated-token-account = "0.4.0"
 pinocchio-system                   = "0.6.0"

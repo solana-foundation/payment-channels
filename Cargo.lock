@@ -3052,6 +3052,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "libyaml-rs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e126dda6f34391ab7b444f9922055facc83c07a910da3eb16f1e4d9c45dc777"
+
+[[package]]
 name = "light-poseidon"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4595,19 +4601,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "serde_yaml"
-version = "0.9.34+deprecated"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
-dependencies = [
- "indexmap",
- "itoa",
- "ryu",
- "serde",
- "unsafe-libyaml",
 ]
 
 [[package]]
@@ -7164,9 +7157,9 @@ dependencies = [
 
 [[package]]
 name = "solex-lang"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "565b0ab81b261d11b05b30e6216daa240fdfdb64b5cfd9247ecb19c12d59910f"
+checksum = "dcff8b8ee16f5821dda3d65b2a0b7e18c2cc2252519571f64f807d3fcebb0339"
 dependencies = [
  "pinocchio",
  "solana-address 2.9.0",
@@ -7175,9 +7168,9 @@ dependencies = [
 
 [[package]]
 name = "solex-macros"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "423b87d9bfbf3dd97bb876d9aaa57534e641870e0e7e167cda7c7d83e15d4633"
+checksum = "19d403ec44784c5a368e66c1e9814950ffcc5826cb58a9a6e6791cdd2908dcef"
 dependencies = [
  "bs58",
  "proc-macro2",
@@ -7188,17 +7181,17 @@ dependencies = [
 
 [[package]]
 name = "solex-types"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc8502181403f149b4e1cc85cb17557103d4896ea14c3188643d2ccf6eb86d82"
+checksum = "9f4789970a3af65f85d5b32d0df805d232f6f232ad208c2f55a6976e57dd1435"
 dependencies = [
  "indexmap",
  "proc-macro2",
  "serde",
- "serde_yaml",
  "syn 2.0.117",
  "thiserror 2.0.18",
  "toml",
+ "yaml_serde",
 ]
 
 [[package]]
@@ -7946,12 +7939,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "unsafe-libyaml"
-version = "0.2.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
-
-[[package]]
 name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8521,6 +8508,19 @@ dependencies = [
  "rusticata-macros",
  "thiserror 1.0.69",
  "time",
+]
+
+[[package]]
+name = "yaml_serde"
+version = "0.10.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33b729a08a9a6be689bbad3e2bf8015926db54b6622cc89c3a5f7dc174b9e918"
+dependencies = [
+ "indexmap",
+ "itoa",
+ "libyaml-rs",
+ "ryu",
+ "serde",
 ]
 
 [[package]]
