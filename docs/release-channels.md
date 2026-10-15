@@ -7,8 +7,14 @@ The program is built per channel with [solex](https://github.com/lgalabru/solex)
 | --- | --- | --- | --- | --- |
 | `stable` | `CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX` | mainnet-beta | none (V1 surface) | `Cs2zdf…` |
 | `canary` | `CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ` | devnet | `hooks` | `4zTeC5…` |
+| `canary` | `5qZ4RaY5TQr2VF3ZKBzrCb4U4F9xDPbB5PqFtpS8H6SN` | mainnet-beta | `hooks` | `Cs2zdf…` |
 
-`canary` includes `stable`. The local hook suite (`just test-v2-hooks`) runs
+`canary` includes `stable`. It is one channel on two clusters: the
+`[channels.canary.mainnet-beta]` override gives the mainnet deployment its own
+address (the devnet keypair is not held in this repository) and the mainnet
+treasury. `solex build --canary` therefore produces one artifact per cluster
+under `target/solex/canary/<cluster>/`, each embedding only its own program id
+and treasury owner. The local hook suite (`just test-v2-hooks`) runs
 against the stable channel with the `hooks` Cargo feature enabled by hand, so
 the program keeps the canonical address the generated client embeds.
 
@@ -33,7 +39,7 @@ the program keeps the canonical address the generated client embeds.
 ```sh
 solex channels                      # deployments and what each ships
 solex features --check              # the hooks feature against both channels
-solex build --channel canary       # target/solex/canary/payment_channels.so, --features hooks
+solex build --canary                # target/solex/canary/{devnet,mainnet-beta}/payment_channels.so, --features hooks
 solex build --channel stable        # target/solex/stable/payment_channels.so
 just test-v2-hooks                  # stable + hooks at the canonical address
 SOLEX_CHANNEL=stable cargo build-sbf --tools-version v1.58 --arch v3
@@ -42,6 +48,16 @@ SOLEX_CHANNEL=stable cargo build-sbf --tools-version v1.58 --arch v3
 Any `cargo build-sbf` or `cargo test` invocation selects a channel by exporting
 `SOLEX_CHANNEL`; the `just` recipes do this. Without it the manifest default,
 `stable`, applies.
+
+## Deploying
+
+`solex deploy --canary` lists the channel's clusters as a checklist and runs
+`solana program deploy` for each one picked, with that cluster's program id,
+artifact and keypair. The first mainnet deploy signs with
+`keys/canary-mainnet-beta.json` (gitignored; keep a copy) and needs a funded
+payer: the program account alone is rent-exempt at about 1.01 SOL for this
+artifact, plus the buffer during upload. `solex deploy --canary --dry-run`
+prints the exact commands.
 
 ## Promotion
 

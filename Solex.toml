@@ -2,8 +2,8 @@
 #
 # A channel is a deployment: program id, cluster(s) and per-deployment
 # constants. `stable` is the audited V1 surface on mainnet. `canary` includes
-# stable and adds the `hooks` feature, deployed on devnet under its own
-# address. Code gates on features with plain #[cfg(feature = "hooks")];
+# stable and adds the `hooks` feature, deployed on devnet and mainnet under
+# its own addresses. Code gates on features with plain #[cfg(feature = "hooks")];
 # `solex build --channel canary` passes `--features hooks`. Local hook tests
 # enable the feature by hand on the stable channel (see `just test-v2-hooks`),
 # which keeps the canonical address the generated client embeds.
@@ -26,8 +26,15 @@ vars = { treasury_owner = "Cs2zdfUNonRdRGsiZUQQLdTxzxVvJZmgiX2mpLYKuEqP" }
 description = "stable plus the hooks feature"
 includes = ["stable"]
 program_id = "CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ"
-cluster = "devnet"
+cluster = ["devnet", "mainnet-beta"]
 vars = { treasury_owner = "4zTeC5mVqWLruDexgU2mV66p9t5vCA9JyiZqdGDUspap" }
+
+# The mainnet canary is a separate deployment of the same channel: its own
+# address (the devnet keypair is not held here) and the mainnet treasury.
+[channels.canary.mainnet-beta]
+program_id = "5qZ4RaY5TQr2VF3ZKBzrCb4U4F9xDPbB5PqFtpS8H6SN"
+keypair = "keys/canary-mainnet-beta.json"
+vars = { treasury_owner = "Cs2zdfUNonRdRGsiZUQQLdTxzxVvJZmgiX2mpLYKuEqP" }
 
 [features.hooks]
 description = "V2 lifecycle hooks: openWithHooks, topUpWithHooks, distributeWithHooks, withdrawPayerWithHooks"
