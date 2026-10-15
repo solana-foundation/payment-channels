@@ -43,8 +43,8 @@ fn generate_idl() -> BuildResult<()> {
 
     let idl_dir = Path::new(&manifest_dir).join("idl");
     fs::create_dir_all(&idl_dir)?;
-    let idl_path = idl_dir.join(if channel == "nightly" {
-        "payment_channels_nightly.raw.json"
+    let idl_path = idl_dir.join(if channel == "canary" {
+        "payment_channels_canary.raw.json"
     } else {
         "payment_channels.raw.json"
     });

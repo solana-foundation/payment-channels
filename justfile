@@ -45,10 +45,10 @@ build-program:
     cd {{program_dir}} && cargo build-sbf {{runtime_sbf_args}}
     @echo "✓ program built"
 
-# Channel builds (Solex.toml): `nightly` is stable plus the hooks feature on
+# Channel builds (Solex.toml): `canary` is stable plus the hooks feature on
 # devnet under its own address; `stable` is V1-only on mainnet. Any cargo
 # build-sbf invocation selects a channel with SOLEX_CHANNEL; `solex env
-# --channel nightly` prints the full environment.
+# --channel canary` prints the full environment.
 #
 # The local test artifact is the stable channel (canonical address, which the
 # generated client embeds) with the hooks feature enabled by hand.
@@ -56,7 +56,7 @@ build-v2-localnet:
     cd {{program_dir}} && SOLEX_CHANNEL=stable cargo build-sbf {{runtime_sbf_args}} --features hooks --sbf-out-dir ../../target/deploy-v2
 
 build-v2-devnet:
-    cd {{program_dir}} && SOLEX_CHANNEL=nightly cargo build-sbf {{runtime_sbf_args}} --features hooks --sbf-out-dir ../../target/deploy-v2-devnet
+    cd {{program_dir}} && SOLEX_CHANNEL=canary cargo build-sbf {{runtime_sbf_args}} --features hooks --sbf-out-dir ../../target/deploy-v2-devnet
 
 # `solex build` writes target/solex/<channel>/payment_channels.so and strips
 # the stray keypair cargo build-sbf drops next to it.
@@ -75,9 +75,9 @@ test-v2-hooks: build-v2-localnet
 
 # Deployment builds pick the channel's program id, features and
 # `vars.treasury_owner` from Solex.toml.
-build-nightly:
-    cd {{program_dir}} && SOLEX_CHANNEL=nightly cargo build-sbf {{runtime_sbf_args}} --features hooks
-    @echo "✓ nightly program built (devnet)"
+build-canary:
+    cd {{program_dir}} && SOLEX_CHANNEL=canary cargo build-sbf {{runtime_sbf_args}} --features hooks
+    @echo "✓ canary program built (devnet)"
 
 build-stable:
     cd {{program_dir}} && SOLEX_CHANNEL=stable cargo build-sbf {{runtime_sbf_args}}

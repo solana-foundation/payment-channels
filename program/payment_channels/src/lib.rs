@@ -46,7 +46,7 @@ pub mod hooks;
 solex::declare_id!();
 
 // The V2 lifecycle-hook instructions are the `hooks` Cargo feature, enabled
-// on the `nightly` channel by Solex.toml. A `stable` build has no dispatch
+// on the `canary` channel by Solex.toml. A `stable` build has no dispatch
 // arm, variant or discriminator for them; `solex features` shows the whole
 // feature as one row.
 #[cfg_attr(feature = "no-entrypoint", allow(dead_code))]

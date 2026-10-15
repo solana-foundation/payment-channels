@@ -1,10 +1,10 @@
 # Release channels for the payment channels program (https://github.com/lgalabru/solex).
 #
 # A channel is a deployment: program id, cluster(s) and per-deployment
-# constants. `stable` is the audited V1 surface on mainnet. `nightly` includes
+# constants. `stable` is the audited V1 surface on mainnet. `canary` includes
 # stable and adds the `hooks` feature, deployed on devnet under its own
 # address. Code gates on features with plain #[cfg(feature = "hooks")];
-# `solex build --channel nightly` passes `--features hooks`. Local hook tests
+# `solex build --channel canary` passes `--features hooks`. Local hook tests
 # enable the feature by hand on the stable channel (see `just test-v2-hooks`),
 # which keeps the canonical address the generated client embeds.
 #
@@ -22,7 +22,7 @@ program_id = "CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX"
 cluster = "mainnet-beta"
 vars = { treasury_owner = "Cs2zdfUNonRdRGsiZUQQLdTxzxVvJZmgiX2mpLYKuEqP" }
 
-[channels.nightly]
+[channels.canary]
 description = "stable plus the hooks feature"
 includes = ["stable"]
 program_id = "CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ"
@@ -31,4 +31,4 @@ vars = { treasury_owner = "4zTeC5mVqWLruDexgU2mV66p9t5vCA9JyiZqdGDUspap" }
 
 [features.hooks]
 description = "V2 lifecycle hooks: openWithHooks, topUpWithHooks, distributeWithHooks, withdrawPayerWithHooks"
-channels = ["nightly"]
+channels = ["canary"]

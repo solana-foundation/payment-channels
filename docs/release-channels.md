@@ -6,9 +6,9 @@ The program is built per channel with [solex](https://github.com/lgalabru/solex)
 | Channel | Program id | Clusters | Features | Treasury owner |
 | --- | --- | --- | --- | --- |
 | `stable` | `CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX` | mainnet-beta | none (V1 surface) | `Cs2zdf…` |
-| `nightly` | `CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ` | devnet | `hooks` | `4zTeC5…` |
+| `canary` | `CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ` | devnet | `hooks` | `4zTeC5…` |
 
-`nightly` includes `stable`. The local hook suite (`just test-v2-hooks`) runs
+`canary` includes `stable`. The local hook suite (`just test-v2-hooks`) runs
 against the stable channel with the `hooks` Cargo feature enabled by hand, so
 the program keeps the canonical address the generated client embeds.
 
@@ -24,7 +24,7 @@ the program keeps the canonical address the generated client embeds.
   (`hooks = []` in the program's Cargo.toml), gated with plain
   `#[cfg(feature = "hooks")]` on their enum variants, `from_bytes` arms,
   dispatch arms, discriminators and handlers. `Solex.toml` declares
-  `[features.hooks] channels = ["nightly"]`, so `solex build --channel nightly`
+  `[features.hooks] channels = ["canary"]`, so `solex build --channel canary`
   passes `--features hooks` and a `stable` build contains none of them: no
   discriminator is recognised and no code is linked.
 
@@ -33,7 +33,7 @@ the program keeps the canonical address the generated client embeds.
 ```sh
 solex channels                      # deployments and what each ships
 solex features --check              # the hooks feature against both channels
-solex build --channel nightly       # target/solex/nightly/payment_channels.so, --features hooks
+solex build --channel canary       # target/solex/canary/payment_channels.so, --features hooks
 solex build --channel stable        # target/solex/stable/payment_channels.so
 just test-v2-hooks                  # stable + hooks at the canonical address
 SOLEX_CHANNEL=stable cargo build-sbf --tools-version v1.58 --arch v3
