@@ -7,14 +7,12 @@ The program is built per channel with [solex](https://github.com/lgalabru/solex)
 | --- | --- | --- | --- | --- |
 | `stable` | `CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX` | mainnet | none (V1 surface) | `Cs2zdf…` |
 | `canary` | `CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ` | devnet | `hooks` | `4zTeC5…` |
-| `canary` | `5qZ4RaY5TQr2VF3ZKBzrCb4U4F9xDPbB5PqFtpS8H6SN` | mainnet | `hooks` | `Cs2zdf…` |
+| `canary` | `CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ` | mainnet | `hooks` | `Cs2zdf…` |
 
-`canary` includes `stable`. It is one channel on two clusters: the
-`[channels.canary.mainnet]` override gives the mainnet deployment its own
-address (the devnet keypair is not held in this repository) and the mainnet
+`canary` includes `stable`. It is one channel on two clusters at the same
+address; the `[channels.canary.mainnet]` override swaps in the mainnet
 treasury. `solex build --canary` therefore produces one artifact per cluster
-under `target/solex/canary/<cluster>/`, each embedding only its own program id
-and treasury owner. The local hook suite (`just test-v2-hooks`) runs
+under `target/solex/canary/<cluster>/`, each embedding its own treasury owner. The local hook suite (`just test-v2-hooks`) runs
 against the stable channel with the `hooks` Cargo feature enabled by hand, so
 the program keeps the canonical address the generated client embeds.
 
@@ -54,8 +52,8 @@ Any `cargo build-sbf` or `cargo test` invocation selects a channel by exporting
 `solex deploy --canary` lists the channel's clusters as a checklist and runs
 `solana program deploy` for each one picked, with that cluster's program id,
 artifact and keypair. The first mainnet deploy signs with
-`keys/canary-mainnet.json` (gitignored; keep a copy) and needs a funded
-payer: the program account alone is rent-exempt at about 1.01 SOL for this
+the channel keypair at `keys/canary.json` (gitignored; the maintainers hold
+it) and needs a funded payer: the program account alone is rent-exempt at about 1.01 SOL for this
 artifact, plus the buffer during upload. `solex deploy --canary --dry-run`
 prints the exact commands.
 
