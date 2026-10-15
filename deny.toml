@@ -41,6 +41,10 @@ ignore = [
     # benchmark report tables) → tabled_derive; proc-macro only, not linked
     # into the on-chain program.
     "RUSTSEC-2026-0173",
+    # unsafe-libyaml unmaintained — transitive via serde_yaml → solex-types,
+    # reached only through the solex-macros proc-macro and build.rs (manifest
+    # parsing at compile time); not linked into the on-chain program.
+    "RUSTSEC-2024-0449",
 ]
 
 [licenses]
