@@ -320,9 +320,11 @@ impl<'a> TokenContext<'a> {
                 }
                 scan_tlv_extensions::<MintExtensionPolicy>(&data[tlv::START..]).map_err(|err| {
                     match err {
-                        TokenExtensionError::MalformedTokenAccountData
-                        | TokenExtensionError::UnsupportedTokenExtension => {
+                        TokenExtensionError::MalformedTokenAccountData => {
                             PaymentChannelsError::MalformedMintTokenExtensions
+                        }
+                        TokenExtensionError::UnsupportedTokenExtension => {
+                            PaymentChannelsError::UnsupportedMintTokenExtensions
                         }
                     }
                 })?;

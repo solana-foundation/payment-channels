@@ -52,6 +52,19 @@ pub fn add_mint_extension(svm: &mut LiteSVM, mint: &Pubkey, extension_type: u16,
     svm.set_account(*mint, acct).expect("overwrite mint");
 }
 
+/// Appends a truncated mint-extension record, making the TLV trailer malformed.
+pub fn add_malformed_mint_extension(
+    svm: &mut LiteSVM,
+    mint: &Pubkey,
+    extension_type: u16,
+    value_len: usize,
+) {
+    add_mint_extension(svm, mint, extension_type, value_len);
+    let mut acct = svm.get_account(mint).expect("mint exists");
+    acct.data.pop().expect("extension has a value byte");
+    svm.set_account(*mint, acct).expect("overwrite mint");
+}
+
 pub fn add_account_extension(
     svm: &mut LiteSVM,
     token_account: &Pubkey,

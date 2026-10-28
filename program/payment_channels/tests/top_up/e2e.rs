@@ -567,7 +567,7 @@ fn top_up_unsupported_token_2022_mint_extension_rejects_without_state_changes() 
     );
     expect_custom_err(
         svm.send_transaction(tx),
-        PaymentChannelsError::MalformedMintTokenExtensions,
+        PaymentChannelsError::UnsupportedMintTokenExtensions,
     );
 
     assert_eq!(read_deposit(&svm, &channel), deposit);
