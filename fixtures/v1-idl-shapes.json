@@ -1,0 +1,33 @@
+{
+  "description": "Frozen V1 Codama node SHA-256 hashes, recursively excluding docs and sorting object keys. Additive nodes are allowed; existing wire, account metadata, and defaults must not change.",
+  "accounts": {
+    "channel": "1d87bb8a2159b7f9c96c2c0b252ea563770cc98b12699d3ffac91d3d252c56be"
+  },
+  "instructions": {
+    "open": "cb65ee25fa102d616f424a8d9a7944b9f9e7e5ef487aadeb281b306d4ebd762e",
+    "settle": "a0b62bc11899d90954d4e38a88309f94d28cef3a707d802ace5a17fa71769dc9",
+    "topUp": "6ac0b94e6af6ba08a80f304665505c35908afcf9d69673bd0c4392af860c5bfd",
+    "settleAndSeal": "358b1b5491f3015b257b5c43f6f4668f3baa4ccca6c2d920a10dfd6f9438bb18",
+    "requestClose": "92fb3ee4c15a3c4ec524e644ff6634293e7e04669efb6c684282bfdb619c5f77",
+    "seal": "d2c3ef1fb032faca224063f1799ccfdfc9d19a783f4f41cdb91a454112036dca",
+    "distribute": "86106fb515d16e797dc226c574a65a14de28f1e30833bbca6d7e69ba04a01826",
+    "withdrawPayer": "5100194aba8316ffe1ee86216fb51eb3919ab6d017269bc320c231c22e211b4e",
+    "reclaim": "a00f4d8d8fcf054b8919b142f2259af39e7e245a9fb4845b1c9caeb92061145c",
+    "emitEvent": "80c58a441452819b923e7058ae4d3f44f939150273b95049620019ca64be5803"
+  },
+  "definedTypes": {
+    "distributeArgs": "f1f4d6c2d1eec061fa8d8d94b8c75ab7a41b137f581f23f5a6a76d981bbea7c3",
+    "payoutBeneficiary": "d8d425e0eeea7521da37007363353abff4f2aa26753677b6a6216bf773722c3d",
+    "redirectReason": "66398f2779451fa3fb818e58cb14c2e525af79f1407d8300c95d302b2f728a68",
+    "distributionEntry": "875061a37be85e36ca55ff9467f48a5e2d2c575e25cfdbc2c2e8102012c209c5",
+    "openArgs": "a4c297b06d0cb825c156ce4c7c6d013aad511d0b5a1fc24bbe02b6d004ab1553",
+    "settleAndSealArgs": "a7f73896aed83b292215aa3407efa8464160f9978610cc01110dc8db1c4b2f94",
+    "topUpArgs": "4c152eed0df518295e3ae60398e5f1c75c39da089ac6b188fba624e76e47f0a5",
+    "voucherArgs": "fed56e9807a04728b2b09ce1b2328ce7544a158372521a0d9b626afa89181c41",
+    "channelStatus": "e5ac55dee82368d8bd023fb1e1fc75bf3f0cb619bd860573724a8b278e3e2b73",
+    "settlementWatermarks": "8fc24cf7124a8112e64cc3cdf278bbb6676626dcc5e4ba1de64369df5be15fa2",
+    "accountDiscriminator": "323cf710cbebb6c2dec60857fda087cc8a81b0a2641a2b4736fcf57e232b748b",
+    "opened": "e3fc2e20b8df9456a43c36296fbb3e697e25ad84ea684dd914b922dd2119eaf1",
+    "payoutRedirected": "f3adb60f1b6e0442d21005528510559d4dd5d54c3d235690781c4e28df522e70"
+  }
+}

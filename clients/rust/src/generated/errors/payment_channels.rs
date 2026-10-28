@@ -205,6 +205,9 @@ pub enum PaymentChannelsError {
     /// 2414 - Channel cannot be fully closed until clock.slot > open_slot + OPEN_SLOT_WINDOW
     #[error("Channel cannot be fully closed until clock.slot > open_slot + OPEN_SLOT_WINDOW")]
     ChannelCloseTooEarly = 0x96E,
+    /// 2500 - Lifecycle callback changed protected channel custody
+    #[error("Lifecycle callback changed protected channel custody")]
+    HookInvariantViolation = 0x9C4,
 }
 
 impl From<PaymentChannelsError> for solana_program_error::ProgramError {
