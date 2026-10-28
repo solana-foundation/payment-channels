@@ -32,7 +32,7 @@ solex channels                      # deployments and what each ships
 solex features --check              # every channel feature against every channel
 solex build --canary                # target/solex/canary/{devnet,mainnet}/payment_channels.so
 solex build --channel stable        # target/solex/stable/payment_channels.so
-SOLEX_CHANNEL=stable cargo build-sbf
+SOLEX_CHANNEL=stable cargo build-sbf --tools-version v1.58 --arch v3
 ```
 
 Any `cargo build-sbf` or `cargo test` invocation selects a channel by exporting

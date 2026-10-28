@@ -10,6 +10,9 @@
 default_channel = "stable"
 program_path = "program/payment_channels"
 
+[build]
+args = ["--tools-version", "v1.58", "--arch", "v3"]
+
 [channels.stable]
 description = "V1 instruction set, the audited surface"
 program_id = "CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX"

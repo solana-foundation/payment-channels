@@ -8,6 +8,11 @@ program_id    := "CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX"
 idl_file      := program_dir / "idl/payment_channels.json"
 raw_idl_file  := program_dir / "idl/payment_channels.raw.json"
 
+# Preserve the compiler/ISA used by the existing Mollusk regression suite and
+# baseline benchmarks. This selects an ISA, not an account ABI.
+v1_sbf_args := "--tools-version v1.52 --arch v0"
+runtime_sbf_args := "--tools-version v1.58 --arch v3"
+
 default:
     @just --list
 
@@ -37,7 +42,7 @@ program-id:
 build: build-program build-client
 
 build-program:
-    cd {{program_dir}} && cargo build-sbf
+    cd {{program_dir}} && cargo build-sbf {{runtime_sbf_args}}
     @echo "✓ program built"
 
 # Channel builds (Solex.toml): `stable` is the V1 surface on mainnet; `canary`
@@ -58,11 +63,11 @@ features:
 # `vars.treasury_owner` from Solex.toml.
 # canary has per-cluster overrides, so the cluster must be chosen.
 build-canary cluster="devnet":
-    cd {{program_dir}} && SOLEX_CHANNEL=canary SOLEX_CLUSTER={{cluster}} cargo build-sbf
+    cd {{program_dir}} && SOLEX_CHANNEL=canary SOLEX_CLUSTER={{cluster}} cargo build-sbf {{runtime_sbf_args}}
     @echo "✓ canary program built ({{cluster}})"
 
 build-stable:
-    cd {{program_dir}} && SOLEX_CHANNEL=stable cargo build-sbf
+    cd {{program_dir}} && SOLEX_CHANNEL=stable cargo build-sbf {{runtime_sbf_args}}
     @echo "✓ stable program built (mainnet)"
 
 # Raw IDL is emitted by build.rs, gated on the `idl` feature so plain
@@ -88,7 +93,13 @@ build-client: generate-client
 test: test-program test-client
 
 test-program: generate-client
-    cd {{program_dir}} && cargo test-sbf
+    cd {{program_dir}} && cargo test-sbf {{v1_sbf_args}}
+
+# The deployed ISA. Mollusk 0.11 cannot load SBPFv3, so only the litesvm
+# suites run against this artifact; `test-program` covers the rest on v0.
+test-program-v3: generate-client
+    cd {{program_dir}} && cargo build-sbf {{runtime_sbf_args}} --sbf-out-dir ../../target/deploy-v3
+    cd {{program_dir}} && PAYMENT_CHANNELS_SO=../../target/deploy-v3/payment_channels.so cargo test --test instructions -- --skip ::integration::
 
 test-client: generate-client
     cd {{ts_client_dir}} && pnpm run test
@@ -100,13 +111,13 @@ test-client: generate-client
 bench: generate-client
     cd {{program_dir}} && \
         BENCH=1 BENCH_DATE="$(date -u +%Y-%m-%d)" \
-        cargo test-sbf --test instructions benchmark::scenarios:: -- --test-threads=1
+        cargo test-sbf {{v1_sbf_args}} --test instructions benchmark::scenarios:: -- --test-threads=1
 
 # Focused event-engine end-to-end run (litesvm). Loads the compiled .so
 # and exercises the self-CPI Anchor-event wire format via the `open`
 # instruction plus the `emit_event` validation surface.
 events-e2e:
-    cd {{program_dir}} && cargo test-sbf --test instructions event_engine_e2e::
+    cd {{program_dir}} && cargo test-sbf {{v1_sbf_args}} --test instructions event_engine_e2e::
 
 # ---------- quality ----------
 
