@@ -95,5 +95,8 @@ jobs:
       - name: Test program
         run: just test-program
 
+      - name: Test program (SBPFv3 artifact, litesvm suites)
+        run: just test-program-v3
+
       - name: Test client (vitest)
         run: just test-client

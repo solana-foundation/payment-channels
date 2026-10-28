@@ -37,8 +37,9 @@ borsh                              = { version = "1", default-features = false, 
 thiserror                          = { version = "2", default-features = false }
 
 [dev-dependencies]
-litesvm                  = { version = "0.11", features = ["precompiles"] }
-litesvm-token            = { version = "0.11", features = ["token-2022"] }
+# Agave 4 understands the SBPFv3 ELF layout emitted by platform-tools v1.58.
+litesvm                  = { version = "0.13.1", features = ["precompiles"] }
+litesvm-token            = { version = "0.13.1", features = ["token-2022"] }
 payment_channels_client  = { workspace = true }
 solana-account           = "^3"
 solana-clock             = "^3"
