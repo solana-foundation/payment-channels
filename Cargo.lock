@@ -2624,6 +2624,8 @@ checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.0",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -2911,6 +2913,12 @@ checksum = "67abfe149395e3aa1c48a2beb32b068e2334402df8181f818d3aee2b304c4f5d"
 dependencies = [
  "libsecp256k1-core",
 ]
+
+[[package]]
+name = "libyaml-rs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e126dda6f34391ab7b444f9922055facc83c07a910da3eb16f1e4d9c45dc777"
 
 [[package]]
 name = "light-poseidon"
@@ -3514,6 +3522,8 @@ dependencies = [
  "solana-system-interface 3.2.0",
  "solana-transaction",
  "solana-transaction-error",
+ "solex-lang",
+ "solex-types",
  "spl-token-2022-interface",
  "tabled",
  "thiserror 2.0.18",
@@ -6676,6 +6686,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "solex-lang"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dcff8b8ee16f5821dda3d65b2a0b7e18c2cc2252519571f64f807d3fcebb0339"
+dependencies = [
+ "pinocchio",
+ "solana-address 2.6.0",
+ "solex-macros",
+]
+
+[[package]]
+name = "solex-macros"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19d403ec44784c5a368e66c1e9814950ffcc5826cb58a9a6e6791cdd2908dcef"
+dependencies = [
+ "bs58",
+ "proc-macro2",
+ "quote",
+ "solex-types",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "solex-types"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f4789970a3af65f85d5b32d0df805d232f6f232ad208c2f55a6976e57dd1435"
+dependencies = [
+ "indexmap",
+ "proc-macro2",
+ "serde",
+ "syn 2.0.117",
+ "thiserror 2.0.18",
+ "toml",
+ "yaml_serde",
+]
+
+[[package]]
 name = "spinning_top"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7932,6 +7981,19 @@ dependencies = [
  "rusticata-macros",
  "thiserror 1.0.69",
  "time",
+]
+
+[[package]]
+name = "yaml_serde"
+version = "0.10.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33b729a08a9a6be689bbad3e2bf8015926db54b6622cc89c3a5f7dc174b9e918"
+dependencies = [
+ "indexmap",
+ "itoa",
+ "libyaml-rs",
+ "ryu",
+ "serde",
 ]
 
 [[package]]
