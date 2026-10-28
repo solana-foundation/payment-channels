@@ -253,8 +253,8 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | 52 | `InvalidChannelTokenExtensions` | Escrow ATA carries a Token-2022 extension outside the allow-list. |
 | 53 | `MintAccountMismatch` | Provided mint cannot be parsed for the supplied token program. |
 | 54 | `InvalidMintTokenProgram` | Token program is neither SPL Token nor Token-2022. |
-| 55 | `MalformedMintTokenAccountData` | Token-2022 mint account base/TLV layout is malformed. |
-| 56 | `MalformedMintTokenExtensions` | Token-2022 mint TLV trailer is malformed. |
+| 55 | `MalformedMintTokenAccountData` | Token-2022 mint padding between the base layout and the account-type byte is not zeroed. |
+| 56 | `MalformedMintTokenExtensions` | Token-2022 mint TLV trailer is malformed (truncated or overrunning TLV entry). |
 | 57 | `PayerAccountMismatch` | Payer ATA is not `ATA(payer, token_program, mint)`. |
 | 58 | `InvalidPayerTokenAccount` | Payer ATA fails state/owner/mint validation. |
 | 59 | `InvalidPayerTokenExtensions` | Payer ATA carries a Token-2022 extension outside the allow-list. |

@@ -58,11 +58,11 @@ pub enum PaymentChannelsError {
     /// 54 - Token program must be SPL Token or Token-2022
     #[error("Token program must be SPL Token or Token-2022")]
     InvalidMintTokenProgram = 0x36,
-    /// 55 - Token account or mint TLV trailer is malformed
-    #[error("Token account or mint TLV trailer is malformed")]
+    /// 55 - Token-2022 mint padding before the account type is not zeroed
+    #[error("Token-2022 mint padding before the account type is not zeroed")]
     MalformedMintTokenAccountData = 0x37,
-    /// 56 - Token account or mint TLV trailer is malformed
-    #[error("Token account or mint TLV trailer is malformed")]
+    /// 56 - Token-2022 mint TLV trailer is malformed
+    #[error("Token-2022 mint TLV trailer is malformed")]
     MalformedMintTokenExtensions = 0x38,
     /// 57 - Payer token account is not ATA(payer, token_program, mint)
     #[error("Payer token account is not ATA(payer, token_program, mint)")]
