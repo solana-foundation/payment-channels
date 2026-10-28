@@ -26,7 +26,6 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           save-rust-cache: "true"
-          solana-version: "stable"
 
       - name: Build program
         run: just build-program
@@ -90,7 +89,6 @@ jobs:
 
       - uses: ./.github/actions/setup
         with:
-          solana-version: "stable"
           rust-cache-key: "unit-test"
           save-rust-cache: "true"
 

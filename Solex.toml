@@ -1,0 +1,28 @@
+# Release channels for the payment channels program (https://github.com/lgalabru/solex).
+#
+# A channel is a deployment: program id, cluster(s) and per-deployment
+# constants. `stable` is the audited V1 surface on mainnet. `canary` includes
+# stable and is deployed on devnet and mainnet under its own address; channel
+# features (`[features.<name>]`) decide what canary ships on top of stable.
+#
+# `vars.treasury_owner` replaces the per-cluster `mod cluster` blocks and the
+# 0xBEEF release gate: a channel without the var does not compile.
+default_channel = "stable"
+program_path = "program/payment_channels"
+
+[channels.stable]
+description = "V1 instruction set, the audited surface"
+program_id = "CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX"
+cluster = "mainnet"
+vars = { treasury_owner = "Cs2zdfUNonRdRGsiZUQQLdTxzxVvJZmgiX2mpLYKuEqP" }
+
+[channels.canary]
+description = "stable plus channel-gated features"
+includes = ["stable"]
+program_id = "CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ"
+cluster = ["devnet", "mainnet"]
+vars = { treasury_owner = "4zTeC5mVqWLruDexgU2mV66p9t5vCA9JyiZqdGDUspap" }
+
+# Same program id on both clusters; only the treasury differs on mainnet.
+[channels.canary.mainnet]
+vars = { treasury_owner = "Cs2zdfUNonRdRGsiZUQQLdTxzxVvJZmgiX2mpLYKuEqP" }

@@ -8,26 +8,24 @@ license = "MIT"
 crate-type = ["lib", "cdylib"]
 
 [features]
-default = ["localnet"]
-# Treasury owner selection per cluster (see src/constants.rs). `localnet` keeps the
-# 0xBEEF placeholder with the release gate off; `devnet`/`testnet`/`mainnet-beta` turn
-# the gate on and require their real owner committed in constants.rs before the build
-# compiles.
-localnet     = []
-devnet       = []
-testnet      = []
-mainnet-beta = []
+# Deployment selection (program id, treasury owner) lives in ../../Solex.toml
+# and is chosen per build with SOLEX_CHANNEL; see `solex channels`. There are
+# no cluster features anymore.
+default = []
 # Enables codama derives + raw build.rs IDL emission. Host-only; must NOT
 # be enabled for `cargo build-sbf` (see `compile_error!` guard in
 # src/lib.rs). Use `just generate-idl` to apply Codama visitors and write
 # the committed IDL.
-idl = ["dep:codama"]
+idl = ["dep:codama", "dep:serde_json"]
 
 [build-dependencies]
 codama = { version = "0.9.1", optional = true }
+serde_json = { version = "1", optional = true }
+solex-types = { version = "0.2.1", default-features = false, features = ["toml"] }
 
 [dependencies]
 pinocchio                          = { version = "0.11.1", features = ["cpi", "copy", "account-resize"] }
+solex-lang                         = { version = "0.2.1", default-features = false, features = ["pinocchio"] }
 solana-address                     = { version = "2", features = ["curve25519", "borsh"] }
 pinocchio-associated-token-account = "0.4.0"
 pinocchio-system                   = "0.6.0"

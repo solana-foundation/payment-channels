@@ -11,7 +11,7 @@ extern crate alloc;
 #[cfg(all(feature = "idl", target_os = "solana"))]
 compile_error!("the `idl` feature is host-only; do not enable it for SBF builds");
 
-use pinocchio::{AccountView, Address, ProgramResult, address::declare_id};
+use pinocchio::{AccountView, Address, ProgramResult};
 
 pinocchio::program_entrypoint!(process_instruction);
 pinocchio::no_allocator!();
@@ -33,7 +33,8 @@ pub use instructions::*;
 pub mod state;
 pub use state::*;
 
-declare_id!("CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX");
+// Program id of the channel being built (Solex.toml, `SOLEX_CHANNEL`).
+solex::declare_id!();
 
 fn process_instruction(
     program_id: &Address,

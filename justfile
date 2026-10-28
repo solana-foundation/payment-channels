@@ -40,21 +40,30 @@ build-program:
     cd {{program_dir}} && cargo build-sbf
     @echo "✓ program built"
 
-# Cluster builds select the per-cluster TREASURY_OWNER (see src/constants.rs) and
-# enable the build-time guard: they fail to compile until that cluster's real owner
-# replaces the 0xBEEF placeholder. `--no-default-features` drops the localnet default
-# so only the target cluster feature is active.
-build-devnet:
-    cd {{program_dir}} && cargo build-sbf --no-default-features --features devnet
-    @echo "✓ devnet program built"
+# Channel builds (Solex.toml): `stable` is the V1 surface on mainnet; `canary`
+# includes stable and ships under its own address on devnet and mainnet. Any
+# cargo build-sbf invocation selects a channel with SOLEX_CHANNEL; `solex env
+# --channel canary` prints the full environment.
 
-build-testnet:
-    cd {{program_dir}} && cargo build-sbf --no-default-features --features testnet
-    @echo "✓ testnet program built"
+# `solex build` writes target/solex/<channel>/payment_channels.so and strips
+# the stray keypair cargo build-sbf drops next to it.
+build-channel channel:
+    solex build --channel {{channel}}
 
-build-mainnet-beta:
-    cd {{program_dir}} && cargo build-sbf --no-default-features --features mainnet-beta
-    @echo "✓ mainnet-beta program built"
+# What ships where: every #[channel] marker against every channel.
+features:
+    solex features --check
+
+# Deployment builds pick the channel's program id, features and
+# `vars.treasury_owner` from Solex.toml.
+# canary has per-cluster overrides, so the cluster must be chosen.
+build-canary cluster="devnet":
+    cd {{program_dir}} && SOLEX_CHANNEL=canary SOLEX_CLUSTER={{cluster}} cargo build-sbf
+    @echo "✓ canary program built ({{cluster}})"
+
+build-stable:
+    cd {{program_dir}} && SOLEX_CHANNEL=stable cargo build-sbf
+    @echo "✓ stable program built (mainnet)"
 
 # Raw IDL is emitted by build.rs, gated on the `idl` feature so plain
 # `cargo build` / `cargo build-sbf` don't touch it. Rust Codama macros define
@@ -134,11 +143,13 @@ clean:
 #   # Docker must be running (solana-verify build executes in a container).
 #
 # HARD PREREQUISITES before any cluster deploy (the build will refuse otherwise):
-#   1. constants.rs: set the real TREASURY_OWNER for the target cluster — the
-#      0xBEEF placeholder trips a compile-time guard on devnet/testnet/mainnet.
-#   2. `program_id` below MUST equal declare_id! in src/lib.rs AND the program
-#      keypair you control. The committed IDL embeds this address, so after any
-#      change run `just generate-client` and commit.
+#   1. Solex.toml: the channel's `vars.treasury_owner` is the real owner (the
+#      build fails on a channel without one).
+#   2. `program_id` below MUST equal the channel's program_id in Solex.toml AND
+#      the program keypair you control. The committed IDL embeds this address,
+#      so after any change run `just generate-client` and commit.
+#   3. solana-verify builds in a container: it must see SOLEX_CHANNEL=stable
+#      (see docs/release-channels.md) before this recipe is used for release.
 #   3. Commit + push to the public repo — verified builds verify a pushed commit.
 
 repo_url    := "https://github.com/Moonsong-Labs/solana-payment-channels"
@@ -157,7 +168,7 @@ base_image  := "solanafoundation/solana-verifiable-build:3.1.13"
 verified-build cluster="mainnet-beta":
     solana-verify build --library-name {{lib_name}} \
         --base-image {{base_image}} \
-        --cargo-build-sbf-args="--no-default-features --features {{cluster}}"
+        --cargo-build-sbf-args=""
     @echo "local executable hash:"
     solana-verify get-executable-hash target/deploy/{{lib_name}}.so
 
@@ -234,4 +245,4 @@ verify-mainnet:
         --library-name {{lib_name}} \
         --base-image {{base_image}} \
         --commit-hash "$(git rev-parse HEAD)" \
-        --cargo-build-sbf-args="--no-default-features --features mainnet-beta"
+        --cargo-build-sbf-args=""

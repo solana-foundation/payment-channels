@@ -86,7 +86,7 @@ just generate-client
 just test-program
 ```
 
-Cluster builds (`just build-mainnet-beta`, `just build-devnet`, …) require that cluster's real `TREASURY_OWNER` in `program/payment_channels/src/constants.rs` and refuse to compile with the placeholder. No production keypair is committed — pass the program-id keypair explicitly when deploying.
+Deployments are [solex](https://github.com/lgalabru/solex) channels declared in `Solex.toml` (`just build-stable`, `just build-canary`); each channel carries its own program id and `vars.treasury_owner`. See [docs/release-channels.md](docs/release-channels.md). No production keypair is committed — pass the program-id keypair explicitly when deploying.
 
 ## Docs & clients
 

@@ -41,6 +41,18 @@ ignore = [
     # benchmark report tables) → tabled_derive; proc-macro only, not linked
     # into the on-chain program.
     "RUSTSEC-2026-0173",
+    # crypto-bigint 0.5 constant-time issues — via k256 →
+    # solana-secp256k1-program → agave-precompiles (litesvm/mollusk dev-deps).
+    # The fix is 0.7, a semver-major bump blocked upstream; not linked into the
+    # on-chain program.
+    "RUSTSEC-2026-0387",
+    # zstd 0.13 / zstd-safe 7 decompression memory-safety issues — via
+    # solana-account-decoder (solana-client in the off-chain Rust client and
+    # dev-deps). Fixes need zstd 0.14 / zstd-safe 8, blocked by Agave 3.1;
+    # not linked into the on-chain program.
+    "RUSTSEC-2026-0391",
+    "RUSTSEC-2026-0398",
+    "RUSTSEC-2026-0403",
 ]
 
 [licenses]
