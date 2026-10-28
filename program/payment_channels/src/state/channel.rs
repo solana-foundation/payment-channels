@@ -18,7 +18,7 @@ use crate::state::transmutable::{Transmutable, load, load_mut};
 /// address itself is per-incarnation: the open window plus the reclaim gate
 /// guarantee an address can never host two channels, so vouchers bind the
 /// incarnation by binding `channel_id` alone.
-pub const CHANNEL_SEED: &[u8] = b"channel";
+pub use payment_channel_interface::channel::CHANNEL_SEED;
 
 /// Current position of a [`Channel`] in the FSM.
 /// [`Open = 0`](ChannelStatus::Open) is deliberate: [`AccountDiscriminator`]
@@ -85,8 +85,8 @@ pub struct Channel {
     /// [`AccountDiscriminator::Channel`]. First byte so zero-initialized
     /// account bytes fail load before any field is interpreted.
     pub discriminator: u8,
-    /// [`CURRENT_CHANNEL_VERSION`] at `open`. Any other value is rejected
-    /// on load, gating future PDA-layout migrations.
+    /// V1 `open` stamps 1; `openWithHooks` stamps 2. The loader validates the
+    /// exact layout for either supported version before exposing this prefix.
     pub version: u8,
     /// Canonical bump from `find_program_address` at `open`. Reused
     /// verbatim by subsequent ixs via `create_program_address`, avoiding
@@ -243,17 +243,14 @@ impl Channel {
         salt: u64,
         open_slot: u64,
     ) -> (Address, u8) {
-        Address::find_program_address(
-            &[
-                CHANNEL_SEED,
-                payer.as_ref(),
-                payee.as_ref(),
-                mint.as_ref(),
-                authorized_signer.as_ref(),
-                &salt.to_le_bytes(),
-                &open_slot.to_le_bytes(),
-            ],
+        payment_channel_interface::channel::channel_address(
             &crate::ID,
+            payer,
+            payee,
+            mint,
+            authorized_signer,
+            salt,
+            open_slot,
         )
     }
 
@@ -319,22 +316,54 @@ impl Channel {
     }
 
     fn load(bytes: &[u8]) -> Result<&Self, ProgramError> {
-        let channel = unsafe { load::<Self>(bytes) }?;
+        Self::validate_layout(bytes)?;
+        let channel = unsafe { load::<Self>(&bytes[..Self::LEN]) }?;
         Self::validate_header(channel)?;
         Ok(channel)
     }
 
     fn load_mut(bytes: &mut [u8]) -> Result<&mut Self, ProgramError> {
-        let channel = unsafe { load_mut::<Self>(bytes) }?;
+        Self::validate_layout(bytes)?;
+        let channel = unsafe { load_mut::<Self>(&mut bytes[..Self::LEN]) }?;
         Self::validate_header(channel)?;
         Ok(channel)
+    }
+
+    /// Validate the raw header before projecting the frozen accounting prefix.
+    /// Supporting a version never reallocates or rewrites it.
+    fn validate_layout(bytes: &[u8]) -> Result<(), ProgramError> {
+        // Preserve V1's short-account rejection before interpreting header bytes.
+        if bytes.len() < Self::LEN {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        let discriminator = *bytes.first().ok_or(ProgramError::InvalidAccountData)?;
+        if discriminator != AccountDiscriminator::Channel as u8 {
+            return Err(PaymentChannelsError::InvalidAccountDiscriminator.into());
+        }
+        let version = *bytes.get(1).ok_or(ProgramError::InvalidAccountData)?;
+        let expected = match version {
+            1 => Self::LEN,
+            2 => ChannelWithHooks::LEN,
+            _ => return Err(PaymentChannelsError::UnsupportedChannelVersion.into()),
+        };
+        if bytes.len() != expected {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        Ok(())
+    }
+
+    pub fn require_hooks(&self, with_hooks: bool) -> Result<(), ProgramError> {
+        if self.version != if with_hooks { 2 } else { 1 } {
+            return Err(PaymentChannelsError::UnsupportedChannelVersion.into());
+        }
+        Ok(())
     }
 
     fn validate_header(channel: &Self) -> Result<(), ProgramError> {
         if channel.discriminator != AccountDiscriminator::Channel as u8 {
             return Err(PaymentChannelsError::InvalidAccountDiscriminator.into());
         }
-        if channel.version != CURRENT_CHANNEL_VERSION {
+        if !matches!(channel.version, 1 | 2) {
             return Err(PaymentChannelsError::UnsupportedChannelVersion.into());
         }
         Ok(())
@@ -346,7 +375,70 @@ unsafe impl Transmutable for Channel {
 }
 
 const _: () = {
-    assert!(Channel::LEN == 256);
+    assert!(Channel::LEN == payment_channel_interface::channel::CHANNEL_V1_LEN);
+};
+
+/// Hooked channels append immutable callback configuration and operation state
+/// to the frozen V1 accounting prefix. Never cast a V1 account to this type.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "idl", derive(CodamaAccount))]
+pub struct ChannelWithHooks {
+    pub channel: Channel,
+    pub hooks: crate::hooks::HookState,
+}
+
+impl ChannelWithHooks {
+    pub const LEN: usize = size_of::<Self>();
+
+    /// Checked V2 decoding; callers of raw-byte loaders must verify ownership.
+    pub fn from_bytes(bytes: &[u8]) -> Result<&Self, ProgramError> {
+        Channel::load(bytes)?.require_hooks(true)?;
+        unsafe { load::<Self>(bytes) }
+    }
+
+    /// Checked mutable V2 decoding; does not convert V1 accounts.
+    pub fn from_bytes_mut(bytes: &mut [u8]) -> Result<&mut Self, ProgramError> {
+        Channel::load(bytes)?.require_hooks(true)?;
+        unsafe { load_mut::<Self>(bytes) }
+    }
+
+    pub fn from_account(account: &AccountView) -> Result<Ref<'_, Self>, ProgramError> {
+        if !account.owned_by(&crate::ID) {
+            return Err(ProgramError::InvalidAccountOwner);
+        }
+        Ref::try_map(account.try_borrow()?, Self::from_bytes).map_err(|(_, e)| e)
+    }
+
+    pub fn from_account_mut(account: &mut AccountView) -> Result<RefMut<'_, Self>, ProgramError> {
+        if !account.owned_by(&crate::ID) {
+            return Err(ProgramError::InvalidAccountOwner);
+        }
+        RefMut::try_map(account.try_borrow_mut()?, Self::from_bytes_mut).map_err(|(_, e)| e)
+    }
+}
+
+impl core::ops::Deref for ChannelWithHooks {
+    type Target = Channel;
+    fn deref(&self) -> &Channel {
+        &self.channel
+    }
+}
+
+impl core::ops::DerefMut for ChannelWithHooks {
+    fn deref_mut(&mut self) -> &mut Channel {
+        &mut self.channel
+    }
+}
+
+unsafe impl Transmutable for ChannelWithHooks {
+    const LEN: usize = size_of::<Self>();
+}
+
+const _: () = {
+    assert!(ChannelWithHooks::LEN == payment_channel_interface::channel::CHANNEL_V2_LEN);
+    assert!(core::mem::offset_of!(ChannelWithHooks, hooks) == 256);
+    assert!(core::mem::align_of::<ChannelWithHooks>() == 1);
 };
 
 /// Cumulative settlement watermarks stored inside [`Channel`].
@@ -482,7 +574,62 @@ mod tests {
 
     #[test]
     fn size_is_256_bytes() {
-        assert_eq!(core::mem::size_of::<Channel>(), 256);
+        assert_eq!(core::mem::size_of::<Channel>(), Channel::LEN);
+    }
+
+    #[test]
+    fn interface_reader_matches_frozen_core_accounting_layout() {
+        use payment_channel_interface::channel::ChannelView;
+        let mut bytes = [0; ChannelWithHooks::LEN];
+        Channel::init_at(
+            &mut bytes[..Channel::LEN],
+            255,
+            7,
+            100,
+            900,
+            [3; 32],
+            Address::new_from_array([1; 32]),
+            Address::new_from_array([2; 32]),
+            Address::new_from_array([4; 32]),
+            Address::new_from_array([5; 32]),
+            Address::new_from_array([6; 32]),
+            424_242,
+        )
+        .unwrap();
+        bytes[1] = 2;
+        {
+            let ch = Channel::load_mut(&mut bytes).unwrap();
+            ch.set_settled(80);
+            ch.set_payout_watermark(60);
+            ch.set_payer_withdrawn_at(-123);
+        }
+        let core = ChannelWithHooks::from_bytes(&bytes).unwrap();
+        let sdk = ChannelView::v2(&bytes).unwrap();
+        assert_eq!(sdk.bump(), core.bump);
+        assert_eq!(sdk.status().unwrap() as u8, core.status);
+        assert_eq!(sdk.salt(), core.salt());
+        assert_eq!(sdk.deposit(), core.deposit());
+        assert_eq!(sdk.settled(), core.settled());
+        assert_eq!(sdk.payout_watermark(), core.payout_watermark());
+        assert_eq!(sdk.payer_withdrawn_at(), core.payer_withdrawn_at());
+        assert_eq!(sdk.distribution_hash(), core.distribution_hash);
+        assert_eq!(sdk.payer(), core.payer);
+        assert_eq!(sdk.payee(), core.payee);
+        assert_eq!(sdk.mint(), core.mint);
+        assert_eq!(sdk.authorized_signer(), core.authorized_signer);
+        assert_eq!(sdk.open_slot(), core.open_slot());
+        assert_eq!(sdk.hooks().unwrap().descriptors, core.hooks.descriptors);
+        assert_eq!(
+            sdk.find_pda(&crate::ID),
+            Channel::find_pda(
+                &core.payer,
+                &core.payee,
+                &core.mint,
+                &core.authorized_signer,
+                core.salt(),
+                core.open_slot(),
+            )
+        );
     }
 
     #[test]
@@ -511,7 +658,7 @@ mod tests {
     #[test]
     fn load_rejects_unsupported_version() {
         let mut bytes = valid_bytes();
-        bytes[1] = CURRENT_CHANNEL_VERSION + 1;
+        bytes[1] = 3;
         let err = Channel::load(&bytes).unwrap_err();
         assert_eq!(err, PaymentChannelsError::UnsupportedChannelVersion.into());
     }
@@ -520,6 +667,44 @@ mod tests {
     fn load_accepts_valid_header() {
         let bytes = valid_bytes();
         assert!(Channel::load(&bytes).is_ok());
+    }
+
+    #[test]
+    fn supported_versions_require_their_exact_layout() {
+        let mut hooked = [0u8; ChannelWithHooks::LEN];
+        hooked[..Channel::LEN].copy_from_slice(&valid_bytes());
+        assert!(Channel::load(&hooked).is_err());
+        hooked[1] = 2;
+        assert_eq!(Channel::load(&hooked).unwrap().version, 2);
+        assert!(ChannelWithHooks::from_bytes(&hooked).is_ok());
+        assert!(Channel::load(&hooked[..Channel::LEN]).is_err());
+        assert!(ChannelWithHooks::from_bytes(&valid_bytes()).is_err());
+        for version in [0, 3, 255] {
+            hooked[1] = version;
+            assert_eq!(
+                Channel::load(&hooked).unwrap_err(),
+                PaymentChannelsError::UnsupportedChannelVersion.into()
+            );
+        }
+    }
+
+    #[test]
+    fn prefix_mutation_preserves_hook_extension_and_version() {
+        let mut bytes = [0u8; ChannelWithHooks::LEN];
+        bytes[..Channel::LEN].copy_from_slice(&valid_bytes());
+        bytes[1] = 2;
+        bytes[Channel::LEN..].fill(42);
+        Channel::load_mut(&mut bytes).unwrap().set_deposit(123);
+        assert_eq!(Channel::load(&bytes).unwrap().deposit(), 123);
+        assert_eq!(bytes[1], 2);
+        assert!(bytes[Channel::LEN..].iter().all(|byte| *byte == 42));
+        assert!(Channel::load(&bytes).unwrap().require_hooks(false).is_err());
+        assert!(
+            Channel::load(&valid_bytes())
+                .unwrap()
+                .require_hooks(true)
+                .is_err()
+        );
     }
 
     #[test]

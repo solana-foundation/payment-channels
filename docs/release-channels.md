@@ -6,32 +6,40 @@ The program is built per channel with [solex](https://github.com/lgalabru/solex)
 | Channel | Program id | Clusters | Features | Treasury owner |
 | --- | --- | --- | --- | --- |
 | `stable` | `CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX` | mainnet | none (V1 surface) | `Cs2zdf…` |
-| `canary` | `CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ` | devnet | none yet | `4zTeC5…` |
-| `canary` | `CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ` | mainnet | none yet | `Cs2zdf…` |
+| `canary` | `CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ` | devnet | `hooks` | `4zTeC5…` |
+| `canary` | `CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ` | mainnet | `hooks` | `Cs2zdf…` |
 
 `canary` includes `stable`. It is one channel on two clusters at the same
 address; the `[channels.canary.mainnet]` override swaps in the mainnet
 treasury. `solex build --canary` therefore produces one artifact per cluster
-under `target/solex/canary/<cluster>/`, each embedding its own treasury owner.
-Channel-gated features are declared under `[features.<name>]` in `Solex.toml`
-and gated in code with plain `#[cfg(feature = "<name>")]`.
+under `target/solex/canary/<cluster>/`, each embedding its own treasury owner. The local hook suite (`just test-v2-hooks`) runs
+against the stable channel with the `hooks` Cargo feature enabled by hand, so
+the program keeps the canonical address the generated client embeds.
 
 ## What replaced the cargo features
 
-- `localnet` / `devnet` / `testnet` / `mainnet-beta` selected `TREASURY_OWNER`
+- `localnet` / `devnet` / `testnet` / `mainnet` selected `TREASURY_OWNER`
   through mutually exclusive `mod cluster` blocks and a `0xBEEF` compile-time
   gate. The owner now comes from `vars.treasury_owner` on the channel via
   `solex::var!("treasury_owner")`; a channel without it does not compile.
-- `declare_id!` is now `solex::declare_id!()`, which reads the channel's
-  `program_id`.
+- `devnet-deployment` switched `declare_id!`. `solex::declare_id!()` reads the
+  channel's `program_id`.
+- The four `*WithHooks` instructions are the `hooks` Cargo feature
+  (`hooks = []` in the program's Cargo.toml), gated with plain
+  `#[cfg(feature = "hooks")]` on their enum variants, `from_bytes` arms,
+  dispatch arms, discriminators and handlers. `Solex.toml` declares
+  `[features.hooks] channels = ["canary"]`, so `solex build --channel canary`
+  passes `--features hooks` and a `stable` build contains none of them: no
+  discriminator is recognised and no code is linked.
 
 ## Building
 
 ```sh
 solex channels                      # deployments and what each ships
-solex features --check              # every channel feature against every channel
-solex build --canary                # target/solex/canary/{devnet,mainnet}/payment_channels.so
+solex features --check              # the hooks feature against both channels
+solex build --canary                # target/solex/canary/{devnet,mainnet}/payment_channels.so, --features hooks
 solex build --channel stable        # target/solex/stable/payment_channels.so
+just test-v2-hooks                  # stable + hooks at the canonical address
 SOLEX_CHANNEL=stable cargo build-sbf --tools-version v1.58 --arch v3
 ```
 
@@ -51,8 +59,10 @@ prints the exact commands.
 
 ## Promotion
 
-Promoting a feature to stable is one manifest edit: add `"stable"` to its
-`[features.<name>] channels`. The source does not change.
+Promoting the V2 hooks to stable is one manifest edit: add `"stable"` to
+`[features.hooks] channels`. The source does not change. Before doing so, read `docs/versioning-and-upgrades.md`:
+once hooked accounts exist at an address, a rollback to a V1-only binary strands
+them, so promotion of the account format is one-way.
 
 ## Known gap
 

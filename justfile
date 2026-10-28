@@ -45,10 +45,18 @@ build-program:
     cd {{program_dir}} && cargo build-sbf {{runtime_sbf_args}}
     @echo "✓ program built"
 
-# Channel builds (Solex.toml): `stable` is the V1 surface on mainnet; `canary`
-# includes stable and ships under its own address on devnet and mainnet. Any
-# cargo build-sbf invocation selects a channel with SOLEX_CHANNEL; `solex env
+# Channel builds (Solex.toml): `canary` is stable plus the hooks feature on
+# devnet under its own address; `stable` is V1-only on mainnet. Any cargo
+# build-sbf invocation selects a channel with SOLEX_CHANNEL; `solex env
 # --channel canary` prints the full environment.
+#
+# The local test artifact is the stable channel (canonical address, which the
+# generated client embeds) with the hooks feature enabled by hand.
+build-v2-localnet:
+    cd {{program_dir}} && SOLEX_CHANNEL=stable cargo build-sbf {{runtime_sbf_args}} --features hooks --sbf-out-dir ../../target/deploy-v2
+
+build-v2-devnet:
+    cd {{program_dir}} && SOLEX_CHANNEL=canary SOLEX_CLUSTER=devnet cargo build-sbf {{runtime_sbf_args}} --features hooks --sbf-out-dir ../../target/deploy-v2-devnet
 
 # `solex build` writes target/solex/<channel>/payment_channels.so and strips
 # the stray keypair cargo build-sbf drops next to it.
@@ -59,11 +67,17 @@ build-channel channel:
 features:
     solex features --check
 
+# Test-only adapter is never included in a deployment recipe. The test binary
+# is compiled for the same channel and features as the artifact it loads.
+test-v2-hooks: build-v2-localnet
+    cargo build-sbf --tools-version v1.58 --arch v3 --manifest-path {{program_dir}}/tests/hook-adapter/Cargo.toml --sbf-out-dir target/deploy-v2
+    SOLEX_CHANNEL=stable cargo test -p payment_channels --features hooks --test hooks_v2 -- --nocapture
+
 # Deployment builds pick the channel's program id, features and
 # `vars.treasury_owner` from Solex.toml.
 # canary has per-cluster overrides, so the cluster must be chosen.
 build-canary cluster="devnet":
-    cd {{program_dir}} && SOLEX_CHANNEL=canary SOLEX_CLUSTER={{cluster}} cargo build-sbf {{runtime_sbf_args}}
+    cd {{program_dir}} && SOLEX_CHANNEL=canary SOLEX_CLUSTER={{cluster}} cargo build-sbf {{runtime_sbf_args}} --features hooks
     @echo "✓ canary program built ({{cluster}})"
 
 build-stable:
@@ -92,7 +106,7 @@ build-client: generate-client
 
 test: test-program test-client
 
-test-program: generate-client
+test-program: generate-client test-v2-hooks
     cd {{program_dir}} && cargo test-sbf {{v1_sbf_args}}
 
 # The deployed ISA. Mollusk 0.11 cannot load SBPFv3, so only the litesvm
@@ -103,6 +117,19 @@ test-program-v3: generate-client
 
 test-client: generate-client
     cd {{ts_client_dir}} && pnpm run test
+
+test-v2-client:
+    pnpm --filter @payment-channels/client typecheck
+    pnpm --filter @payment-channels/client test
+
+# Builds must complete before the offline RPC harness starts; no concurrent cargo targets.
+test-same-address-upgrade:
+    bash scripts/v1-v2-upgrade-e2e/run.sh
+
+test-credit-provider-surfpool:
+    CARGO_INCREMENTAL=0 CARGO_NET_OFFLINE=true CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target}/credit-e2e-channel-sbf" cargo build-sbf --tools-version v1.58 --arch v3 --manifest-path program/payment_channels/Cargo.toml --sbf-out-dir target/deploy-v2
+    CARGO_INCREMENTAL=0 CARGO_NET_OFFLINE=true CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target}/credit-e2e-provider-sbf" cargo build-sbf --tools-version v1.58 --arch v3 --manifest-path examples/credit-provider/Cargo.toml --sbf-out-dir target/deploy
+    bash scripts/test-credit-provider-surfpool.sh
 
 # Run the parameterized CU benchmark scenarios and emit bench_report.md
 # next to Cargo.toml. `--test-threads=1` keeps logs interleaved-free and

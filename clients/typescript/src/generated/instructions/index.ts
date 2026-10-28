@@ -7,12 +7,16 @@
  */
 
 export * from "./distribute";
+export * from "./distributeWithHooks";
 export * from "./emitEvent";
 export * from "./open";
+export * from "./openWithHooks";
 export * from "./reclaim";
 export * from "./requestClose";
 export * from "./seal";
 export * from "./settle";
 export * from "./settleAndSeal";
 export * from "./topUp";
+export * from "./topUpWithHooks";
 export * from "./withdrawPayer";
+export * from "./withdrawPayerWithHooks";
