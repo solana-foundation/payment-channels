@@ -162,6 +162,7 @@ For a nonzero recipient/payee payout or payer refund, an unusable canonical ATA 
 **Client transaction format:** at `count == 32`, callers MUST use **version 0 transactions with an address lookup table** indexing recipient ATAs. The instruction uses 11 fixed accounts plus up to 32 recipient ATAs (43 total); legacy transactions cannot fit the static account-key budget (~32 keys including fee payer and program id).
 
 **CPI profile:** SPL Token batches non-zero payouts via inner `Batch` CPIs (up to 8 transfers per invoke when ≥2 transfers are queued). Token-2022 uses one `TransferChecked` CPI per non-zero payout.
+A PYUSD/USDG-shaped Token-2022 mint (dormant `TransferFeeConfig` + `TransferHook`, see ADR-001) costs roughly 25% more per `distribute` than an extensionless Token-2022 mint, because Token-2022 runs its fee and hook bookkeeping on every transfer and each ATA carries three extra extension records; the `tok=t22-pyusd` rows of the CU benchmark (`just bench`) pin this.
 
 **Treasury sweep (SEALED):** `treasury_sweep = escrow_balance_at_entry − sum(queued_payouts)`; the sweep captures bps flooring dust not assigned to recipients or the payee.
 
@@ -254,14 +255,15 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | 53 | `MintAccountMismatch` | Provided mint cannot be parsed for the supplied token program. |
 | 54 | `InvalidMintTokenProgram` | Token program is neither SPL Token nor Token-2022. |
 | 55 | `MalformedMintTokenAccountData` | Token-2022 mint padding between the base layout and the account-type byte is not zeroed. |
-| 56 | `MalformedMintTokenExtensions` | Token-2022 mint TLV trailer is malformed (truncated or overrunning TLV entry). |
+| 56 | `MalformedMintTokenExtensions` | Token-2022 mint TLV trailer is malformed (truncated or overrunning TLV entry, or a state-gated record whose length is not the upstream struct size). |
 | 57 | `PayerAccountMismatch` | Payer ATA is not `ATA(payer, token_program, mint)`. |
 | 58 | `InvalidPayerTokenAccount` | Payer ATA fails state/owner/mint validation. |
 | 59 | `InvalidPayerTokenExtensions` | Payer ATA carries a Token-2022 extension outside the allow-list. |
 | 60 | `PayeeAccountMismatch` | Payee ATA is not `ATA(payee, token_program, mint)`. |
 | 61 | `InvalidPayeeTokenAccount` | Payee ATA fails state/owner/mint validation. |
 | 62 | `InvalidPayeeTokenExtensions` | Payee ATA carries a Token-2022 extension outside the allow-list. |
-| 63 | `UnsupportedMintTokenExtensions` | Token-2022 mint is well-formed but carries an extension outside the mint allow-list. |
+| 63 | `UnsupportedMintTokenExtensions` | Token-2022 mint carries an extension outside the allow-list (ADR-001 "Token Program Support"). |
+| 64 | `ActiveMintTokenExtension` | Token-2022 mint has a nonzero transfer fee on the schedule governing the current epoch or the one scheduled next, or an installed transfer-hook program. Dormant configurations (as on PYUSD/USDG) pass. |
 
 ### General object validation
 
