@@ -2,9 +2,8 @@ use pinocchio::{AccountView, Address};
 
 use crate::helpers::{
     accounts::view::{TokenContext, TokenProgramKind},
-    token::{
-        TokenAccountExtensionPolicy, TokenExtensionError, base_layout, scan_tlv_extensions, tlv,
-    },
+    token::{TokenExtensionError, base_layout, scan_tlv_extensions, tlv},
+    token_extensions::TokenAccountExtensionPolicy,
 };
 
 pub(crate) enum AccountValidationError {
@@ -27,7 +26,7 @@ pub(crate) trait AccountValidator {
 
     /// Validates that `self` is an associated token account owned by `token_program`, holds
     /// `expected_mint`, is owned by `expected_owner`, and is in the `Initialized`
-    /// state. Token-2022 accounts may carry only the `ImmutableOwner` extension.
+    /// state. Token-2022 extensions are checked by `TokenAccountExtensionPolicy`.
     fn validate_as_ata_checked(
         &self,
         owner: &Address,
@@ -114,8 +113,8 @@ impl AccountValidator for AccountView {
                 .map_err(|_| AccountValidationError::MalformedTokenAccountData)?;
             if data.len() > base_layout::TOKEN_ACCOUNT_LEN {
                 // No padding between token-account base and AccountType offset;
-                // walk the whitelisted TLV trailer.
-                scan_tlv_extensions::<TokenAccountExtensionPolicy>(&data[tlv::START..])
+                // walk the TLV trailer against `TokenAccountExtensionPolicy` (ADR-007).
+                scan_tlv_extensions(&TokenAccountExtensionPolicy, &data[tlv::START..])
                     .map_err(AccountValidationError::from)?;
             }
         }

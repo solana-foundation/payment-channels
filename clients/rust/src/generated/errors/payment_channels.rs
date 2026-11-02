@@ -82,6 +82,12 @@ pub enum PaymentChannelsError {
     /// 62 - Payee token account has invalid extensions
     #[error("Payee token account has invalid extensions")]
     InvalidPayeeTokenExtensions = 0x3E,
+    /// 63 - Token-2022 mint carries an extension outside the allow-list
+    #[error("Token-2022 mint carries an extension outside the allow-list")]
+    UnsupportedMintTokenExtensions = 0x3F,
+    /// 64 - Token-2022 mint has a live transfer fee or an installed transfer hook
+    #[error("Token-2022 mint has a live transfer fee or an installed transfer hook")]
+    ActiveMintTokenExtension = 0x40,
     /// 200 - Deposit must be non-zero
     #[error("Deposit must be non-zero")]
     DepositMustBeNonZero = 0xC8,

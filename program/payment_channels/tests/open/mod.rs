@@ -50,6 +50,10 @@ pub(super) struct OpenRun {
     /// Appended after the 13 fixed account metas. The handler's exact-slice
     /// destructure must reject any non-empty value.
     pub extra_accounts: Vec<AccountMeta>,
+    /// Defaults to SPL Token.
+    pub token_program: Pubkey,
+    /// Account served at `mint`; a lamports-only dummy when `None`.
+    pub mint_account: Option<Account>,
 }
 
 impl OpenRun {
@@ -69,6 +73,8 @@ impl OpenRun {
             channel_ata: Pubkey::new_unique(),
             recipients: None,
             extra_accounts: Vec::new(),
+            token_program: SPL_TOKEN,
+            mint_account: None,
         }
     }
 
@@ -103,7 +109,7 @@ impl OpenRun {
             AccountMeta::new(self.channel, false),
             AccountMeta::new(Pubkey::new_unique(), false), // payer_token_account
             AccountMeta::new(self.channel_ata, false),
-            AccountMeta::new_readonly(SPL_TOKEN, false),
+            AccountMeta::new_readonly(self.token_program, false),
             AccountMeta::new_readonly(SYSTEM_PROGRAM, false),
             AccountMeta::new_readonly(SYSVAR_RENT, false),
             AccountMeta::new_readonly(ATA_PROGRAM, false),
@@ -132,6 +138,8 @@ impl OpenRun {
             .map(|m| {
                 let acc = if m.pubkey == self.channel {
                     channel_account.clone()
+                } else if m.pubkey == self.mint {
+                    self.mint_account.clone().unwrap_or_else(|| dummy.clone())
                 } else {
                     dummy.clone()
                 };

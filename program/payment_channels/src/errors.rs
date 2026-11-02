@@ -64,6 +64,10 @@ pub enum PaymentChannelsError {
     InvalidPayeeTokenAccount = 61,
     #[error("Payee token account has invalid extensions")]
     InvalidPayeeTokenExtensions = 62,
+    #[error("Token-2022 mint carries an extension outside the allow-list")]
+    UnsupportedMintTokenExtensions = 63,
+    #[error("Token-2022 mint has a live transfer fee or an installed transfer hook")]
+    ActiveMintTokenExtension = 64,
 
     // general object validations
     #[error("Deposit must be non-zero")]
