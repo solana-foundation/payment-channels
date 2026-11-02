@@ -88,6 +88,9 @@ pub enum PaymentChannelsError {
     /// 64 - Token-2022 mint has a live transfer fee or an installed transfer hook
     #[error("Token-2022 mint has a live transfer fee or an installed transfer hook")]
     ActiveMintTokenExtension = 0x40,
+    /// 65 - Clock sysvar could not be read while evaluating the mint policy
+    #[error("Clock sysvar could not be read while evaluating the mint policy")]
+    ClockSysvarUnavailable = 0x41,
     /// 200 - Deposit must be non-zero
     #[error("Deposit must be non-zero")]
     DepositMustBeNonZero = 0xC8,

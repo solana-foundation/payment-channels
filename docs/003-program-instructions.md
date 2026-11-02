@@ -264,6 +264,7 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | 62 | `InvalidPayeeTokenExtensions` | Payee ATA carries a Token-2022 extension outside the allow-list. |
 | 63 | `UnsupportedMintTokenExtensions` | Token-2022 mint carries an extension outside the allow-list (ADR-001 "Token Program Support"). |
 | 64 | `ActiveMintTokenExtension` | Token-2022 mint has a nonzero transfer fee on the schedule governing the current epoch or the one scheduled next, or an installed transfer-hook program. Dormant configurations (as on PYUSD/USDG) pass. |
+| 65 | `ClockSysvarUnavailable` | The Clock sysvar could not be read while evaluating the Token-2022 fee schedule. Not reachable on a conforming runtime. |
 
 ### General object validation
 
