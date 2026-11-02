@@ -26,6 +26,9 @@ use solana_system_interface::instruction::create_account;
 use solana_transaction::Transaction;
 use spl_token_2022_interface::instruction::initialize_mint2;
 
+use crate::common::TOKEN_2022;
+use crate::common::token_2022::create_paxos_style_mint_at;
+
 use crate::common::{
     ATA_PROGRAM, INSTRUCTIONS_SYSVAR, PROGRAM_ID, SYSTEM_PROGRAM, SYSVAR_RENT, current_slot,
     event_authority, treasury_owner,
@@ -92,9 +95,18 @@ fn create_seeded_mint(
     svm: &mut LiteSVM,
     payer: &Keypair,
     token_program: &Pubkey,
+    shape: MintShape,
 ) -> (Keypair, Pubkey) {
     let mint_kp = seeded_keypair("mint");
     let mint_pk = mint_kp.pubkey();
+    if shape == MintShape::PaxosStyle {
+        assert_eq!(
+            token_program, &TOKEN_2022,
+            "paxos-style mints are Token-2022"
+        );
+        create_paxos_style_mint_at(svm, payer, &mint_kp, 0);
+        return (mint_kp, mint_pk);
+    }
     // Base Mint layout — 82 bytes for both SPL Token and Token-2022 with
     // no extensions; matches what `litesvm_token::CreateMint` allocates
     // when its `token-2022` feature is off.
@@ -113,6 +125,15 @@ fn create_seeded_mint(
     );
     svm.send_transaction(tx).expect("create mint");
     (mint_kp, mint_pk)
+}
+
+/// Which Token-2022 extension set the fixture mint carries.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum MintShape {
+    /// Base 82-byte layout, no extensions (SPL Token or Token-2022).
+    Plain,
+    /// Mainnet PYUSD / USDG extension set via the real Token-2022 program.
+    PaxosStyle,
 }
 
 /// All the state a benchmark scenario needs to talk to a single channel.
@@ -148,10 +169,11 @@ fn seeded_mint_funded(
     svm: &mut LiteSVM,
     deposit: u64,
     token_program: &Pubkey,
+    shape: MintShape,
 ) -> (Keypair, Pubkey, Pubkey) {
     let payer = seeded_keypair("payer");
     svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
-    let (_mint_kp, mint) = create_seeded_mint(svm, &payer, token_program);
+    let (_mint_kp, mint) = create_seeded_mint(svm, &payer, token_program, shape);
     let payer_ata = CreateAssociatedTokenAccount::new(svm, &payer, &mint)
         .token_program_id(token_program)
         .send()
@@ -228,7 +250,17 @@ fn seeded_splits(n: usize) -> Vec<(Pubkey, u16)> {
 /// Does NOT run `open`. Use [`open_setup`] when `open` is *not* the focal
 /// ix; otherwise call [`build_open_ix`] and record the resulting tx.
 pub fn prepare_channel(svm: &mut LiteSVM, num_recipients: usize, token_program: Pubkey) -> Fixture {
-    let (payer, mint, payer_ata) = seeded_mint_funded(svm, DEFAULT_DEPOSIT, &token_program);
+    prepare_channel_with_mint(svm, num_recipients, token_program, MintShape::Plain)
+}
+
+/// [`prepare_channel`] with an explicit mint [`MintShape`].
+pub fn prepare_channel_with_mint(
+    svm: &mut LiteSVM,
+    num_recipients: usize,
+    token_program: Pubkey,
+    shape: MintShape,
+) -> Fixture {
+    let (payer, mint, payer_ata) = seeded_mint_funded(svm, DEFAULT_DEPOSIT, &token_program, shape);
     let payee = seeded_keypair("payee");
     let authorized_signer = seeded_keypair("authorized_signer");
     // `open_slot` is a channel PDA seed, so the address depends on the slot
