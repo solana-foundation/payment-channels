@@ -10,7 +10,8 @@ use solana_program_error::ProgramError;
 use solana_pubkey::Pubkey;
 
 use super::{DistributeRun, Split};
-use crate::common::ChannelBuilder;
+use crate::common::token_2022::mint_policy_cases;
+use crate::common::{ChannelBuilder, TOKEN_2022};
 
 const DEPOSIT: u64 = 1_000_000;
 
@@ -81,4 +82,37 @@ fn legacy_tombstone_account_rejects() {
         DistributeRun::new(vec![2u8], payer, &splits).run(),
         ProgramResult::Failure(ProgramError::InvalidAccountData),
     );
+}
+
+/// Mint policy runs after the status and identity checks and before any CPI.
+#[test]
+fn token_2022_mint_policy_gate_runs_before_any_cpi() {
+    for (label, mint_account, expected) in
+        mint_policy_cases(PaymentChannelsError::ChannelAccountMismatch)
+    {
+        let payer = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let splits = one_split();
+        let run = DistributeRun {
+            mint,
+            token_program: TOKEN_2022,
+            mint_account: Some(mint_account),
+            ..DistributeRun::new(
+                ChannelBuilder::new()
+                    .status(ChannelStatus::Open)
+                    .deposit(DEPOSIT)
+                    .payer(payer)
+                    .rent_payer(payer)
+                    .mint(mint)
+                    .build(),
+                payer,
+                &splits,
+            )
+        };
+        assert_eq!(
+            run.run(),
+            ProgramResult::Failure(ProgramError::Custom(expected as u32)),
+            "{label}"
+        );
+    }
 }

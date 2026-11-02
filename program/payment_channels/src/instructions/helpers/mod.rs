@@ -5,6 +5,7 @@ pub mod distribution;
 pub mod ed25519;
 pub mod hash;
 pub mod token;
+pub mod token_extensions;
 pub mod transfer;
 pub mod voucher;
 

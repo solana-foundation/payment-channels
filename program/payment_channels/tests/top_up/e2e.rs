@@ -2,7 +2,10 @@
 
 #![allow(clippy::result_large_err)]
 
-use crate::common::token_2022::{EXT_TRANSFER_FEE_CONFIG, add_mint_extension};
+use crate::common::token_2022::{
+    EXT_NON_TRANSFERABLE, add_mint_extension, set_transfer_fee, set_transfer_hook_program,
+    setup_paxos_style_funded_svm,
+};
 use crate::common::{
     ChannelBuilder, PROGRAM_ID, ProgramLoader, SPL_TOKEN, TOKEN_2022, expect_custom_err,
     open_channel, read_channel, token_balance,
@@ -548,7 +551,7 @@ fn top_up_unsupported_token_2022_mint_extension_rejects_without_state_changes() 
     assert_eq!(token_balance(&svm, &payer_ata), top_up_amount);
     assert_eq!(token_balance(&svm, &channel_ata), deposit);
 
-    add_mint_extension(&mut svm, &mint, EXT_TRANSFER_FEE_CONFIG, 108);
+    add_mint_extension(&mut svm, &mint, EXT_NON_TRANSFERABLE, 0);
 
     let ix = build_top_up_ix(
         &payer.pubkey(),
@@ -573,6 +576,85 @@ fn top_up_unsupported_token_2022_mint_extension_rejects_without_state_changes() 
     assert_eq!(read_deposit(&svm, &channel), deposit);
     assert_eq!(token_balance(&svm, &payer_ata), top_up_amount);
     assert_eq!(token_balance(&svm, &channel_ata), deposit);
+}
+
+/// PYUSD/USDG-shaped mint: `top_up` credits exactly while dormant and rejects
+/// once a fee is scheduled or a hook installed, keeping `deposit == escrow`.
+#[test]
+fn top_up_paxos_style_mint_exact_while_dormant_and_rejects_when_live() {
+    let mut svm = LiteSVM::load_program();
+    let payee = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
+    let deposit: u64 = 100_000_000;
+    let top_up_amount: u64 = 50_000_000;
+
+    let (payer, mint, payer_ata) =
+        setup_paxos_style_funded_svm(&mut svm, deposit + 2 * top_up_amount);
+    let (channel, channel_ata) = open_channel(
+        &mut svm,
+        &payer,
+        &payee,
+        &authorized_signer,
+        1,
+        deposit,
+        &mint,
+        &payer_ata,
+        &TOKEN_2022,
+    );
+    assert_eq!(token_balance(&svm, &channel_ata), deposit);
+
+    let send = |svm: &mut LiteSVM| {
+        let ix = build_top_up_ix(
+            &payer.pubkey(),
+            &channel,
+            &payer_ata,
+            &channel_ata,
+            &mint,
+            top_up_amount,
+            TOKEN_2022,
+        );
+        svm.expire_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer.pubkey()),
+            &[&payer],
+            svm.latest_blockhash(),
+        );
+        svm.send_transaction(tx)
+    };
+
+    send(&mut svm).expect("dormant fee: top_up ok");
+    assert_eq!(read_deposit(&svm, &channel), deposit + top_up_amount);
+    assert_eq!(
+        token_balance(&svm, &channel_ata),
+        deposit + top_up_amount,
+        "escrow credited exactly: no fee withheld"
+    );
+
+    set_transfer_fee(&mut svm, &payer, &mint, 10, 1_000);
+    expect_custom_err(
+        send(&mut svm),
+        PaymentChannelsError::ActiveMintTokenExtension,
+    );
+    assert_eq!(read_deposit(&svm, &channel), deposit + top_up_amount);
+    assert_eq!(token_balance(&svm, &channel_ata), deposit + top_up_amount);
+    assert_eq!(token_balance(&svm, &payer_ata), top_up_amount);
+
+    set_transfer_fee(&mut svm, &payer, &mint, 0, 0);
+    set_transfer_hook_program(&mut svm, &payer, &mint, Some(Pubkey::new_unique()));
+    expect_custom_err(
+        send(&mut svm),
+        PaymentChannelsError::ActiveMintTokenExtension,
+    );
+    assert_eq!(read_deposit(&svm, &channel), deposit + top_up_amount);
+
+    set_transfer_hook_program(&mut svm, &payer, &mint, None);
+    send(&mut svm).expect("dormant again: top_up ok");
+    assert_eq!(read_deposit(&svm, &channel), deposit + 2 * top_up_amount);
+    assert_eq!(
+        token_balance(&svm, &channel_ata),
+        deposit + 2 * top_up_amount
+    );
 }
 
 #[test]

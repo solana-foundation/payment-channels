@@ -29,6 +29,8 @@ pub(super) struct TopUpRun {
     /// override only when targeting the unknown-program dispatch arm.
     pub token_program: Pubkey,
     pub amount: u64,
+    /// Account served at `mint`; a lamports-only dummy when `None`.
+    pub mint_account: Option<Account>,
 }
 
 impl TopUpRun {
@@ -41,6 +43,7 @@ impl TopUpRun {
             channel_ata: Pubkey::new_unique(),
             token_program: SPL_TOKEN,
             amount,
+            mint_account: None,
         }
     }
 
@@ -87,6 +90,8 @@ impl TopUpRun {
             .map(|m| {
                 let acc = if m.pubkey == channel_pubkey {
                     channel_account.clone()
+                } else if m.pubkey == self.mint {
+                    self.mint_account.clone().unwrap_or_else(|| dummy.clone())
                 } else {
                     dummy.clone()
                 };
