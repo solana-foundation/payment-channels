@@ -3,9 +3,11 @@ description: Install Rust, optionally Solana, and pnpm; optionally prime a share
 
 inputs:
   solana-version:
-    description: Anza CLI channel or version to install (e.g. "stable", "1.18.22").
+    # Pinned: Agave 4.x `cargo build-sbf` emits ELFs that the LiteSVM / Mollusk
+    # 0.11 loaders reject ("invalid file header"). Move with the SBPF v3 bump.
+    description: Anza CLI channel or version to install (e.g. "v3.1.13", "stable").
     required: false
-    default: stable
+    default: v3.1.13
   install-solana:
     description: Install the Solana/Anza CLI. Set to "false" for pure-lint jobs.
     required: false
