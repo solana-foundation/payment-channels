@@ -22,7 +22,7 @@ use solana_transaction::versioned::VersionedTransaction;
 use litesvm::LiteSVM;
 
 use super::fixtures::{
-    self, DEFAULT_DEPOSIT, DEFAULT_SETTLED, Fixture, GRACE_PERIOD, build_settle_pair,
+    self, DEFAULT_DEPOSIT, DEFAULT_SETTLED, Fixture, GRACE_PERIOD, MintShape, build_settle_pair,
 };
 use super::record;
 use crate::common::{
@@ -85,8 +85,17 @@ fn build_focal_v0_tx(
 // open — sweep recipients × token program.
 
 fn run_open(num_recipients: usize, token_program: solana_pubkey::Pubkey, label: &str) {
+    run_open_with_mint(num_recipients, token_program, MintShape::Plain, label);
+}
+
+fn run_open_with_mint(
+    num_recipients: usize,
+    token_program: solana_pubkey::Pubkey,
+    shape: MintShape,
+    label: &str,
+) {
     let mut svm = LiteSVM::load_program();
-    let f = fixtures::prepare_channel(&mut svm, num_recipients, token_program);
+    let f = fixtures::prepare_channel_with_mint(&mut svm, num_recipients, token_program, shape);
     let ix = fixtures::build_open_ix(&f, DEFAULT_DEPOSIT);
     let tx = build_focal_tx(&svm, &f.payer, &[], &[ix]);
     record(&mut svm, tx, label).expect("open ok");
@@ -140,6 +149,18 @@ fn open_n32_t22() {
     run_open(32, TOKEN_2022, "open[n=32,tok=t22]");
 }
 
+/// `open` on a PYUSD/USDG-shaped mint: mint TLV walk plus Token-2022's own
+/// fee/hook handling on the ATAs, against the extensionless `t22` row.
+#[test]
+fn open_n01_t22_pyusd() {
+    run_open_with_mint(
+        1,
+        TOKEN_2022,
+        MintShape::PaxosStyle,
+        "open[n=01,tok=t22-pyusd]",
+    );
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // settle — fresh vs advance against an existing watermark.
 
@@ -176,9 +197,13 @@ fn settle_advance() {
 // top_up — SPL + Token-2022.
 
 fn run_top_up(token_program: solana_pubkey::Pubkey, label: &str) {
+    run_top_up_with_mint(token_program, MintShape::Plain, label);
+}
+
+fn run_top_up_with_mint(token_program: solana_pubkey::Pubkey, shape: MintShape, label: &str) {
     use litesvm_token::MintTo;
     let mut svm = LiteSVM::load_program();
-    let f = fixtures::prepare_channel(&mut svm, 1, token_program);
+    let f = fixtures::prepare_channel_with_mint(&mut svm, 1, token_program, shape);
     fixtures::open_setup(&mut svm, &f, DEFAULT_DEPOSIT);
     // Mint extra tokens to the payer ATA so top_up has balance to move.
     let top_up_amount = DEFAULT_DEPOSIT / 2;
@@ -216,6 +241,13 @@ fn top_up_spl() {
 #[test]
 fn top_up_t22() {
     run_top_up(TOKEN_2022, "top_up[tok=t22]");
+}
+
+/// `top_up` on a PYUSD/USDG-shaped mint: mint TLV walk + fee/hook state
+/// gate on top of the `t22` row.
+#[test]
+fn top_up_t22_pyusd() {
+    run_top_up_with_mint(TOKEN_2022, MintShape::PaxosStyle, "top_up[tok=t22-pyusd]");
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -385,8 +417,16 @@ fn distribute_setup_open(
     num_recipients: usize,
     token_program: solana_pubkey::Pubkey,
 ) -> (LiteSVM, Fixture, fixtures::DistributeAccounts) {
+    distribute_setup_open_with_mint(num_recipients, token_program, MintShape::Plain)
+}
+
+fn distribute_setup_open_with_mint(
+    num_recipients: usize,
+    token_program: solana_pubkey::Pubkey,
+    shape: MintShape,
+) -> (LiteSVM, Fixture, fixtures::DistributeAccounts) {
     let mut svm = LiteSVM::load_program();
-    let f = fixtures::prepare_channel(&mut svm, num_recipients, token_program);
+    let f = fixtures::prepare_channel_with_mint(&mut svm, num_recipients, token_program, shape);
     fixtures::open_setup(&mut svm, &f, DEFAULT_DEPOSIT);
     fixtures::settle_setup(&mut svm, &f, DEFAULT_SETTLED);
     let accts = fixtures::create_distribute_atas(&mut svm, &f);
@@ -397,7 +437,15 @@ fn distribute_setup_sealed(
     num_recipients: usize,
     token_program: solana_pubkey::Pubkey,
 ) -> (LiteSVM, Fixture, fixtures::DistributeAccounts) {
-    let (mut svm, f, accts) = distribute_setup_open(num_recipients, token_program);
+    distribute_setup_sealed_with_mint(num_recipients, token_program, MintShape::Plain)
+}
+
+fn distribute_setup_sealed_with_mint(
+    num_recipients: usize,
+    token_program: solana_pubkey::Pubkey,
+    shape: MintShape,
+) -> (LiteSVM, Fixture, fixtures::DistributeAccounts) {
+    let (mut svm, f, accts) = distribute_setup_open_with_mint(num_recipients, token_program, shape);
     // Mutate to SEALED so the focal tx exercises the
     // treasury-sweep + payer-refund + full-closure branch.
     mutate_channel(&mut svm, &f.channel, |ch| {
@@ -443,6 +491,15 @@ fn distribute_n16_spl_open() {
 fn distribute_n16_t22_open() {
     let (mut svm, f, accts) = distribute_setup_open(16, TOKEN_2022);
     run_distribute(&f, &mut svm, &accts, "distribute[n=16,tok=t22,open]");
+}
+
+/// `distribute` n=16 OPEN on a PYUSD/USDG-shaped mint: per-ATA policy walk
+/// plus Token-2022's per-transfer fee/hook handling.
+#[test]
+fn distribute_n16_t22_pyusd_open() {
+    let (mut svm, f, accts) =
+        distribute_setup_open_with_mint(16, TOKEN_2022, MintShape::PaxosStyle);
+    run_distribute(&f, &mut svm, &accts, "distribute[n=16,tok=t22-pyusd,open]");
 }
 
 /// `distribute` from SEALED at 1 recipient, SPL. Adds the close
@@ -549,6 +606,14 @@ fn distribute_n32_t22_fin() {
     run_distribute_alt(&f, &mut svm, &accts, "distribute[n=32,tok=t22,fin]");
 }
 
+/// Protocol worst case on a PYUSD/USDG-shaped mint: n=32, SEALED, via ALT.
+#[test]
+fn distribute_n32_t22_pyusd_fin() {
+    let (mut svm, f, accts) =
+        distribute_setup_sealed_with_mint(32, TOKEN_2022, MintShape::PaxosStyle);
+    run_distribute_alt(&f, &mut svm, &accts, "distribute[n=32,tok=t22-pyusd,fin]");
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // reclaim — permissionless rent recovery for a Distributed channel PDA.
 
@@ -577,8 +642,16 @@ fn reclaim() {
 // withdraw_payer — SEALED-only, payer-signed one-shot refund.
 
 fn run_withdraw_payer(token_program: solana_pubkey::Pubkey, label: &str) {
+    run_withdraw_payer_with_mint(token_program, MintShape::Plain, label);
+}
+
+fn run_withdraw_payer_with_mint(
+    token_program: solana_pubkey::Pubkey,
+    shape: MintShape,
+    label: &str,
+) {
     let mut svm = LiteSVM::load_program();
-    let f = fixtures::prepare_channel(&mut svm, 1, token_program);
+    let f = fixtures::prepare_channel_with_mint(&mut svm, 1, token_program, shape);
     fixtures::open_setup(&mut svm, &f, DEFAULT_DEPOSIT);
     // Skip the request_close + grace + seal prelude — measure withdraw_payer alone.
     mutate_channel(&mut svm, &f.channel, |ch| {
@@ -615,4 +688,14 @@ fn withdraw_payer_spl() {
 #[test]
 fn withdraw_payer_t22() {
     run_withdraw_payer(TOKEN_2022, "withdraw_payer[tok=t22]");
+}
+
+/// `withdraw_payer` on a PYUSD/USDG-shaped mint.
+#[test]
+fn withdraw_payer_t22_pyusd() {
+    run_withdraw_payer_with_mint(
+        TOKEN_2022,
+        MintShape::PaxosStyle,
+        "withdraw_payer[tok=t22-pyusd]",
+    );
 }
