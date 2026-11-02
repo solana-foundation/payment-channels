@@ -222,27 +222,30 @@ Defensive validation runs before any escrow movement or `payout_watermark` mutat
 - `distribute` validates the mint and every token account it touches: the channel escrow, the payer refund ATA, the treasury ATA, and each recipient ATA.
 - SPL Token mints/accounts must use the base layouts (strict length equality).
 - Token-2022 mints/accounts are parsed with the account-type byte and TLV extension trailer.
-- Token-2022 mint extensions are allowed only for an explicitly enumerated set: `MetadataPointer`, `TokenMetadata`, `GroupPointer`, `TokenGroup`, `GroupMemberPointer`, `TokenGroupMember`. The list is fixed; future extensions, even ones that would not affect transfer semantics, are rejected until added here.
-- Token-2022 token-account extensions are allowed only for base accounts and `ImmutableOwner`.
+- Token-2022 mint extensions are admitted by `MintExtensionPolicy` (`helpers/token_extensions.rs`) in three tiers (decision record: [ADR-007](./007-token-2022-mint-extension-policy.md)); everything else is rejected with `UnsupportedMintTokenExtensions` (63):
+  - **Inert** (always allowed): `MetadataPointer`, `TokenMetadata`, `GroupPointer`, `TokenGroup`, `GroupMemberPointer`, `TokenGroupMember`, `MintCloseAuthority`, `ConfidentialTransferMint`, `ConfidentialTransferFeeConfig`, `InterestBearingConfig`, `ScaledUiAmount`. None of these change what a plain `TransferChecked` moves in base units.
+  - **Trusted** (allowed under the mint trust model below): `PermanentDelegate`, `Pausable`. Issuer powers over the escrow, accepted on the same grounds as the base-layout freeze authority.
+  - **State-gated** (allowed only while dormant): `TransferFeeConfig` with neither the schedule charging at the current epoch nor the one scheduled next able to charge (`transfer_fee_basis_points == 0` or `maximum_fee == 0`), and `TransferHook` with no `program_id` installed. A live configuration is rejected with `ActiveMintTokenExtension` (64). The gate is re-evaluated by every token-moving instruction (`open`, `topUp`, `withdrawPayer`, `distribute`).
+- Token-2022 token-account extensions are allowed only for base accounts, `ImmutableOwner`, and the three records Token-2022 adds automatically to every account of an allow-listed mint: `TransferFeeAmount`, `TransferHookAccount`, `PausableAccount`. The account policy does not inspect their state (a beneficiary's withheld fees never block a credit).
 - Unknown, malformed, or unsupported extensions are rejected before any token transfer, except for the beneficiary redirect case described above.
+
+This admits the Paxos-issued Token-2022 stablecoins as deployed on mainnet (PYUSD `2b1kV6…4GXo`, USDG `2u1tsz…jGWH`, both verified via RPC on 2026-10-27): `MintCloseAuthority`, `PermanentDelegate`, `TransferFeeConfig` (0 bps / 0 max on both schedules), `ConfidentialTransferMint` (`autoApproveNewAccounts: false`), `ConfidentialTransferFeeConfig`, `TransferHook` (`programId: null`), `MetadataPointer`, `TokenMetadata`. `scripts/mint-extensions.mjs` reproduces this classification for any mint and is the operator preflight.
 
 ### Why the allow-list excludes the rest
 
-Each row below would either trap funds, distort the `deposit`/`settled` accounting, add CPI account requirements, or undermine the program's custody guarantee. `open` rejects mints carrying any of these extensions; `distribute` re-validates each runtime token account before transfer. Rejection is by allow-list exclusion (not state inspection) — extension presence alone is disqualifying.
+Each row below would either trap funds, distort the `deposit`/`settled` accounting, add CPI account requirements, or let a beneficiary's own account reject a credit. `open` rejects mints carrying any of these extensions; `distribute` re-validates the mint and each runtime token account before transfer.
 
 | Extension | Reason |
 |---|---|
-| `NonTransferable` | No transfer from escrow could ever succeed |
-| `PermanentDelegate` | Delegate can move escrow arbitrarily; breaks custody |
+| `NonTransferable` / `NonTransferableAccount` | No transfer from escrow could ever succeed |
 | `DefaultAccountState` | Destination ATAs could be born in any non-`Initialized` state, blocking payouts; rejected regardless of the configured state |
-| `ConfidentialTransferMint` | Program does not produce confidential-transfer proofs; rejected in both auto-approve and required modes |
-| `TransferFeeConfig` | Withheld fees on incoming and outgoing transfers desynchronize `deposit`/`settled` from real escrow balance |
-| `TransferHook` | Hook program can revert any transfer based on arbitrary logic; funds could be permanently trapped |
-| `InterestBearing` | User-visible token amount changes over time; exact channel accounting is intentionally base-unit only |
-| `ScaledUiAmountConfig` | Display-vs-raw amount divergence breaks user-visible exact distribution |
-| `Pausable` | Mint-level pause can block escrow release |
-| `CpiGuard` / `MemoTransfer` account extensions | Distribution CPIs do not use delegate flow or memo pre-instructions |
-| `MintCloseAuthority` | Mint identity can be closed and recreated while channels reference the address |
+| `TransferFeeConfig` **with a live fee** | Token-2022 debits the escrow the full `amount` but credits the destination `amount − fee`; on `open`/`topUp` the escrow would receive less than the `deposit` credited, so the terminal `distribute` could not satisfy `escrow == Σ payouts + sweep` and the channel could never close. Rejected the moment a fee is scheduled, before it takes effect |
+| `TransferHook` **with a program installed** | Token-2022 forwards the hook's extra account metas, which the fixed four-account `TransferChecked` CPI in `transfer.rs` does not carry; every escrow movement would fail |
+| `ConfidentialTransferAccount` / `ConfidentialTransferFeeAmount` | Account-side; the holder can set `allow_non_confidential_credits = false`, which makes a plain credit fail. Rejected so the payout redirects to treasury instead of bricking the crank |
+| `CpiGuard` / `MemoTransfer` account extensions | Owner-signed `open` CPI is blocked by CPI Guard; an inbound transfer to a `MemoTransfer` account needs a memo the CPI never sends |
+| `ConfidentialMintBurn` | Not analysed |
+
+Tiers were decided by reading the live PYUSD/USDG configuration rather than extension presence alone: four of the six formerly blocking extensions are present-but-dormant on every deployed Paxos mint, and the two that are not (`PermanentDelegate`, `MintCloseAuthority`) are either issuer powers already accepted in kind (seize vs. freeze) or inert while supply is nonzero.
 
 ### Mint trust model
 
@@ -258,7 +261,14 @@ The channel stays wedged until the freeze authority thaws the escrow. There is n
 
 This is intentional. Hard-rejecting any mint with a live freeze authority would exclude the majority of real-world stablecoins (USDC, USDT, PYUSD, EURC, …), all of which retain a freeze authority controlled by the issuer. The trust decision is therefore pushed off-chain: a merchant accepting payments in mint `M` is implicitly accepting that `M`'s freeze authority can wedge any channel denominated in `M`, and should only do so for mints whose freeze authority they consider acceptably governed.
 
-The same reasoning applies, less acutely, to the mint authority and to any Token-2022 update authority for allow-listed extensions: the program does not audit these at `open`, and merchants should treat the mint as a trust dependency of the channel, not a parameter the program defends against.
+The same reasoning applies to the mint authority and to the Token-2022 issuer powers the allow-list admits on trust:
+
+- **`PermanentDelegate`** (PYUSD, USDG) — the issuer can transfer or burn from the escrow ATA without the channel's signature. This is strictly stronger than freezing: if the delegate removes tokens from escrow, `escrow < deposit − payout_watermark`, every OPEN `distribute` fails on insufficient funds, and the SEALED `distribute` underflows `escrow − Σ payouts` (`DistributeBalanceCalculationOverflow`), so the channel can never close. The program does not detect or repair this; it is accepted because the same regulated issuer already holds the freeze authority, and a seizure of a stablecoin escrow is a legal-process event the merchant has accepted by choosing the mint.
+- **`Pausable`** — a paused mint fails every `TransferChecked`; same wedge as a freeze, lifted when the issuer unpauses.
+- **`TransferFeeConfig` / `TransferHook` activation** — the issuer can schedule a fee (`SetTransferFee`, effective two epochs later) or install a hook program at any time. From that moment every token-moving instruction rejects with `ActiveMintTokenExtension` until the issuer reverts it (for a fee, until the reverted zero schedule takes over, up to two epochs later); the escrow is intact but immobile. This is the same operational class as a freeze and is preferred over fee-tolerant accounting, which would break the "`deposit`/`settled` are authoritative in base units" invariant the state machine rests on. Note that unsolicited transfers into the escrow while a fee is live would leave a withheld balance on the escrow ATA that blocks its `CloseAccount`; the permissionless `HarvestWithheldTokensToMint` clears it.
+- **`MintCloseAuthority`** — closing a mint requires `supply == 0`, which a funded escrow prevents; inert for the life of any channel holding a balance.
+
+Merchants should treat the mint as a trust dependency of the channel, not a parameter the program defends against, and use `scripts/mint-extensions.mjs` to see exactly which of these powers a given mint's issuer holds.
 
 ## Channel Closure: Epoch-Bound Full Deallocation
 

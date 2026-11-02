@@ -93,6 +93,7 @@ Cluster builds (`just build-mainnet-beta`, `just build-devnet`, …) require tha
 - [State machine](docs/001-payment-channel-state-machine.md)
 - [HTTP protocol](docs/002-http-protocol.md)
 - [Instruction reference](docs/003-program-instructions.md)
+- [Token-2022 mint extension policy](docs/007-token-2022-mint-extension-policy.md)
 - Generated clients: [TypeScript](clients/typescript), [Rust](clients/rust).
 
 ## License
