@@ -292,7 +292,7 @@ impl<'a> TokenContext<'a> {
     pub fn new(
         mint: MintAccountView<'a, Unchecked>,
         token_program: TokenProgramAccountView<'a, Unchecked>,
-    ) -> Result<Self, ProgramError> {
+    ) -> Result<Self, PaymentChannelsError> {
         let kind = TokenProgramKind::from_address(token_program.address())?;
 
         let decimals = match kind {
@@ -323,10 +323,12 @@ impl<'a> TokenContext<'a> {
                     .iter()
                     .all(|b| *b == 0);
                 if !all_zero {
-                    return Err(PaymentChannelsError::MalformedMintTokenAccountData.into());
+                    return Err(PaymentChannelsError::MalformedMintTokenAccountData);
                 }
                 let policy = MintExtensionPolicy {
-                    epoch: Clock::get()?.epoch,
+                    epoch: Clock::get()
+                        .map_err(|_| PaymentChannelsError::ClockSysvarUnavailable)?
+                        .epoch,
                 };
                 scan_tlv_extensions(&policy, &data[tlv::START..]).map_err(|err| match err {
                     TokenExtensionError::MalformedTokenAccountData => {

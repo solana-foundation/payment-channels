@@ -739,6 +739,12 @@
         "name": "activeMintTokenExtension"
       },
       {
+        "code": 65,
+        "kind": "errorNode",
+        "message": "Clock sysvar could not be read while evaluating the mint policy",
+        "name": "clockSysvarUnavailable"
+      },
+      {
         "code": 200,
         "kind": "errorNode",
         "message": "Deposit must be non-zero",

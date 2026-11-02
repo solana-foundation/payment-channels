@@ -68,6 +68,8 @@ pub enum PaymentChannelsError {
     UnsupportedMintTokenExtensions = 63,
     #[error("Token-2022 mint has a live transfer fee or an installed transfer hook")]
     ActiveMintTokenExtension = 64,
+    #[error("Clock sysvar could not be read while evaluating the mint policy")]
+    ClockSysvarUnavailable = 65,
 
     // general object validations
     #[error("Deposit must be non-zero")]
