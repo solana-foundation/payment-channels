@@ -41,6 +41,10 @@ ignore = [
     # benchmark report tables) → tabled_derive; proc-macro only, not linked
     # into the on-chain program.
     "RUSTSEC-2026-0173",
+    # crypto-bigint 0.5.5 timing variability — transitive via
+    # litesvm/mollusk → Agave precompiles; dev-dep only. The patched 0.7
+    # release is outside the version range supported by Agave's k256 stack.
+    "RUSTSEC-2026-0387",
 ]
 
 [licenses]
