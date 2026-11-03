@@ -19,7 +19,10 @@ use solana_compute_budget_interface::ComputeBudgetInstruction;
 use crate::common::{
     ChannelBuilder, INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, expect_custom_err,
     read_channel,
-    voucher::{build_ed25519_ix, voucher, voucher_payload},
+    voucher::{
+        build_ed25519_ix, cap_voucher_payload, claim_voucher_payload, signed_ed25519_ix, voucher,
+        voucher_payload,
+    },
 };
 use payment_channels::state::ChannelStatus;
 
@@ -485,4 +488,50 @@ fn settle_voucher_bad_magic_rejects() {
         PaymentChannelsError::VoucherBadMagic,
     );
     assert_eq!(read_settled(&svm, &channel), 0);
+}
+
+/// Sends `[ed25519(message signed by the authorized signer), settle]` and
+/// expects `expected` with the watermark untouched.
+fn settle_with_signed_message_rejects(
+    build_message: impl FnOnce(&Pubkey, &Pubkey) -> Vec<u8>,
+    expected: PaymentChannelsError,
+) {
+    let mut svm = LiteSVM::load_program();
+    let fee_payer = Keypair::new();
+    svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
+
+    let signer = Keypair::new();
+    let channel = Pubkey::new_unique();
+    seed_channel(&mut svm, &channel, 0, 1_000_000, 0, &signer.pubkey());
+
+    let message = build_message(&channel, &signer.pubkey());
+    let ed25519_ix = signed_ed25519_ix(&signer, &message);
+    let settle_ix = build_settle_ix(&channel);
+
+    let tx = Transaction::new_signed_with_payer(
+        &[ed25519_ix, settle_ix],
+        Some(&fee_payer.pubkey()),
+        &[&fee_payer],
+        svm.latest_blockhash(),
+    );
+    expect_custom_err(svm.send_transaction(tx), expected);
+    assert_eq!(read_settled(&svm, &channel), 0);
+}
+
+/// A claim has the v1 length, so only its `0x56 0x04` magic keeps it out.
+#[test]
+fn settle_rejects_metered_claim() {
+    settle_with_signed_message_rejects(
+        |channel, _| claim_voucher_payload(channel, 500_000, 0).to_vec(),
+        PaymentChannelsError::VoucherBadMagic,
+    );
+}
+
+/// A cap is 82 bytes, so the v1 parser rejects it on length before the magic.
+#[test]
+fn settle_rejects_metered_cap() {
+    settle_with_signed_message_rejects(
+        |channel, signer| cap_voucher_payload(channel, 500_000, 0, signer).to_vec(),
+        PaymentChannelsError::MalformedEd25519Instruction,
+    );
 }

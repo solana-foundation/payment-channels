@@ -12,15 +12,18 @@ use super::{
 };
 use crate::instructions::VOUCHER_PAYLOAD_SIZE;
 
-/// Canonical inline ix data length.
-const CANONICAL_IX_DATA_LEN: usize = MESSAGE_OFFSET + VOUCHER_PAYLOAD_SIZE;
-
 /// Parsed Ed25519 precompile ix data. Sized-array refs let the caller
 /// compare against `[u8; 32]` / `[u8; 50]` fixtures without slice-length
 /// runtime checks.
 pub struct Parsed<'a> {
     pub pubkey: &'a [u8; PUBKEY_SERIALIZED_SIZE],
     pub message: &'a [u8; VOUCHER_PAYLOAD_SIZE],
+}
+
+/// Parsed precompile instruction whose message length is selected by the caller.
+pub struct ParsedMessage<'a> {
+    pub pubkey: &'a [u8; PUBKEY_SERIALIZED_SIZE],
+    pub message: &'a [u8],
 }
 
 /// Structural rejection reasons for `parse`. Every variant maps 1:1 to
@@ -34,7 +37,7 @@ pub struct Parsed<'a> {
 ///     crate::errors::PaymentChannelsError::MalformedEd25519Instruction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ed25519ParseError {
-    /// `data.len() != CANONICAL_IX_DATA_LEN (= 162)`.
+    /// `data.len() != MESSAGE_OFFSET + expected message length`.
     Length,
     /// `num_signatures != 1`. N = 0 verifies nothing; N > 1 appends
     /// further offsets records whose signatures we never parse, so the
@@ -53,16 +56,32 @@ pub enum Ed25519ParseError {
     /// hardcoded slices land on different bytes than the precompile
     /// checked.
     NonCanonicalOffsets,
-    /// `message_data_size != VOUCHER_PAYLOAD_SIZE (= 50)`.
+    /// `message_data_size` does not equal the expected message length.
     MessageSize,
 }
 
-/// Parse a single-signature Ed25519 precompile ix with the canonical
-/// inline layout. Validates every field of `Ed25519SignatureOffsets`.
+/// Parse a canonical single-signature Ed25519 precompile instruction carrying
+/// a v1 voucher.
 pub fn parse(data: &[u8]) -> Result<Parsed<'_>, Ed25519ParseError> {
+    let parsed = parse_with_message_len(data, VOUCHER_PAYLOAD_SIZE)?;
+    let message: &[u8; VOUCHER_PAYLOAD_SIZE] = parsed
+        .message
+        .try_into()
+        .expect("message length parameter pins the canonical voucher region");
+    Ok(Parsed {
+        pubkey: parsed.pubkey,
+        message,
+    })
+}
+
+/// Parse a single-signature Ed25519 precompile instruction with the canonical
+/// inline layout and an exact message length.
+pub fn parse_with_message_len(
+    data: &[u8],
+    message_len: usize,
+) -> Result<ParsedMessage<'_>, Ed25519ParseError> {
     // Full canonical inline layout: `[num_sigs=1, pad=0, offsets×1, pubkey, signature, message]`.
-    // Guard — length. Pins the full 162-byte canonical layout.
-    if data.len() != CANONICAL_IX_DATA_LEN {
+    if data.len() != MESSAGE_OFFSET + message_len {
         return Err(Ed25519ParseError::Length);
     }
 
@@ -113,9 +132,7 @@ pub fn parse(data: &[u8]) -> Result<Parsed<'_>, Ed25519ParseError> {
         return Err(Ed25519ParseError::NonCanonicalOffsets);
     }
 
-    // Guard — canonical message length (50 B: `magic || channel_id ||
-    // cumulative_amount || expires_at`, LE).
-    if message_data_size as usize != VOUCHER_PAYLOAD_SIZE {
+    if message_data_size as usize != message_len {
         return Err(Ed25519ParseError::MessageSize);
     }
 
@@ -125,10 +142,7 @@ pub fn parse(data: &[u8]) -> Result<Parsed<'_>, Ed25519ParseError> {
         [PUBKEY_OFFSET..PUBKEY_OFFSET + PUBKEY_SERIALIZED_SIZE]
         .try_into()
         .expect("length + offset guards pin the canonical pubkey region");
-    let message: &[u8; VOUCHER_PAYLOAD_SIZE] = data
-        [MESSAGE_OFFSET..MESSAGE_OFFSET + VOUCHER_PAYLOAD_SIZE]
-        .try_into()
-        .expect("length + offset guards pin the canonical message region");
+    let message = &data[MESSAGE_OFFSET..MESSAGE_OFFSET + message_len];
 
-    Ok(Parsed { pubkey, message })
+    Ok(ParsedMessage { pubkey, message })
 }

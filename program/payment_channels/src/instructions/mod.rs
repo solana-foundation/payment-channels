@@ -7,6 +7,7 @@ pub mod request_close;
 pub mod seal;
 pub mod settle;
 pub mod settle_and_seal;
+pub mod settle_metered;
 pub mod top_up;
 pub mod withdraw_payer;
 
@@ -83,17 +84,139 @@ impl VoucherArgs {
 /// truncated or extended message.
 pub const VOUCHER_PAYLOAD_SIZE: usize = core::mem::size_of::<VoucherArgs>();
 
-/// Pins [`VOUCHER_PAYLOAD_SIZE`] to the Ed25519 precompile's `u16`
-/// `message_data_size` field so the `as u16` casts at ix-build sites
-/// can't silently truncate, and pins the exact byte width the off-chain
-/// signer contract depends on.
+/// Domain-separation prefix of the signed cap: tag `'V'` plus format `0x03`.
+pub const CAP_VOUCHER_MAGIC: [u8; 2] = [0x56, 0x03];
+
+/// Signed cap: `magic || channel_id || cap_cumulative || expires_at || operator`.
+/// Signed by [`Channel::authorized_signer`](crate::Channel::authorized_signer);
+/// the struct bytes ARE the 82-byte Ed25519 message.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "idl", derive(CodamaType))]
+pub struct CapVoucherArgs {
+    /// Must equal [`CAP_VOUCHER_MAGIC`].
+    pub magic: [u8; 2],
+    /// Must equal the [`Channel`](crate::Channel) PDA.
+    pub channel_id: Address,
+    /// Ceiling on the claim: `claim_cumulative <= cap_cumulative <=`
+    /// [`deposit`](crate::Channel::deposit). One cap can cover several
+    /// increasing claims.
+    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    cap_cumulative: [u8; 8],
+    /// Unix-seconds TTL; `0` means no expiry.
+    #[cfg_attr(feature = "idl", codama(type = number(i64)))]
+    expires_at: [u8; 8],
+    /// Ed25519 pubkey authorized to sign the claim.
+    pub operator: Address,
+}
+
+impl CapVoucherArgs {
+    pub fn new(
+        channel_id: Address,
+        cap_cumulative: u64,
+        expires_at: i64,
+        operator: Address,
+    ) -> Self {
+        Self {
+            magic: CAP_VOUCHER_MAGIC,
+            channel_id,
+            cap_cumulative: cap_cumulative.to_le_bytes(),
+            expires_at: expires_at.to_le_bytes(),
+            operator,
+        }
+    }
+
+    #[inline(always)]
+    pub fn cap_cumulative(&self) -> u64 {
+        u64::from_le_bytes(self.cap_cumulative)
+    }
+
+    #[inline(always)]
+    pub fn expires_at(&self) -> i64 {
+        i64::from_le_bytes(self.expires_at)
+    }
+}
+
+/// Domain-separation prefix of the signed claim: tag `'V'` plus format `0x04`.
+pub const CLAIM_VOUCHER_MAGIC: [u8; 2] = [0x56, 0x04];
+
+/// Signed claim: `magic || channel_id || claim_cumulative || expires_at`.
+/// Signed by the cap's [`operator`](CapVoucherArgs::operator); the struct bytes
+/// ARE the 50-byte Ed25519 message.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "idl", derive(CodamaType))]
+pub struct ClaimVoucherArgs {
+    /// Must equal [`CLAIM_VOUCHER_MAGIC`].
+    pub magic: [u8; 2],
+    /// Must equal the [`Channel`](crate::Channel) PDA.
+    pub channel_id: Address,
+    /// New [`settled`](crate::Channel::settled) watermark:
+    /// `settled < claim_cumulative <= cap_cumulative`.
+    #[cfg_attr(feature = "idl", codama(type = number(u64)))]
+    claim_cumulative: [u8; 8],
+    /// Unix-seconds TTL; `0` means no expiry.
+    #[cfg_attr(feature = "idl", codama(type = number(i64)))]
+    expires_at: [u8; 8],
+}
+
+impl ClaimVoucherArgs {
+    pub fn new(channel_id: Address, claim_cumulative: u64, expires_at: i64) -> Self {
+        Self {
+            magic: CLAIM_VOUCHER_MAGIC,
+            channel_id,
+            claim_cumulative: claim_cumulative.to_le_bytes(),
+            expires_at: expires_at.to_le_bytes(),
+        }
+    }
+
+    #[inline(always)]
+    pub fn claim_cumulative(&self) -> u64 {
+        u64::from_le_bytes(self.claim_cumulative)
+    }
+
+    #[inline(always)]
+    pub fn expires_at(&self) -> i64 {
+        i64::from_le_bytes(self.expires_at)
+    }
+}
+
+/// Canonical `message_data_size` of a cap precompile instruction.
+pub const CAP_VOUCHER_PAYLOAD_SIZE: usize = core::mem::size_of::<CapVoucherArgs>();
+
+/// Canonical `message_data_size` of a claim precompile instruction.
+pub const CLAIM_VOUCHER_PAYLOAD_SIZE: usize = core::mem::size_of::<ClaimVoucherArgs>();
+
+/// Pins payload widths to the Ed25519 precompile's `u16` `message_data_size`
+/// field so the `as u16` casts at ix-build sites can't silently truncate,
+/// and pins the exact byte width the off-chain signer contract depends on.
 const _: () = {
     assert!(VOUCHER_PAYLOAD_SIZE <= u16::MAX as usize);
     assert!(VOUCHER_PAYLOAD_SIZE == 50);
+    assert!(CAP_VOUCHER_PAYLOAD_SIZE == 82);
+    assert!(CLAIM_VOUCHER_PAYLOAD_SIZE == VOUCHER_PAYLOAD_SIZE);
+    assert!(CAP_VOUCHER_MAGIC[0] == VOUCHER_MAGIC[0] && CAP_VOUCHER_MAGIC[1] == 0x03);
+    assert!(CLAIM_VOUCHER_MAGIC[0] == VOUCHER_MAGIC[0] && CLAIM_VOUCHER_MAGIC[1] == 0x04);
+    assert!(VOUCHER_MAGIC[1] == 0x01);
+    assert!(core::mem::offset_of!(CapVoucherArgs, channel_id) == 2);
+    assert!(core::mem::offset_of!(CapVoucherArgs, cap_cumulative) == 34);
+    assert!(core::mem::offset_of!(CapVoucherArgs, expires_at) == 42);
+    assert!(core::mem::offset_of!(CapVoucherArgs, operator) == 50);
+    assert!(core::mem::offset_of!(ClaimVoucherArgs, channel_id) == 2);
+    assert!(core::mem::offset_of!(ClaimVoucherArgs, claim_cumulative) == 34);
+    assert!(core::mem::offset_of!(ClaimVoucherArgs, expires_at) == 42);
 };
 
 unsafe impl Transmutable for VoucherArgs {
     const LEN: usize = VOUCHER_PAYLOAD_SIZE;
+}
+
+unsafe impl Transmutable for CapVoucherArgs {
+    const LEN: usize = CAP_VOUCHER_PAYLOAD_SIZE;
+}
+
+unsafe impl Transmutable for ClaimVoucherArgs {
+    const LEN: usize = CLAIM_VOUCHER_PAYLOAD_SIZE;
 }
 
 /// PDA signer for Anchor-compatible self-CPI event emission.
@@ -256,6 +379,20 @@ pub enum PaymentChannelsInstruction<'a> {
     )]
     Reclaim = 9,
 
+    /// Permissionless crank: advances [`settled`](crate::Channel::settled)
+    /// to an operator-signed claim, bounded by a client-signed cap. The pair
+    /// rides in the two Ed25519 precompile ixs immediately before, in either
+    /// order: the cap is signed by
+    /// [`authorized_signer`](crate::Channel::authorized_signer), the claim by
+    /// the cap's `operator`, and `settled < claim <= cap <= deposit`.
+    /// Account shape matches [`Settle`]. `OPEN → OPEN`.
+    #[cfg_attr(
+        feature = "idl",
+        codama(account(name = "channel", writable)),
+        codama(account(name = "instructions_sysvar"))
+    )]
+    SettleMetered = 10,
+
     /// Self-CPI target for the event pipeline; not part of the public
     /// instruction set. `228 = EVENT_IX_TAG_LE[0]`: self-CPI event data
     /// starts with this byte, so byte-0 dispatch routes straight to
@@ -353,6 +490,7 @@ impl<'a> PaymentChannelsInstruction<'a> {
             Self::Distribute(_) => "distribute",
             Self::WithdrawPayer => "withdraw_payer",
             Self::Reclaim => "reclaim",
+            Self::SettleMetered => "settle_metered",
             Self::EmitEvent => "emit_event",
             #[cfg(feature = "hooks")]
             Self::OpenWithHooks(_) => "open_with_hooks",
@@ -384,6 +522,7 @@ impl<'a> PaymentChannelsInstruction<'a> {
             }
             withdraw_payer::DISCRIMINATOR => Ok(Self::WithdrawPayer),
             reclaim::DISCRIMINATOR => Ok(Self::Reclaim),
+            settle_metered::DISCRIMINATOR => Ok(Self::SettleMetered),
             emit_event::DISCRIMINATOR => Ok(Self::EmitEvent),
             #[cfg(feature = "hooks")]
             open::WITH_HOOKS_DISCRIMINATOR => {
@@ -459,6 +598,10 @@ mod tests {
         assert_eq!(
             tag(&PaymentChannelsInstruction::Reclaim),
             reclaim::DISCRIMINATOR,
+        );
+        assert_eq!(
+            tag(&PaymentChannelsInstruction::SettleMetered),
+            settle_metered::DISCRIMINATOR,
         );
         assert_eq!(
             tag(&PaymentChannelsInstruction::EmitEvent),
