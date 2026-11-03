@@ -7,7 +7,9 @@
  */
 
 export * from "./accountDiscriminator";
+export * from "./capVoucherArgs";
 export * from "./channelStatus";
+export * from "./claimVoucherArgs";
 export * from "./distributeArgs";
 export * from "./distributionEntry";
 export * from "./openArgs";

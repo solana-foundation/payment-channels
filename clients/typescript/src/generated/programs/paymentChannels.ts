@@ -40,6 +40,7 @@ import {
   getSealInstruction,
   getSettleAndSealInstruction,
   getSettleInstruction,
+  getSettleMeteredInstruction,
   getTopUpInstruction,
   getWithdrawPayerInstruction,
   parseDistributeInstruction,
@@ -50,6 +51,7 @@ import {
   parseSealInstruction,
   parseSettleAndSealInstruction,
   parseSettleInstruction,
+  parseSettleMeteredInstruction,
   parseTopUpInstruction,
   parseWithdrawPayerInstruction,
   type DistributeAsyncInput,
@@ -63,6 +65,7 @@ import {
   type ParsedSealInstruction,
   type ParsedSettleAndSealInstruction,
   type ParsedSettleInstruction,
+  type ParsedSettleMeteredInstruction,
   type ParsedTopUpInstruction,
   type ParsedWithdrawPayerInstruction,
   type ReclaimInput,
@@ -70,6 +73,7 @@ import {
   type SealInput,
   type SettleAndSealInput,
   type SettleInput,
+  type SettleMeteredInput,
   type TopUpInput,
   type WithdrawPayerInput,
 } from "../instructions";
@@ -92,6 +96,7 @@ export enum PaymentChannelsInstruction {
   Distribute,
   WithdrawPayer,
   Reclaim,
+  SettleMetered,
   EmitEvent,
 }
 
@@ -125,6 +130,9 @@ export function identifyPaymentChannelsInstruction(
   }
   if (containsBytes(data, getU8Encoder().encode(9), 0)) {
     return PaymentChannelsInstruction.Reclaim;
+  }
+  if (containsBytes(data, getU8Encoder().encode(10), 0)) {
+    return PaymentChannelsInstruction.SettleMetered;
   }
   if (containsBytes(data, getU8Encoder().encode(228), 0)) {
     return PaymentChannelsInstruction.EmitEvent;
@@ -165,6 +173,9 @@ export type ParsedPaymentChannelsInstruction<
   | ({
       instructionType: PaymentChannelsInstruction.Reclaim;
     } & ParsedReclaimInstruction<TProgram>)
+  | ({
+      instructionType: PaymentChannelsInstruction.SettleMetered;
+    } & ParsedSettleMeteredInstruction<TProgram>)
   | ({
       instructionType: PaymentChannelsInstruction.EmitEvent;
     } & ParsedEmitEventInstruction<TProgram>);
@@ -237,6 +248,13 @@ export function parsePaymentChannelsInstruction<TProgram extends string>(
         ...parseReclaimInstruction(instruction),
       };
     }
+    case PaymentChannelsInstruction.SettleMetered: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: PaymentChannelsInstruction.SettleMetered,
+        ...parseSettleMeteredInstruction(instruction),
+      };
+    }
     case PaymentChannelsInstruction.EmitEvent: {
       assertIsInstructionWithAccounts(instruction);
       return {
@@ -297,6 +315,10 @@ export type PaymentChannelsPluginInstructions = {
   reclaim: (
     input: ReclaimInput,
   ) => ReturnType<typeof getReclaimInstruction> & SelfPlanAndSendFunctions;
+  settleMetered: (
+    input: SettleMeteredInput,
+  ) => ReturnType<typeof getSettleMeteredInstruction> &
+    SelfPlanAndSendFunctions;
   emitEvent: (
     input: EmitEventAsyncInput,
   ) => ReturnType<typeof getEmitEventInstructionAsync> &
@@ -353,6 +375,11 @@ export function paymentChannelsProgram() {
             ),
           reclaim: (input) =>
             addSelfPlanAndSendFunctions(client, getReclaimInstruction(input)),
+          settleMetered: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getSettleMeteredInstruction(input),
+            ),
           emitEvent: (input) =>
             addSelfPlanAndSendFunctions(
               client,

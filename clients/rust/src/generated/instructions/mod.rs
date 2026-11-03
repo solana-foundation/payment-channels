@@ -13,6 +13,7 @@ pub(crate) mod r#request_close;
 pub(crate) mod r#seal;
 pub(crate) mod r#settle;
 pub(crate) mod r#settle_and_seal;
+pub(crate) mod r#settle_metered;
 pub(crate) mod r#top_up;
 pub(crate) mod r#withdraw_payer;
 
@@ -24,5 +25,6 @@ pub use self::r#request_close::*;
 pub use self::r#seal::*;
 pub use self::r#settle::*;
 pub use self::r#settle_and_seal::*;
+pub use self::r#settle_metered::*;
 pub use self::r#top_up::*;
 pub use self::r#withdraw_payer::*;
