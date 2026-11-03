@@ -54,6 +54,7 @@ fn process_instruction(
         }
         PaymentChannelsInstruction::WithdrawPayer => withdraw_payer::process(program_id, accounts),
         PaymentChannelsInstruction::Reclaim => reclaim::process(program_id, accounts),
+        PaymentChannelsInstruction::SettleMetered => settle_metered::process(program_id, accounts),
         PaymentChannelsInstruction::EmitEvent => emit_event::process(program_id, accounts),
     }
 }
