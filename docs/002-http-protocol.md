@@ -26,16 +26,17 @@ Actors: **C** = client (payer). **S** = server (merchant).
 | S → C | `402 Payment Required` + `WWW-Authenticate: Payment <auth-params>` header | auth-params: `id="…", method="solana", intent="session", request="<b64url-nopad(JCS(challenge-json))>"` | — |
 | C → S | `POST /channel/open` | body: MPP credential envelope, `payload.action="open"`, carries `transaction` (base64 partial-signed open tx) | `open` |
 | C → S | `GET <resource>` + `Authorization: Payment <b64url-nopad(JCS(credential-json))>` header | `payload.action="voucher"`, carries SignedVoucher | — (off-chain metering) |
+| C → S | `GET <resource>` + `Authorization: Payment <…>` header, metered mode | `payload.action="cap"`, carries SignedCap | — (off-chain metering; see [Metered Negotiation](#metered-negotiation)) |
 | C → S | `POST /channel/topup` | body: MPP credential envelope, `payload.action="topUp"` (camelCase), carries `transaction` | `topUp` |
 | C → S | `POST /channel/close` | body: MPP credential envelope, `payload.action="close"`, optional `payload.voucher` (SignedVoucher); no pre-signed tx | `settleAndSeal` (optionally bundled with `distribute`) |
-| S → C | Any 200 that accepted a voucher or submitted an on-chain tx on the client's behalf | `Payment-Receipt: <b64url-nopad(JSON)>` header | — |
+| S → C | Any 200 that accepted a voucher or submitted an on-chain tx on the client's behalf | `Payment-Receipt: <b64url-nopad(JSON)>` header; in metered mode it carries the operator's SignedClaim | — |
 
 ### Notes
 
 - **Minimum-deposit constraint:** `POST /channel/open` requires both `payload.depositAmount` and the decoded `open` instruction's `deposit` to be at least `challenge.methodDetails.minimumDeposit`. Enforced at the HTTP layer, not on-chain.
 - **Grace-period constraint:** New-channel `POST /channel/open` requires `payload.gracePeriodSeconds == challenge.methodDetails.gracePeriodSeconds`. Before signing or submitting the transaction, the server MUST decode the `open` instruction data and reject unless encoded `grace_period` equals the same positive `u32`. The on-chain program rejects zero grace periods, but merchant-specific close-window policy is enforced at the HTTP layer. It is recommended to set the grace period to a realistic business-appropriate minimum, e.g. 15 minutes to allow for a final settlement, if client requests a close.
 - **Server-submitted ixs:** `settle`, `settleAndSeal`, and `distribute` are submitted directly by the server. In the cooperative path, the server triggers `distribute` (often bundled with `settleAndSeal`) and may run mid-session distributes from `OPEN`.
-- **Voucher-bearing transaction shape:** A canonical single-signature Ed25519 precompile instruction must sit immediately before `settle` or before a voucher-bearing `settleAndSeal`. The payment-channel instruction itself carries no voucher bytes; it reads the precompile-verified 50-byte message through the Instructions sysvar.
+- **Voucher-bearing transaction shape:** A canonical single-signature Ed25519 precompile instruction must sit immediately before `settle` or before a voucher-bearing `settleAndSeal`. The payment-channel instruction itself carries no voucher bytes; it reads the precompile-verified 50-byte message through the Instructions sysvar. In metered mode, two precompile instructions (the 82-byte cap, then the 50-byte claim) sit immediately before `settleMetered` or `settleAndSeal` with `has_voucher == 2`.
 - **PDA payees:** `open` allows `payee` to be either an on-curve address or a program-derived address (PDA) beneficiary. A direct `settleAndSeal` transaction requires a signer equal to `Channel.payee`; PDA payees can use that cooperative-close path only through CPI from the owning program with signer seeds. Permissionless `settle`, `seal`, and `distribute` remain available without a payee signature.
 - **Escape routes are direct-to-chain:** The client submits these directly to Solana RPC:
   - `requestClose`: Payer-signed. Callable in `OPEN`. Starts the grace period.
@@ -204,6 +205,91 @@ sequenceDiagram
         P->>P: verify hash(preimage)<br/>final cumulative deltas -> recipients/payee<br/>(if payerWithdrawnAt == 0) transfer (deposit − settled) → payer<br/>sweep irreducible residual → treasury<br/>close escrow ATA<br/>deallocate PDA (fast path) or state = DISTRIBUTED, later `reclaim`
     end
 ```
+
+## Metered Negotiation
+
+Metered mode lets the server charge the actual cost of a request (tokens generated, bytes served) in one round trip, without the client trusting the server with more than one request's ceiling. It is a Solana-session extension; servers that don't advertise it, and clients that don't understand it, use the exact-voucher flow above unchanged.
+
+The split of authority:
+
+- the **client** signs a **cap**: "you may settle up to `capCumulative`, and only claims signed by `operator` count";
+- the **server's operator key** signs a **claim**: "the actual cumulative charge is `claimCumulative`";
+- the program accepts the pair only if `settled < claimCumulative ≤ capCumulative ≤ deposit` ([ADR-003 → `settleMetered`](./003-program-instructions.md#settlemetered-10)).
+
+A dishonest server can therefore under-claim but never claim more than the client capped.
+
+### Advertising
+
+The server offers metered mode by adding `meteredOperator` to the challenge `methodDetails`:
+
+```json
+"methodDetails": {
+  "...": "...",
+  "meteredOperator": "<Ed25519 pubkey base58 — the only key whose claims the server will submit>"
+}
+```
+
+When `meteredOperator` is present, `amount` is the **per-request ceiling**: the most one request can cost. A client that ignores `meteredOperator` sends exact vouchers and pays `amount` per request, as today.
+
+### Request: the client signs a cap
+
+For each paid request, the client sends `payload.action="cap"` with a SignedCap:
+
+```json
+{
+  "cap": {
+    "channelId": "<PDA address base58>",
+    "capCumulative": "<u64 decimal string>",
+    "expiresAt": "<RFC 3339 timestamp — OPTIONAL>",
+    "operator": "<meteredOperator pubkey base58>"
+  },
+  "signer": "<authorizedSigner pubkey base58>",
+  "signature": "<base58 Ed25519 sig over the 82-byte on-chain cap payload>",
+  "signatureType": "ed25519"
+}
+```
+
+The signed bytes are the on-chain `CapVoucherArgs` payload: `magic [0x56, 0x03] (2) || channelId (32) || capCumulative (8 LE) || expiresAt (8 LE, 0 when omitted) || operator (32)`, 82 bytes.
+
+The cap is a ceiling, not a payment. The client sets `capCumulative = lastClaimCumulative + amount`, where `lastClaimCumulative` is the highest claim it has verified (or the on-chain `settled` for a fresh session). The client MUST NOT sign a cap above `deposit`, and SHOULD NOT sign one more than one ceiling above its last verified claim, since that difference is what a dishonest server could take. A client that sends `n` metered requests concurrently needs `capCumulative = lastClaimCumulative + n × amount` on the last of them, and accepts that exposure.
+
+### Response: the server returns the claim
+
+After serving the request, the server computes the actual cost `c` (`0 ≤ c ≤ capCumulative − acceptedClaim`), signs a claim with the operator key and returns it in `Payment-Receipt` as `claim`:
+
+```json
+{
+  "claim": {
+    "channelId": "<PDA address base58>",
+    "claimCumulative": "<u64 decimal string = acceptedClaim + c>",
+    "expiresAt": "<RFC 3339 timestamp — OPTIONAL>"
+  },
+  "signer": "<meteredOperator pubkey base58>",
+  "signature": "<base58 Ed25519 sig over the 50-byte on-chain claim payload>",
+  "signatureType": "ed25519"
+}
+```
+
+The signed bytes are the on-chain `ClaimVoucherArgs` payload: `magic [0x56, 0x04] (2) || channelId (32) || claimCumulative (8 LE) || expiresAt (8 LE, 0 when omitted)`, 50 bytes. A claim must strictly advance the watermark, so when `c == 0` the server omits `claim` and the previous claim stays current.
+
+The client MUST verify the claim before sending its next cap: the signer equals `meteredOperator`, the signature verifies over the 50-byte payload, `channelId` matches, `claimCumulative > lastClaimCumulative`, and `claimCumulative ≤` the cap it just signed. The charge for the request is `claimCumulative − lastClaimCumulative`; the client then sets `lastClaimCumulative = claimCumulative`.
+
+### Server requirements in metered mode
+
+Server Implementation Requirements 5 and 6 apply with these changes:
+
+1. **Validate the cap like a voucher.** `cap.channelId` equals the active channel PDA, `SignedCap.signer` equals the persisted `authorizedSigner`, the signature verifies over the 82-byte payload, `cap.operator` equals the advertised `meteredOperator`, `capCumulative ≤ deposit`, and `expiresAt` stays valid through the expected settlement.
+2. **Require one full ceiling of headroom.** The server MUST reject a cap with `capCumulative < acceptedClaim + reserved + amount`, where `reserved` is the headroom already promised to this channel's in-flight requests (`0` when requests are served one at a time). Checking only `capCumulative > acceptedClaim` is not enough: a client could cap 1 unit above the accepted claim and still receive a request that costs up to `amount`, and two concurrent requests could share one cap's headroom. On acceptance the server adds `amount` to `reserved`, and on completion it replaces that reservation with the actual cost `c`. Servers that don't track reservations MUST serve metered requests on a channel one at a time.
+3. **Never claim above the cap.** `claimCumulative ≤ capCumulative` of the cap accepted for the same request. The program enforces this on chain, so a claim above the cap is unsettleable, not just dishonest.
+4. **Persist the pair atomically.** Settlement needs both messages: the highest accepted SignedCap and the highest SignedClaim it covers, keyed by `channelId`. Accepting a request is one atomic per-channel transition that stores both before the response is sent. A claim without a covering cap can't be settled.
+5. **Keep claims fresh.** The operator SHOULD sign claims with `expiresAt` omitted, or no earlier than the cap's, so the pair stays settleable for the whole settlement window.
+
+### Settlement and close
+
+- **Mid-session:** the server submits `[ed25519(cap), ed25519(claim), settleMetered]` with the latest stored pair. `settleMetered` is permissionless, so the client or anyone holding the pair can also submit it.
+- **Cooperative close:** `POST /channel/close` needs no voucher in metered mode; the server already holds the latest pair. It submits `[ed25519(cap), ed25519(claim), settleAndSeal(has_voucher = 2)]`, or `settleAndSeal(0)` when on-chain `settled` already equals the latest claim.
+- **Front-run retry:** in `OPEN`, a third party can copy the pair from a pending `settleAndSeal(2)` and land `settleMetered` first; the seal then fails with `VoucherWatermarkNotMonotonic` (234). The server MUST treat 234 from a voucher-bearing `settleAndSeal` as "already settled", re-read the channel, and resend with `has_voucher = 0`.
+- **Forced close:** during the grace period the server can still apply its latest pair with `settleAndSeal(2)`, bounded by the last cap the client signed.
 
 ## Wire Examples
 
@@ -384,5 +470,58 @@ Payment-Receipt: eyJtZXRob2QiOiJzb2xhbmEiLCJpbnRlbnQiOiJzZXNzaW9uIi...
   "spent": "250"
 }
 ```
+
+**Example 7: Metered `GET` with cap (C -> S)**
+
+The challenge advertised `"amount": "10"` and `"meteredOperator": "SrvrOperator1111111111111111111111111111111"`. The last verified claim was `42500`, so the client caps at `42510`:
+
+```json
+{
+  "id": "018f1a2b-7d1e-7c4a-9e12-3d0f5a8b2c4d",
+  "method": "solana",
+  "intent": "session",
+  "payload": {
+    "action": "cap",
+    "cap": {
+      "cap": {
+        "channelId": "ChA9XyZabcdef1234567890abcdef1234567890abc",
+        "capCumulative": "42510",
+        "operator": "SrvrOperator1111111111111111111111111111111"
+      },
+      "signer": "PayerAbcdef1234567890abcdef1234567890abcde",
+      "signature": "3xQp...base58-Ed25519-sig-over-82-bytes...",
+      "signatureType": "ed25519"
+    }
+  }
+}
+```
+
+**Example 8: Metered `Payment-Receipt` with claim (S -> C)**
+
+The request actually cost `7`, so the claim is `42507`:
+
+```json
+{
+  "method": "solana",
+  "intent": "session",
+  "reference": "ChA9XyZabcdef1234567890abcdef1234567890abc",
+  "status": "success",
+  "timestamp": "2026-04-20T18:42:04Z",
+  "challengeId": "018f1a2b-7d1e-7c4a-9e12-3d0f5a8b2c4d",
+  "acceptedCumulative": "42507",
+  "spent": "7",
+  "claim": {
+    "claim": {
+      "channelId": "ChA9XyZabcdef1234567890abcdef1234567890abc",
+      "claimCumulative": "42507"
+    },
+    "signer": "SrvrOperator1111111111111111111111111111111",
+    "signature": "4Nm2...base58-Ed25519-sig-over-50-bytes...",
+    "signatureType": "ed25519"
+  }
+}
+```
+
+The next request's cap is `42507 + 10 = 42517`.
 
 On close-receipt responses (`POST /channel/close`), add `"txHash": "<base58 solana sig>"` identifying the `settleAndSeal` tx the server submitted (optionally bundled with `distribute`), and (if the bundled `distribute` ran) `"refunded": "<u64 decimal>"` for the `deposit - settled` branch paid back to the payer.

@@ -426,8 +426,12 @@ safe no-op. Every other invalid entry fails the complete batch.
 ## Compatibility
 
 - `settle` and `[0x56, 0x01]` vouchers remain unchanged.
-- `settleAndSeal` continues to accept only its optional version-1 voucher.
+- `settleAndSeal` continues to accept only its optional version-1 voucher or
+  metered pair (`has_voucher == 2`); it does not accept batch vouchers.
 - `settleBatch` uses a new discriminator and `[0x56, 0x02]` message.
+  Discriminator `10` is taken by `settleMetered`, and `[0x56, 0x03]` /
+  `[0x56, 0x04]` by the metered cap and claim. See the
+  [voucher magic registry](./003-program-instructions.md#voucher-magic-registry).
 - Existing clients can ignore the new instruction.
 - Batch-capable clients and servers must negotiate the off-chain envelope and
   persist the complete ordered entry list with the signature.
