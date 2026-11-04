@@ -22,7 +22,7 @@ use super::ed25519::parse as ed25519_ix;
 use crate::errors::PaymentChannelsError;
 use crate::instructions::{
     CAP_VOUCHER_MAGIC, CAP_VOUCHER_PAYLOAD_SIZE, CLAIM_VOUCHER_MAGIC, CLAIM_VOUCHER_PAYLOAD_SIZE,
-    CapVoucherArgs, ClaimVoucherArgs, VOUCHER_MAGIC, VoucherArgs,
+    CapVoucherArgs, ClaimVoucherArgs, VOUCHER_MAGIC, VOUCHER_PAYLOAD_SIZE, VoucherArgs,
 };
 use crate::state::channel::Channel;
 use crate::state::{Transmutable, load};
@@ -46,7 +46,7 @@ pub fn verify_voucher(
     if ix.get_program_id() != &crate::ed25519::PROGRAM_ID {
         return Err(PaymentChannelsError::MissingEd25519Verification.into());
     }
-    let parsed = ed25519_ix::parse(ix.get_instruction_data())
+    let parsed = ed25519_ix::parse(ix.get_instruction_data(), VOUCHER_PAYLOAD_SIZE)
         .map_err(|_| PaymentChannelsError::MalformedEd25519Instruction)?;
     verify_parsed(channel_address, channel, &parsed, now_unix)
 }
@@ -157,7 +157,7 @@ fn load_ed25519_ix<'s>(
 fn parse_metered<'i>(
     ix: &'i IntrospectedInstruction<'_>,
     slot_magic: [u8; 2],
-) -> Result<ed25519_ix::ParsedMessage<'i>, ProgramError> {
+) -> Result<ed25519_ix::Parsed<'i>, ProgramError> {
     let data = ix.get_instruction_data();
     let (message_len, expected_magic) = match data.len().checked_sub(super::ed25519::MESSAGE_OFFSET)
     {
@@ -165,7 +165,7 @@ fn parse_metered<'i>(
         Some(CLAIM_VOUCHER_PAYLOAD_SIZE) => (CLAIM_VOUCHER_PAYLOAD_SIZE, CLAIM_VOUCHER_MAGIC),
         _ => return Err(PaymentChannelsError::MalformedEd25519Instruction.into()),
     };
-    let parsed = ed25519_ix::parse_with_message_len(data, message_len)
+    let parsed = ed25519_ix::parse(data, message_len)
         .map_err(|_| PaymentChannelsError::MalformedEd25519Instruction)?;
     if parsed.message[..2] != expected_magic || expected_magic != slot_magic {
         return Err(PaymentChannelsError::VoucherBadMagic.into());
@@ -213,8 +213,8 @@ fn verify_parsed(
     parsed: &ed25519_ix::Parsed<'_>,
     now_unix: i64,
 ) -> Result<u64, ProgramError> {
-    // `ed25519_ix::parse` pinned `message_data_size == VOUCHER_PAYLOAD_SIZE`
-    // at the canonical offset, so `parsed.message` is exactly a `VoucherArgs`
+    // `ed25519_ix::parse` pinned the message to `VOUCHER_PAYLOAD_SIZE` at the
+    // canonical offset, so `parsed.message` is exactly a `VoucherArgs`
     // bit-pattern. `VoucherArgs` is align-1, so this zero-copy load cannot
     // fail on length or alignment (the map_err is unreachable in practice).
     let voucher: &VoucherArgs = unsafe { load::<VoucherArgs>(parsed.message) }
@@ -263,7 +263,6 @@ mod tests {
     use std::vec::Vec;
 
     use super::*;
-    use crate::instructions::{CAP_VOUCHER_PAYLOAD_SIZE, VOUCHER_PAYLOAD_SIZE};
     use crate::state::Transmutable;
 
     const CHANNEL_ID: Address = Address::new_from_array([7u8; 32]);
@@ -341,9 +340,7 @@ mod tests {
     fn valid_parsed(message: &[u8]) -> ed25519_ix::Parsed<'_> {
         ed25519_ix::Parsed {
             pubkey: AUTH.as_array(),
-            message: message
-                .try_into()
-                .expect("test message must be VOUCHER_PAYLOAD_SIZE"),
+            message,
         }
     }
 
@@ -522,7 +519,9 @@ mod tests {
     /// unexpectedly succeeds — structural-failure tests always pass
     /// deliberately malformed data.
     fn parse_err(data: &[u8]) -> ed25519_ix::Ed25519ParseError {
-        ed25519_ix::parse(data).err().expect("parse should fail")
+        ed25519_ix::parse(data, VOUCHER_PAYLOAD_SIZE)
+            .err()
+            .expect("parse should fail")
     }
 
     #[test]
@@ -688,11 +687,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_with_message_len_accepts_cap_sized_message() {
+    fn parse_accepts_cap_sized_message() {
         let message = [0x56u8, 0x03].repeat(CAP_VOUCHER_PAYLOAD_SIZE / 2);
         let data = build_ix_data(AUTH.as_array(), &message, &AUTH_SIGNATURE);
-        let parsed = ed25519_ix::parse_with_message_len(&data, CAP_VOUCHER_PAYLOAD_SIZE)
-            .expect("82-byte canonical message");
+        let parsed =
+            ed25519_ix::parse(&data, CAP_VOUCHER_PAYLOAD_SIZE).expect("82-byte canonical message");
         assert_eq!(parsed.message, message.as_slice());
         assert_eq!(parse_err(&data), ed25519_ix::Ed25519ParseError::Length);
     }
@@ -706,7 +705,7 @@ mod tests {
     }
 
     fn parse_cap_err(data: &[u8]) -> ed25519_ix::Ed25519ParseError {
-        ed25519_ix::parse_with_message_len(data, CAP_VOUCHER_PAYLOAD_SIZE)
+        ed25519_ix::parse(data, CAP_VOUCHER_PAYLOAD_SIZE)
             .err()
             .expect("parse should fail")
     }
@@ -777,9 +776,7 @@ mod tests {
         let msg = v.as_bytes();
         let parsed = ed25519_ix::Parsed {
             pubkey: OTHER_PUBKEY.as_array(),
-            message: msg
-                .try_into()
-                .expect("test message must be VOUCHER_PAYLOAD_SIZE"),
+            message: msg,
         };
         expect_err(
             verify_parsed(&CHANNEL_ID, &ch, &parsed, 0),
