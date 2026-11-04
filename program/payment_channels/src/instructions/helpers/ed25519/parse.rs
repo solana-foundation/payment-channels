@@ -10,18 +10,10 @@ use super::{
     MESSAGE_OFFSET, PUBKEY_OFFSET, PUBKEY_SERIALIZED_SIZE, SIGNATURE_OFFSET,
     SIGNATURE_OFFSETS_START,
 };
-use crate::instructions::VOUCHER_PAYLOAD_SIZE;
 
-/// Parsed Ed25519 precompile ix data. Sized-array refs let the caller
-/// compare against `[u8; 32]` / `[u8; 50]` fixtures without slice-length
-/// runtime checks.
+/// Parsed Ed25519 precompile ix data: borrowed views of the signer pubkey
+/// and the signed message, whose length the caller selected.
 pub struct Parsed<'a> {
-    pub pubkey: &'a [u8; PUBKEY_SERIALIZED_SIZE],
-    pub message: &'a [u8; VOUCHER_PAYLOAD_SIZE],
-}
-
-/// Parsed precompile instruction whose message length is selected by the caller.
-pub struct ParsedMessage<'a> {
     pub pubkey: &'a [u8; PUBKEY_SERIALIZED_SIZE],
     pub message: &'a [u8],
 }
@@ -60,26 +52,10 @@ pub enum Ed25519ParseError {
     MessageSize,
 }
 
-/// Parse a canonical single-signature Ed25519 precompile instruction carrying
-/// a v1 voucher.
-pub fn parse(data: &[u8]) -> Result<Parsed<'_>, Ed25519ParseError> {
-    let parsed = parse_with_message_len(data, VOUCHER_PAYLOAD_SIZE)?;
-    let message: &[u8; VOUCHER_PAYLOAD_SIZE] = parsed
-        .message
-        .try_into()
-        .expect("message length parameter pins the canonical voucher region");
-    Ok(Parsed {
-        pubkey: parsed.pubkey,
-        message,
-    })
-}
-
 /// Parse a single-signature Ed25519 precompile instruction with the canonical
-/// inline layout and an exact message length.
-pub fn parse_with_message_len(
-    data: &[u8],
-    message_len: usize,
-) -> Result<ParsedMessage<'_>, Ed25519ParseError> {
+/// inline layout and an exact message length. Validates every field of
+/// `Ed25519SignatureOffsets`.
+pub fn parse(data: &[u8], message_len: usize) -> Result<Parsed<'_>, Ed25519ParseError> {
     // Full canonical inline layout: `[num_sigs=1, pad=0, offsets×1, pubkey, signature, message]`.
     if data.len() != MESSAGE_OFFSET + message_len {
         return Err(Ed25519ParseError::Length);
@@ -144,5 +120,5 @@ pub fn parse_with_message_len(
         .expect("length + offset guards pin the canonical pubkey region");
     let message = &data[MESSAGE_OFFSET..MESSAGE_OFFSET + message_len];
 
-    Ok(ParsedMessage { pubkey, message })
+    Ok(Parsed { pubkey, message })
 }
