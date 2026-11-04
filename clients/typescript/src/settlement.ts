@@ -1,9 +1,8 @@
-// Hand-written helpers for voucher settlement: v1 (`settle`, `settleAndSeal`
-// with `has_voucher == 1`) and metered (`settleMetered`, `settleAndSeal` with
-// `has_voucher == 2`). The generated client has the voucher codecs and the
-// bare instructions; this module adds the signed messages, the Ed25519
-// precompile instructions that carry them, and the transaction shapes the
-// program expects.
+// Hand-written helpers for metered settlement (`settleMetered`, and
+// `settleAndSeal` with `has_voucher == 2`). The generated client has the
+// voucher codecs and the bare instructions; this module adds the signed
+// messages, the Ed25519 precompile instructions that carry them, and the
+// transaction shape the program expects.
 
 import {
   type Address,
@@ -21,22 +20,18 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
   signBytes,
 } from '@solana/kit';
-import { getSettleInstruction } from './generated/instructions/settle.js';
 import { getSettleMeteredInstruction } from './generated/instructions/settleMetered.js';
 import { getCapVoucherArgsEncoder } from './generated/types/capVoucherArgs.js';
 import { getClaimVoucherArgsEncoder } from './generated/types/claimVoucherArgs.js';
-import { getVoucherArgsEncoder } from './generated/types/voucherArgs.js';
 
-/** Magic of a v1 voucher, signed by `authorizedSigner` (`settle`, `settleAndSeal(1)`). */
-export const VOUCHER_MAGIC = [0x56, 0x01] as const;
 /** Magic of a metered cap, signed by `authorizedSigner`. */
 export const CAP_VOUCHER_MAGIC = [0x56, 0x03] as const;
 /** Magic of a metered claim, signed by the cap's `operator`. */
 export const CLAIM_VOUCHER_MAGIC = [0x56, 0x04] as const;
 
-export const VOUCHER_SIZE = 50;
-export const CAP_VOUCHER_SIZE = 82;
-export const CLAIM_VOUCHER_SIZE = 50;
+/** Signed-message sizes, taken from the generated codecs. */
+export const CAP_VOUCHER_SIZE = getCapVoucherArgsEncoder().fixedSize;
+export const CLAIM_VOUCHER_SIZE = getClaimVoucherArgsEncoder().fixedSize;
 
 /** `settleAndSeal.hasVoucher`: seal at the current `settled` watermark. */
 export const SETTLE_AND_SEAL_NO_VOUCHER = 0;
@@ -54,14 +49,6 @@ const PUBKEY_OFFSET = 16;
 const SIGNATURE_OFFSET = 48;
 const MESSAGE_OFFSET = 112;
 const CURRENT_INSTRUCTION = 0xffff;
-
-export type VoucherInput = {
-  channelId: Address;
-  /** New `settled` watermark; must be above `settled` and at most the deposit. */
-  cumulativeAmount: bigint;
-  /** Unix seconds; `0n` (the default) means no expiry. */
-  expiresAt?: bigint;
-};
 
 export type CapVoucherInput = {
   channelId: Address;
@@ -87,16 +74,6 @@ export type SignedVoucherMessage = {
   signer: Address;
   signature: SignatureBytes;
 };
-
-/** The 50 bytes the client signs to settle up to `cumulativeAmount`. */
-export function encodeVoucher(input: VoucherInput): ReadonlyUint8Array {
-  return getVoucherArgsEncoder().encode({
-    magic: [...VOUCHER_MAGIC],
-    channelId: input.channelId,
-    cumulativeAmount: input.cumulativeAmount,
-    expiresAt: input.expiresAt ?? 0n,
-  });
-}
 
 /** The 82 bytes the client signs to authorize claims up to `capCumulative`. */
 export function encodeCapVoucher(input: CapVoucherInput): ReadonlyUint8Array {
@@ -161,48 +138,6 @@ export function getEd25519VerifyInstruction(signed: SignedVoucherMessage): Instr
   return { programAddress: ED25519_PROGRAM_ADDRESS, data };
 }
 
-export type SettlementInput = {
-  channel: Address;
-  /** v1 voucher signed by the channel's `authorizedSigner`. */
-  voucher: SignedVoucherMessage;
-};
-
-/**
- * `[ed25519(voucher), settle]`. Nothing may sit between the voucher and
- * `settle`. Put compute-budget instructions before the voucher.
- */
-export function getSettleInstructions(input: SettlementInput): Instruction[] {
-  assertMessage('voucher', input.voucher.message, VOUCHER_SIZE, VOUCHER_MAGIC);
-  return [
-    getEd25519VerifyInstruction(input.voucher),
-    getSettleInstruction({
-      channel: input.channel,
-      instructionsSysvar: SYSVAR_INSTRUCTIONS_ADDRESS,
-    }),
-  ];
-}
-
-export type BuildSettleTransactionInput = SettlementInput & {
-  feePayer: Address;
-  lifetime: BlockhashLifetimeConstraint;
-  /** Placed before the voucher, e.g. compute-budget instructions. */
-  preInstructions?: Instruction[];
-};
-
-/** Version 0 transaction message for a v1 settlement, ready to sign. */
-export function buildSettleTransaction(input: BuildSettleTransactionInput) {
-  return pipe(
-    createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayer(input.feePayer, m),
-    (m) => setTransactionMessageLifetimeUsingBlockhash(input.lifetime, m),
-    (m) =>
-      appendTransactionMessageInstructions(
-        [...(input.preInstructions ?? []), ...getSettleInstructions(input)],
-        m,
-      ),
-  );
-}
-
 export type MeteredSettlementInput = {
   channel: Address;
   /** Cap signed by the channel's `authorizedSigner`. */
@@ -212,9 +147,9 @@ export type MeteredSettlementInput = {
 };
 
 /**
- * `[ed25519(cap), ed25519(claim), settleMetered]`. The program also accepts
- * the pair in the other order, but nothing may sit between the pair and
- * `settleMetered`. Put compute-budget instructions before the pair.
+ * `[ed25519(cap), ed25519(claim), settleMetered]`, in that order. Nothing may
+ * sit between the pair and `settleMetered`; put compute-budget instructions
+ * before the pair.
  */
 export function getSettleMeteredInstructions(input: MeteredSettlementInput): Instruction[] {
   assertMessage('cap', input.cap.message, CAP_VOUCHER_SIZE, CAP_VOUCHER_MAGIC);
