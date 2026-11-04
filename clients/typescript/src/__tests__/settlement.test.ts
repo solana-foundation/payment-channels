@@ -8,24 +8,19 @@ import {
 import { describe, expect, it } from 'vitest';
 import {
   PAYMENT_CHANNELS_PROGRAM_ADDRESS,
-  SETTLE_DISCRIMINATOR,
   SETTLE_METERED_DISCRIMINATOR,
 } from '../generated/index.js';
 import {
   buildSettleMeteredTransaction,
-  buildSettleTransaction,
   CAP_VOUCHER_SIZE,
   CLAIM_VOUCHER_SIZE,
   ED25519_PROGRAM_ADDRESS,
   encodeCapVoucher,
   encodeClaimVoucher,
-  encodeVoucher,
   getEd25519VerifyInstruction,
-  getSettleInstructions,
   getSettleMeteredInstructions,
   SYSVAR_INSTRUCTIONS_ADDRESS,
   signVoucherMessage,
-  VOUCHER_SIZE,
 } from '../settlement.js';
 
 const CHANNEL = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' as Address;
@@ -55,36 +50,6 @@ async function signedPair() {
   return { cap, claim };
 }
 
-async function signedVoucher() {
-  return signVoucherMessage(
-    await generateKeyPair(),
-    encodeVoucher({ channelId: CHANNEL, cumulativeAmount: 500n }),
-  );
-}
-
-describe('v1 voucher encoder matches the program layout', () => {
-  it('encodes the voucher as magic || channel || cumulative || expires_at', () => {
-    const bytes = encodeVoucher({
-      channelId: CHANNEL,
-      cumulativeAmount: 0x0102030405060708n,
-      expiresAt: 1_700_000_000n,
-    });
-    expect(bytes.length).toBe(VOUCHER_SIZE);
-    expect([...bytes]).toEqual([
-      0x56,
-      0x01,
-      ...getAddressEncoder().encode(CHANNEL),
-      ...le64(0x0102030405060708n),
-      ...le64(1_700_000_000n),
-    ]);
-  });
-
-  it('defaults expiresAt to 0 (no expiry)', () => {
-    const bytes = encodeVoucher({ channelId: CHANNEL, cumulativeAmount: 1n });
-    expect([...bytes.slice(42, 50)]).toEqual(le64(0n));
-  });
-});
-
 describe('metered voucher encoders match the program layout', () => {
   it('encodes the cap as magic || channel || cap || expires_at || operator', () => {
     const bytes = encodeCapVoucher({
@@ -94,7 +59,8 @@ describe('metered voucher encoders match the program layout', () => {
       operator: OPERATOR,
     });
     const address = getAddressEncoder();
-    expect(bytes.length).toBe(CAP_VOUCHER_SIZE);
+    expect(bytes.length).toBe(82);
+    expect(CAP_VOUCHER_SIZE).toBe(82);
     expect([...bytes]).toEqual([
       0x56,
       0x03,
@@ -111,7 +77,8 @@ describe('metered voucher encoders match the program layout', () => {
       claimCumulative: 500n,
       expiresAt: 1_700_000_000n,
     });
-    expect(bytes.length).toBe(CLAIM_VOUCHER_SIZE);
+    expect(bytes.length).toBe(50);
+    expect(CLAIM_VOUCHER_SIZE).toBe(50);
     expect([...bytes]).toEqual([
       0x56,
       0x04,
@@ -150,53 +117,6 @@ describe('getEd25519VerifyInstruction', () => {
     const message = encodeClaimVoucher({ channelId: CHANNEL, claimCumulative: 7n });
     const signed = await signVoucherMessage(keyPair, message);
     expect(await verifySignature(keyPair.publicKey, signed.signature, message)).toBe(true);
-  });
-});
-
-describe('getSettleInstructions', () => {
-  it('emits [ed25519(voucher), settle]', async () => {
-    const voucher = await signedVoucher();
-    const [voucherIx, settleIx] = getSettleInstructions({ channel: CHANNEL, voucher });
-
-    expect(voucherIx.programAddress).toBe(ED25519_PROGRAM_ADDRESS);
-    expect((voucherIx.data as Uint8Array).length).toBe(112 + VOUCHER_SIZE);
-    expect([...(settleIx.data as Uint8Array)]).toEqual([SETTLE_DISCRIMINATOR]);
-    expect(settleIx.accounts?.map((a) => a.address)).toEqual([
-      CHANNEL,
-      SYSVAR_INSTRUCTIONS_ADDRESS,
-    ]);
-  });
-
-  it('rejects a cap passed as the voucher', async () => {
-    const { cap } = await signedPair();
-    expect(() => getSettleInstructions({ channel: CHANNEL, voucher: cap })).toThrow(RangeError);
-  });
-
-  it('rejects a claim passed as the voucher', async () => {
-    const { claim } = await signedPair();
-    expect(() => getSettleInstructions({ channel: CHANNEL, voucher: claim })).toThrow(TypeError);
-  });
-});
-
-describe('buildSettleTransaction', () => {
-  it('puts pre-instructions before the voucher', async () => {
-    const voucher = await signedVoucher();
-    const pre = { programAddress: FEE_PAYER, data: new Uint8Array([9]) };
-    const message = buildSettleTransaction({
-      channel: CHANNEL,
-      voucher,
-      feePayer: FEE_PAYER,
-      lifetime: { blockhash: FEE_PAYER as never, lastValidBlockHeight: 0n },
-      preInstructions: [pre],
-    });
-
-    expect(message.version).toBe(0);
-    expect(message.feePayer.address).toBe(FEE_PAYER);
-    expect(message.instructions.map((ix) => ix.programAddress)).toEqual([
-      FEE_PAYER,
-      ED25519_PROGRAM_ADDRESS,
-      PAYMENT_CHANNELS_PROGRAM_ADDRESS,
-    ]);
   });
 });
 
