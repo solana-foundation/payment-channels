@@ -37,15 +37,12 @@ pub fn verify_voucher(
 ) -> Result<u64, ProgramError> {
     let sysvar = Instructions::try_from(instructions_sysvar)?;
     let current = sysvar.load_current_index();
-    let prev_idx = current
-        .checked_sub(1)
-        .ok_or(PaymentChannelsError::MissingEd25519Verification)?;
-    let ix = sysvar
-        .load_instruction_at(prev_idx as usize)
-        .map_err(|_| PaymentChannelsError::MissingEd25519Verification)?;
-    if ix.get_program_id() != &crate::ed25519::PROGRAM_ID {
-        return Err(PaymentChannelsError::MissingEd25519Verification.into());
-    }
+    let ix = load_ed25519_ix(
+        &sysvar,
+        current,
+        1,
+        PaymentChannelsError::MissingEd25519Verification,
+    )?;
     let (signer, voucher) = parse_signed::<VoucherArgs>(ix.get_instruction_data(), VOUCHER_MAGIC)?;
     verify_parsed(channel_address, channel, signer, voucher, now_unix)
 }
@@ -151,11 +148,8 @@ fn parse_signed<T: Transmutable>(
     Ok((parsed.pubkey, message))
 }
 
-/// Channel binding and freshness (`expires_at == 0` means no expiry) for the
-/// metered cap and claim; [`parse_signed`] has already pinned the magic.
-///
-/// Mirrors the inline checks in [`verify_parsed`], which stay inline because
-/// the v1 path is audited. A change to either copy must be made in both.
+/// Channel binding and freshness (`expires_at == 0` means no expiry), shared
+/// by every voucher kind.
 fn check_binding(
     channel_id: &Address,
     channel_address: &Address,
@@ -189,19 +183,12 @@ fn verify_parsed(
     voucher: &VoucherArgs,
     now_unix: i64,
 ) -> Result<u64, ProgramError> {
-    // Address binding IS the epoch binding: `open_slot` is a PDA seed, so
-    // an address never hosts two incarnations (see
-    // `constants::OPEN_SLOT_WINDOW`) and a voucher issued for a previous
-    // channel at recycled parameters targets an address that no longer —
-    // and can never again — exist.
-    if voucher.channel_id != *channel_address {
-        return Err(PaymentChannelsError::VoucherChannelMismatch.into());
-    }
-
-    let expires_at: i64 = voucher.expires_at();
-    if expires_at != 0 && now_unix >= expires_at {
-        return Err(PaymentChannelsError::VoucherExpired.into());
-    }
+    check_binding(
+        &voucher.channel_id,
+        channel_address,
+        voucher.expires_at(),
+        now_unix,
+    )?;
 
     let cumulative: u64 = voucher.cumulative_amount();
     let deposit: u64 = channel.deposit();
