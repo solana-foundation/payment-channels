@@ -262,7 +262,7 @@ The order is fixed: the cap at `current − 2`, the claim at `current − 1`. Ea
 
 "Fresh" uses the v1 rule: `expires_at == 0 || now < expires_at`.
 
-**Replay.** Cap reuse is intended: one cap can cover several increasing claims, and an older, lower cap is harmless because every claim must still strictly advance `settled`. A leaked cap lets the named operator settle up to that cap and nothing else, the same exposure as a leaked v1 voucher.
+**Replay.** Cap reuse is intended: one cap can cover several increasing claims, and an older, lower cap is harmless because every claim must still strictly advance `settled`. A leaked cap lets the named operator settle up to that cap and nothing else, the same exposure as a leaked v1 voucher. Because caps replay, a client's exposure on an open channel is the highest cap it has ever signed, not the latest one; signing a lower cap later does not reduce it.
 
 **Accounts**
 
