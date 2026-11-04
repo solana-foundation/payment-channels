@@ -44,7 +44,7 @@ pub fn verify_voucher(
         PaymentChannelsError::MissingEd25519Verification,
     )?;
     let (signer, voucher) = parse_signed::<VoucherArgs>(ix.get_instruction_data(), VOUCHER_MAGIC)?;
-    verify_parsed(channel_address, channel, signer, voucher, now_unix)
+    validate_v1_voucher(channel_address, channel, signer, voucher, now_unix)
 }
 
 /// Verify the metered cap/claim pair against the channel. Returns the new
@@ -81,12 +81,12 @@ pub fn verify_metered_pair(
     let (claim_signer, claim) =
         parse_signed::<ClaimVoucherArgs>(claim_ix.get_instruction_data(), CLAIM_VOUCHER_MAGIC)?;
 
-    check_binding(&cap.channel_id, channel_address, cap.expires_at(), now_unix)?;
+    validate_channel_and_expiry(&cap.channel_id, channel_address, cap.expires_at(), now_unix)?;
     if cap_signer != channel.authorized_signer.as_array() {
         return Err(PaymentChannelsError::VoucherSignerMismatch.into());
     }
 
-    check_binding(
+    validate_channel_and_expiry(
         &claim.channel_id,
         channel_address,
         claim.expires_at(),
@@ -150,7 +150,7 @@ fn parse_signed<T: Transmutable>(
 
 /// Channel binding and freshness (`expires_at == 0` means no expiry), shared
 /// by every voucher kind.
-fn check_binding(
+fn validate_channel_and_expiry(
     channel_id: &Address,
     channel_address: &Address,
     expires_at: i64,
@@ -176,14 +176,14 @@ fn check_binding(
 ///
 /// The precompile proved `signer` signed the message and [`parse_signed`]
 /// pinned its layout and magic; the fields are read straight from it.
-fn verify_parsed(
+fn validate_v1_voucher(
     channel_address: &Address,
     channel: &Channel,
     signer: &[u8; 32],
     voucher: &VoucherArgs,
     now_unix: i64,
 ) -> Result<u64, ProgramError> {
-    check_binding(
+    validate_channel_and_expiry(
         &voucher.channel_id,
         channel_address,
         voucher.expires_at(),
@@ -276,7 +276,7 @@ mod tests {
 
     /// Assert `result` is an error whose `ProgramError::Custom` code
     /// equals the numeric discriminant of `expected`. Panics on `Ok`
-    /// or on a non-custom error — used by every `verify_parsed` test
+    /// or on a non-custom error — used by every `validate_v1_voucher` test
     /// that pins a specific validator failure.
     fn expect_err<T>(result: Result<T, ProgramError>, expected: PaymentChannelsError) {
         match result {
@@ -288,7 +288,7 @@ mod tests {
 
     /// `verify_voucher` without the sysvar: parse a canonical ix carrying
     /// `message` under `signer`, then verify it.
-    fn verify_message(
+    fn verify_v1_message(
         ch: &Channel,
         signer: &Address,
         message: &[u8],
@@ -296,7 +296,7 @@ mod tests {
     ) -> Result<u64, ProgramError> {
         let data = build_ix_data(signer.as_array(), message, &AUTH_SIGNATURE);
         let (pubkey, voucher) = parse_signed::<VoucherArgs>(&data, VOUCHER_MAGIC)?;
-        verify_parsed(&CHANNEL_ID, ch, pubkey, voucher, now)
+        validate_v1_voucher(&CHANNEL_ID, ch, pubkey, voucher, now)
     }
 
     // --- payload contract -------------------------------------------------
@@ -327,7 +327,7 @@ mod tests {
         let ch = make_channel(100, 1_000, AUTH);
         let v = VoucherArgs::new(CHANNEL_ID, 200, 0);
         let msg = v.as_bytes();
-        let out = verify_message(&ch, &AUTH, msg, 1_000_000).unwrap();
+        let out = verify_v1_message(&ch, &AUTH, msg, 1_000_000).unwrap();
         assert_eq!(out, 200);
     }
 
@@ -336,7 +336,7 @@ mod tests {
         let ch = make_channel(100, 500, AUTH);
         let v = VoucherArgs::new(CHANNEL_ID, 500, 2_000);
         let msg = v.as_bytes();
-        let out = verify_message(&ch, &AUTH, msg, 1_999).unwrap();
+        let out = verify_v1_message(&ch, &AUTH, msg, 1_999).unwrap();
         assert_eq!(out, 500);
     }
 
@@ -349,7 +349,7 @@ mod tests {
         v.magic[1] = 0x02; // wrong format version byte
         let msg = v.as_bytes();
         expect_err(
-            verify_message(&ch, &AUTH, msg, 0),
+            verify_v1_message(&ch, &AUTH, msg, 0),
             PaymentChannelsError::VoucherBadMagic,
         );
     }
@@ -361,7 +361,7 @@ mod tests {
         v.magic = [0u8; 2];
         let msg = v.as_bytes();
         expect_err(
-            verify_message(&ch, &AUTH, msg, 0),
+            verify_v1_message(&ch, &AUTH, msg, 0),
             PaymentChannelsError::VoucherBadMagic,
         );
     }
@@ -374,7 +374,7 @@ mod tests {
         let v = VoucherArgs::new(Address::new_from_array([9u8; 32]), 100, 0);
         let msg = v.as_bytes();
         expect_err(
-            verify_message(&ch, &AUTH, msg, 0),
+            verify_v1_message(&ch, &AUTH, msg, 0),
             PaymentChannelsError::VoucherChannelMismatch,
         );
     }
@@ -385,7 +385,7 @@ mod tests {
         let v = VoucherArgs::new(CHANNEL_ID, 100, 500);
         let msg = v.as_bytes();
         expect_err(
-            verify_message(&ch, &AUTH, msg, 500),
+            verify_v1_message(&ch, &AUTH, msg, 500),
             PaymentChannelsError::VoucherExpired,
         );
     }
@@ -396,7 +396,7 @@ mod tests {
         let v = VoucherArgs::new(CHANNEL_ID, 100, 500);
         let msg = v.as_bytes();
         expect_err(
-            verify_message(&ch, &AUTH, msg, 501),
+            verify_v1_message(&ch, &AUTH, msg, 501),
             PaymentChannelsError::VoucherExpired,
         );
     }
@@ -407,7 +407,7 @@ mod tests {
         let v = VoucherArgs::new(CHANNEL_ID, 100, -1);
         let msg = v.as_bytes();
         expect_err(
-            verify_message(&ch, &AUTH, msg, 0),
+            verify_v1_message(&ch, &AUTH, msg, 0),
             PaymentChannelsError::VoucherExpired,
         );
     }
@@ -418,7 +418,7 @@ mod tests {
         let v = VoucherArgs::new(CHANNEL_ID, 250, 0);
         let msg = v.as_bytes();
         expect_err(
-            verify_message(&ch, &AUTH, msg, 0),
+            verify_v1_message(&ch, &AUTH, msg, 0),
             PaymentChannelsError::VoucherWatermarkNotMonotonic,
         );
     }
@@ -429,7 +429,7 @@ mod tests {
         let v = VoucherArgs::new(CHANNEL_ID, 100, 0);
         let msg = v.as_bytes();
         expect_err(
-            verify_message(&ch, &AUTH, msg, 0),
+            verify_v1_message(&ch, &AUTH, msg, 0),
             PaymentChannelsError::VoucherWatermarkNotMonotonic,
         );
     }
@@ -440,7 +440,7 @@ mod tests {
         let v = VoucherArgs::new(CHANNEL_ID, 0, 0);
         let msg = v.as_bytes();
         expect_err(
-            verify_message(&ch, &AUTH, msg, 0),
+            verify_v1_message(&ch, &AUTH, msg, 0),
             PaymentChannelsError::VoucherWatermarkNotMonotonic,
         );
     }
@@ -451,7 +451,7 @@ mod tests {
         let v = VoucherArgs::new(CHANNEL_ID, 501, 0);
         let msg = v.as_bytes();
         expect_err(
-            verify_message(&ch, &AUTH, msg, 0),
+            verify_v1_message(&ch, &AUTH, msg, 0),
             PaymentChannelsError::VoucherOverDeposit,
         );
     }
@@ -718,7 +718,7 @@ mod tests {
         let v = VoucherArgs::new(CHANNEL_ID, 100, 0);
         let msg = v.as_bytes();
         expect_err(
-            verify_message(&ch, &OTHER_PUBKEY, msg, 0),
+            verify_v1_message(&ch, &OTHER_PUBKEY, msg, 0),
             PaymentChannelsError::VoucherSignerMismatch,
         );
     }
