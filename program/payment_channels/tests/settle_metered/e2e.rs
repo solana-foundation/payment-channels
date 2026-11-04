@@ -229,8 +229,7 @@ fn missing_preceding_precompile_rejects() {
 fn swapped_precompile_order_rejects() {
     let mut env = setup();
     let (cap, claim, settle) = prepared(&env);
-    // The cap slot parses for an 82-byte message and gets 50 bytes, so it
-    // fails the layout parser before any magic is compared.
+    // A 50-byte claim in the 82-byte cap slot fails the layout parser.
     reject(
         &mut env,
         &[claim, cap, settle],
@@ -254,8 +253,7 @@ fn earlier_pair_does_not_satisfy_the_immediate_slots() {
     let mut env = setup();
     let (cap, claim, settle) = prepared(&env);
     let extra_claim = claim.clone();
-    // `current - 2` now holds a claim: 50 bytes in the 82-byte cap slot fails
-    // the layout parser, so the valid pair one slot earlier is never read.
+    // `current - 2` holds a claim; the valid pair one slot earlier is never read.
     reject(
         &mut env,
         &[cap, claim, extra_claim, settle],

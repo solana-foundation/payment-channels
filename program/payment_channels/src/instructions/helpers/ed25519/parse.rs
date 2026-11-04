@@ -11,8 +11,7 @@ use super::{
     SIGNATURE_OFFSETS_START,
 };
 
-/// Parsed Ed25519 precompile ix data: borrowed views of the signer pubkey
-/// and the signed message, whose length the caller selected.
+/// Borrowed signer pubkey and signed message of a parsed precompile ix.
 pub struct Parsed<'a> {
     pub pubkey: &'a [u8; PUBKEY_SERIALIZED_SIZE],
     pub message: &'a [u8],
@@ -52,9 +51,8 @@ pub enum Ed25519ParseError {
     MessageSize,
 }
 
-/// Parse a single-signature Ed25519 precompile instruction with the canonical
-/// inline layout and an exact message length. Validates every field of
-/// `Ed25519SignatureOffsets`.
+/// Parse a single-signature Ed25519 precompile ix with the canonical inline
+/// layout and a message of exactly `message_len` bytes.
 pub fn parse(data: &[u8], message_len: usize) -> Result<Parsed<'_>, Ed25519ParseError> {
     // Full canonical inline layout: `[num_sigs=1, pad=0, offsets×1, pubkey, signature, message]`.
     if data.len() != MESSAGE_OFFSET + message_len {
