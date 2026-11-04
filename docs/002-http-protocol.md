@@ -251,7 +251,7 @@ For each paid request, the client sends `payload.action="cap"` with a SignedCap:
 
 The signed bytes are the on-chain `CapVoucherArgs` payload: `magic [0x56, 0x03] (2) || channelId (32) || capCumulative (8 LE) || expiresAt (8 LE, 0 when omitted) || operator (32)`, 82 bytes.
 
-The cap is a ceiling, not a payment. The client sets `capCumulative = lastClaimCumulative + amount`, where `lastClaimCumulative` is the highest claim it has verified (or the on-chain `settled` for a fresh session). The client MUST NOT sign a cap above `deposit`, and SHOULD NOT sign one more than one ceiling above its last verified claim, since that difference is what a dishonest server could take. A client that sends `n` metered requests concurrently needs `capCumulative = lastClaimCumulative + n × amount` on the last of them, and accepts that exposure.
+The cap is a ceiling, not a payment. The client sets `capCumulative = lastClaimCumulative + amount`, where `lastClaimCumulative` is the highest claim it has verified (or the on-chain `settled` for a fresh session). The client MUST NOT sign a cap above `deposit`, and SHOULD NOT sign one more than one ceiling above its last verified claim, since that difference is what a dishonest server could take. A client that sends `n` metered requests concurrently needs `capCumulative = lastClaimCumulative + n × amount` on the last of them, and accepts that exposure. Caps replay on chain, so the exposure that matters is the highest cap ever signed on the channel until it closes, not the most recent one.
 
 ### Response: the server returns the claim
 
