@@ -229,10 +229,12 @@ fn missing_preceding_precompile_rejects() {
 fn swapped_precompile_order_rejects() {
     let mut env = setup();
     let (cap, claim, settle) = prepared(&env);
+    // The cap slot parses for an 82-byte message and gets 50 bytes, so it
+    // fails the layout parser before any magic is compared.
     reject(
         &mut env,
         &[claim, cap, settle],
-        PaymentChannelsError::VoucherBadMagic,
+        PaymentChannelsError::MalformedEd25519Instruction,
     );
 }
 
@@ -252,10 +254,12 @@ fn earlier_pair_does_not_satisfy_the_immediate_slots() {
     let mut env = setup();
     let (cap, claim, settle) = prepared(&env);
     let extra_claim = claim.clone();
+    // `current - 2` now holds a claim: 50 bytes in the 82-byte cap slot fails
+    // the layout parser, so the valid pair one slot earlier is never read.
     reject(
         &mut env,
         &[cap, claim, extra_claim, settle],
-        PaymentChannelsError::VoucherBadMagic,
+        PaymentChannelsError::MalformedEd25519Instruction,
     );
 }
 
@@ -459,7 +463,7 @@ fn v1_voucher_ix(env: &Env, signer: &Keypair) -> Instruction {
 fn v1_voucher_in_cap_slot_rejects() {
     metered_rejects(
         |env| (v1_voucher_ix(env, &env.client), good_claim(env, CLAIM)),
-        PaymentChannelsError::VoucherBadMagic,
+        PaymentChannelsError::MalformedEd25519Instruction,
     );
 }
 
@@ -477,7 +481,7 @@ fn v1_voucher_in_claim_slot_rejects() {
 fn two_caps_rejects() {
     metered_rejects(
         |env| (good_cap(env, DEPOSIT), good_cap(env, DEPOSIT)),
-        PaymentChannelsError::VoucherBadMagic,
+        PaymentChannelsError::MalformedEd25519Instruction,
     );
 }
 
@@ -488,7 +492,7 @@ fn two_self_operated_caps_rejects() {
             let cap = || signed_cap_ix(&env.client, &env.channel, CLAIM, 0, &env.client.pubkey());
             (cap(), cap())
         },
-        PaymentChannelsError::VoucherBadMagic,
+        PaymentChannelsError::MalformedEd25519Instruction,
     );
 }
 

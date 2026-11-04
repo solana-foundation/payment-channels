@@ -21,8 +21,8 @@ use pinocchio::{
 use super::ed25519::parse as ed25519_ix;
 use crate::errors::PaymentChannelsError;
 use crate::instructions::{
-    CAP_VOUCHER_MAGIC, CAP_VOUCHER_PAYLOAD_SIZE, CLAIM_VOUCHER_MAGIC, CLAIM_VOUCHER_PAYLOAD_SIZE,
-    CapVoucherArgs, ClaimVoucherArgs, VOUCHER_MAGIC, VOUCHER_PAYLOAD_SIZE, VoucherArgs,
+    CAP_VOUCHER_MAGIC, CLAIM_VOUCHER_MAGIC, CapVoucherArgs, ClaimVoucherArgs, VOUCHER_MAGIC,
+    VOUCHER_PAYLOAD_SIZE, VoucherArgs,
 };
 use crate::state::channel::Channel;
 use crate::state::{Transmutable, load};
@@ -55,8 +55,10 @@ pub fn verify_voucher(
 /// watermark (the claim) on success.
 ///
 /// The two Ed25519 ixs immediately before this instruction must hold the cap
-/// at `current - 2` and the claim at `current - 1`; a slot whose magic is not
-/// the expected kind fails with `VoucherBadMagic` before the next slot loads.
+/// at `current - 2` and the claim at `current - 1`. Each slot is parsed as
+/// the type it must hold: a message of another size fails the layout parser
+/// (`MalformedEd25519Instruction`), a message of the right size with another
+/// magic fails with `VoucherBadMagic`, before the next slot loads.
 /// Cap: signed by [`Channel::authorized_signer`], names the operator allowed
 /// to claim under it. Claim: signed by that operator. Both must be bound to
 /// this channel and fresh, and `settled < claim <= cap <= deposit`.
@@ -75,23 +77,17 @@ pub fn verify_metered_pair(
         2,
         PaymentChannelsError::MissingSecondEd25519Verification,
     )?;
-    let cap_parsed = parse_metered(&cap_ix, CAP_VOUCHER_MAGIC)?;
+    let (cap_signer, cap) = parse_signed::<CapVoucherArgs>(&cap_ix, CAP_VOUCHER_MAGIC)?;
     let claim_ix = load_ed25519_ix(
         &sysvar,
         current,
         1,
         PaymentChannelsError::MissingEd25519Verification,
     )?;
-    let claim_parsed = parse_metered(&claim_ix, CLAIM_VOUCHER_MAGIC)?;
-
-    // The parser pinned each message to its exact payload size, and both
-    // structs are align-1, so these zero-copy loads cannot fail.
-    let cap: &CapVoucherArgs = read_pinned(cap_parsed.message)?;
-    let claim: &ClaimVoucherArgs = read_pinned(claim_parsed.message)?;
+    let (claim_signer, claim) = parse_signed::<ClaimVoucherArgs>(&claim_ix, CLAIM_VOUCHER_MAGIC)?;
 
     check_binding(&cap.channel_id, channel_address, cap.expires_at(), now_unix)?;
-    let authorized: Address = channel.authorized_signer;
-    if cap_parsed.pubkey != authorized.as_array() {
+    if cap_signer != channel.authorized_signer.as_array() {
         return Err(PaymentChannelsError::VoucherSignerMismatch.into());
     }
 
@@ -101,7 +97,7 @@ pub fn verify_metered_pair(
         claim.expires_at(),
         now_unix,
     )?;
-    if claim_parsed.pubkey != cap.operator.as_array() {
+    if claim_signer != cap.operator.as_array() {
         return Err(PaymentChannelsError::VoucherOperatorMismatch.into());
     }
 
@@ -122,16 +118,6 @@ pub fn verify_metered_pair(
     Ok(claim_cumulative)
 }
 
-/// Zero-copy load of a payload whose length the Ed25519 parser already pinned.
-///
-/// `load` only fails when `bytes.len()` is not `T::LEN`. [`parse_metered`]
-/// guarantees that for both voucher kinds; the error stays so a length bug
-/// rejects the instruction instead of reading off the end of the message.
-fn read_pinned<T: Transmutable>(bytes: &[u8]) -> Result<&T, ProgramError> {
-    unsafe { load::<T>(bytes) }
-        .map_err(|_| PaymentChannelsError::MalformedEd25519Instruction.into())
-}
-
 /// Load `ix[current - distance]` and require it to be the Ed25519 precompile;
 /// `missing` is returned when the slot is absent or holds another program.
 fn load_ed25519_ix<'s>(
@@ -150,31 +136,30 @@ fn load_ed25519_ix<'s>(
     Ok(ix)
 }
 
-/// Parse a metered precompile ix. The message size picks the expected kind,
-/// cap (82 bytes) or claim (50 bytes); the canonical layout is validated
-/// before any message byte is read, then the magic must match that kind and
-/// the kind must be the one `slot_magic` expects at this position.
-fn parse_metered<'i>(
+/// Parse an Ed25519 precompile ix whose signed message must be a `T` that
+/// starts with `magic`. The canonical layout is validated for exactly
+/// `T::LEN` message bytes before any of them is read, so the zero-copy load
+/// cannot fail on length; the `map_err` stays so a future size mismatch
+/// rejects the instruction instead of panicking. Returns the
+/// precompile-verified signer and the typed message.
+fn parse_signed<'i, T: Transmutable>(
     ix: &'i IntrospectedInstruction<'_>,
-    slot_magic: [u8; 2],
-) -> Result<ed25519_ix::Parsed<'i>, ProgramError> {
-    let data = ix.get_instruction_data();
-    let (message_len, expected_magic) = match data.len().checked_sub(super::ed25519::MESSAGE_OFFSET)
-    {
-        Some(CAP_VOUCHER_PAYLOAD_SIZE) => (CAP_VOUCHER_PAYLOAD_SIZE, CAP_VOUCHER_MAGIC),
-        Some(CLAIM_VOUCHER_PAYLOAD_SIZE) => (CLAIM_VOUCHER_PAYLOAD_SIZE, CLAIM_VOUCHER_MAGIC),
-        _ => return Err(PaymentChannelsError::MalformedEd25519Instruction.into()),
-    };
-    let parsed = ed25519_ix::parse(data, message_len)
+    magic: [u8; 2],
+) -> Result<(&'i [u8; 32], &'i T), ProgramError> {
+    let parsed = ed25519_ix::parse(ix.get_instruction_data(), T::LEN)
         .map_err(|_| PaymentChannelsError::MalformedEd25519Instruction)?;
-    if parsed.message[..2] != expected_magic || expected_magic != slot_magic {
+    if parsed.message[..2] != magic {
         return Err(PaymentChannelsError::VoucherBadMagic.into());
     }
-    Ok(parsed)
+    // SAFETY: every `Transmutable` voucher type is `repr(C)` over byte arrays
+    // (align 1, any bit-pattern valid), and the parser pinned the length.
+    let message = unsafe { load::<T>(parsed.message) }
+        .map_err(|_| PaymentChannelsError::MalformedEd25519Instruction)?;
+    Ok((parsed.pubkey, message))
 }
 
 /// Channel binding and freshness (`expires_at == 0` means no expiry) for the
-/// metered cap and claim; [`parse_metered`] has already pinned the magic.
+/// metered cap and claim; [`parse_signed`] has already pinned the magic.
 ///
 /// Mirrors the inline checks in [`verify_parsed`], which stay inline because
 /// the v1 path is audited. A change to either copy must be made in both.
@@ -263,6 +248,7 @@ mod tests {
     use std::vec::Vec;
 
     use super::*;
+    use crate::instructions::CAP_VOUCHER_PAYLOAD_SIZE;
     use crate::state::Transmutable;
 
     const CHANNEL_ID: Address = Address::new_from_array([7u8; 32]);
@@ -831,21 +817,6 @@ mod tests {
                 PaymentChannelsError::MissingEd25519Verification,
             ),
             PaymentChannelsError::MissingEd25519Verification,
-        );
-    }
-
-    /// `read_pinned` is the `map_err` on both voucher loads. The parser never
-    /// hands it a slice of the wrong length; this pins the error it returns.
-    #[test]
-    fn pinned_load_rejects_a_slice_of_the_wrong_length() {
-        let bytes = [0u8; 1];
-        expect_err(
-            read_pinned::<CapVoucherArgs>(&bytes).map(|_| ()),
-            PaymentChannelsError::MalformedEd25519Instruction,
-        );
-        expect_err(
-            read_pinned::<ClaimVoucherArgs>(&bytes).map(|_| ()),
-            PaymentChannelsError::MalformedEd25519Instruction,
         );
     }
 }

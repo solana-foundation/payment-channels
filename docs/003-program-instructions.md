@@ -252,8 +252,8 @@ The order is fixed: the cap at `current − 2`, the claim at `current − 1`. Ea
 1. Channel is `OPEN`; discriminator and version supported.
 2. For `ix[current − 2]`, then `ix[current − 1]`:
    - it is the Ed25519 program, else `MissingSecondEd25519Verification` (241) for `current − 2` and `MissingEd25519Verification` (230) for `current − 1`;
-   - it parses as a canonical layout whose message size is 82 (cap) or 50 (claim), else `MalformedEd25519Instruction` (231);
-   - its magic matches that size and is the kind expected at that position (cap at `current − 2`, claim at `current − 1`), else `VoucherBadMagic` (238).
+   - it parses as a canonical layout whose message size is the one expected at that position (82 for the cap at `current − 2`, 50 for the claim at `current − 1`), else `MalformedEd25519Instruction` (231) — a swapped pair fails here;
+   - its magic is the kind expected at that position, else `VoucherBadMagic` (238).
 3. Cap: `channel_id` equals the channel PDA (232); fresh (233); signer equals `Channel.authorized_signer` (237).
 4. Claim: `channel_id` equals the channel PDA (232); fresh (233); signer equals `cap.operator` (239).
 5. Amounts: `cap_cumulative ≤ deposit` (235), `claim_cumulative ≤ cap_cumulative` (240), `settled < claim_cumulative` (234).
@@ -337,7 +337,7 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | 235 | `VoucherOverDeposit` | `voucher.cumulative_amount > Channel.deposit` (v1), or `cap.cap_cumulative > Channel.deposit` (metered). |
 | 236 | `VoucherMessageMismatch` | Reserved (formerly: signed message did not equal a caller-supplied voucher copy; the voucher is now read from the precompile message directly). |
 | 237 | `VoucherSignerMismatch` | Ed25519 pubkey does not equal `Channel.authorized_signer`. |
-| 238 | `VoucherBadMagic` | Voucher payload does not start with the magic its instruction expects: `[0x56, 0x01]` for `settle` and `settleAndSeal(1)`; for the metered pair, `[0x56, 0x03]` on the 82-byte cap and `[0x56, 0x04]` on the 50-byte claim, with the cap at `current − 2` and the claim at `current − 1`. See [Voucher magic registry](#voucher-magic-registry). |
+| 238 | `VoucherBadMagic` | Voucher payload does not start with the magic its instruction expects: `[0x56, 0x01]` for `settle` and `settleAndSeal(1)`; for the metered pair, `[0x56, 0x03]` for the cap at `current − 2` and `[0x56, 0x04]` for the claim at `current − 1` (a message of the wrong size for its slot fails the layout parser with 231 instead). See [Voucher magic registry](#voucher-magic-registry). |
 | 239 | `VoucherOperatorMismatch` | Metered claim's Ed25519 signer does not equal the cap's `operator`. |
 | 240 | `ClaimExceedsCap` | Metered `claim_cumulative > cap_cumulative`. |
 | 241 | `MissingSecondEd25519Verification` | Metered pair: no Ed25519 precompile instruction at `current_index − 2`, or wrong program id. |
