@@ -22,8 +22,8 @@ use crate::common::{
     ChannelBuilder, INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, expect_custom_err,
     read_channel, set_clock,
     voucher::{
-        build_metered_pair, cap_voucher_payload, claim_voucher_payload, signed_cap_ix,
-        signed_claim_ix, signed_ed25519_ix, voucher, voucher_payload,
+        cap_voucher_payload, claim_voucher_payload, signed_cap_ix, signed_claim_ix,
+        signed_ed25519_ix, voucher, voucher_payload,
     },
 };
 use payment_channels::state::ChannelStatus;
@@ -40,9 +40,6 @@ struct Env {
     client: Keypair,
     operator: Keypair,
     channel: Pubkey,
-    settled: u64,
-    cap_ix: Instruction,
-    claim_ix: Instruction,
 }
 
 fn setup() -> Env {
@@ -57,11 +54,10 @@ fn setup_with_status(status: ChannelStatus) -> Env {
     let client = Keypair::new();
     let operator = Keypair::new();
     let channel = Pubkey::new_unique();
-    let settled = SETTLED;
     let data = ChannelBuilder::new()
         .status(status)
         .deposit(DEPOSIT)
-        .settled(settled)
+        .settled(SETTLED)
         .authorized_signer(client.pubkey())
         .build();
     svm.set_account(
@@ -76,17 +72,12 @@ fn setup_with_status(status: ChannelStatus) -> Env {
     )
     .expect("set_account");
 
-    let (cap_ix, claim_ix) = build_metered_pair(&channel, &client, &operator, DEPOSIT, CLAIM, 0);
-
     Env {
         svm,
         fee_payer,
         client,
         operator,
         channel,
-        settled,
-        cap_ix,
-        claim_ix,
     }
 }
 
@@ -124,7 +115,7 @@ fn reject(env: &mut Env, ixs: &[Instruction], expected: PaymentChannelsError) {
 }
 
 fn assert_settled_unchanged(env: &Env) {
-    assert_settled(env, env.settled);
+    assert_settled(env, SETTLED);
 }
 
 fn assert_settled(env: &Env, expected: u64) {
@@ -141,10 +132,11 @@ fn assert_precompile_failure_at(env: &mut Env, ixs: &[Instruction], index: u8) {
     assert_settled_unchanged(env);
 }
 
+/// A valid `(cap, claim, settle_metered)` triple for `env`.
 fn prepared(env: &Env) -> (Instruction, Instruction, Instruction) {
     (
-        env.cap_ix.clone(),
-        env.claim_ix.clone(),
+        good_cap(env, DEPOSIT),
+        good_claim(env, CLAIM),
         settle_metered_ix(&env.channel),
     )
 }
@@ -161,9 +153,7 @@ fn compute_budget_before_the_pair_is_accepted() {
 fn claims_advance_under_one_cap_then_under_a_raised_cap() {
     let mut env = setup();
     let settle = settle_metered_ix(&env.channel);
-    let pair = |env: &Env, cap, claim| {
-        build_metered_pair(&env.channel, &env.client, &env.operator, cap, claim, 0)
-    };
+    let pair = |env: &Env, cap, claim| (good_cap(env, cap), good_claim(env, claim));
 
     let (cap, claim) = pair(&env, 1_000_000, 500_000);
     send(&mut env, &[cap, claim, settle.clone()]).expect("first claim");
@@ -261,16 +251,21 @@ fn earlier_pair_does_not_satisfy_the_immediate_slots() {
     );
 }
 
+/// One rider byte on either precompile breaks the pinned data length.
 #[test]
-fn malformed_precompile_rejects() {
-    let mut env = setup();
-    let (mut cap, claim, settle) = prepared(&env);
-    cap.data.push(0);
-    reject(
-        &mut env,
-        &[cap, claim, settle],
-        PaymentChannelsError::MalformedEd25519Instruction,
-    );
+fn rider_byte_on_either_slot_rejects() {
+    for slot in 0..2 {
+        let mut env = setup();
+        let (cap, claim, settle) = prepared(&env);
+        let mut pair = [cap, claim];
+        pair[slot].data.push(0);
+        let [cap, claim] = pair;
+        reject(
+            &mut env,
+            &[cap, claim, settle],
+            PaymentChannelsError::MalformedEd25519Instruction,
+        );
+    }
 }
 
 /// The message size picks the voucher kind before any message byte is read:
@@ -285,6 +280,23 @@ fn cap_magic_on_claim_sized_message_rejects() {
             (
                 good_cap(env, DEPOSIT),
                 signed_ed25519_ix(&env.operator, &payload),
+            )
+        },
+        PaymentChannelsError::VoucherBadMagic,
+    );
+}
+
+/// An 82-byte cap with an unknown format byte: the layout parses, the magic
+/// fails.
+#[test]
+fn cap_with_wrong_magic_rejects() {
+    metered_rejects(
+        |env| {
+            let mut payload = cap_voucher_payload(&env.channel, DEPOSIT, 0, &env.operator.pubkey());
+            payload[1] = 0x05;
+            (
+                signed_ed25519_ix(&env.client, &payload),
+                good_claim(env, CLAIM),
             )
         },
         PaymentChannelsError::VoucherBadMagic,
@@ -350,18 +362,6 @@ fn wrong_claim_message_size_rejects() {
             PaymentChannelsError::MalformedEd25519Instruction,
         );
     }
-}
-
-#[test]
-fn claim_rider_byte_rejects() {
-    let mut env = setup();
-    let (cap, mut claim, settle) = prepared(&env);
-    claim.data.push(0);
-    reject(
-        &mut env,
-        &[cap, claim, settle],
-        PaymentChannelsError::MalformedEd25519Instruction,
-    );
 }
 
 fn redirected(ix: &Instruction, at: usize) -> Instruction {
@@ -457,16 +457,14 @@ fn v1_voucher_ix(env: &Env, signer: &Keypair) -> Instruction {
     signed_ed25519_ix(signer, &payload)
 }
 
+/// A v1 voucher fits neither slot: wrong size for the cap, wrong magic for
+/// the claim.
 #[test]
-fn v1_voucher_in_cap_slot_rejects() {
+fn v1_voucher_in_either_slot_rejects() {
     metered_rejects(
         |env| (v1_voucher_ix(env, &env.client), good_claim(env, CLAIM)),
         PaymentChannelsError::MalformedEd25519Instruction,
     );
-}
-
-#[test]
-fn v1_voucher_in_claim_slot_rejects() {
     metered_rejects(
         |env| (good_cap(env, DEPOSIT), v1_voucher_ix(env, &env.operator)),
         PaymentChannelsError::VoucherBadMagic,
@@ -475,23 +473,25 @@ fn v1_voucher_in_claim_slot_rejects() {
 
 /// The pair must be one cap and one claim; a second cap can't stand in for
 /// the claim, even when the client names itself as operator.
+/// A full 82-byte cap in the 50-byte claim slot fails the layout parser.
 #[test]
-fn two_caps_rejects() {
+fn cap_in_claim_slot_rejects() {
     metered_rejects(
         |env| (good_cap(env, DEPOSIT), good_cap(env, DEPOSIT)),
         PaymentChannelsError::MalformedEd25519Instruction,
     );
 }
 
+/// `operator` is an opaque key: a client that names itself can sign both
+/// halves of the pair.
 #[test]
-fn two_self_operated_caps_rejects() {
-    metered_rejects(
-        |env| {
-            let cap = || signed_cap_ix(&env.client, &env.channel, CLAIM, 0, &env.client.pubkey());
-            (cap(), cap())
-        },
-        PaymentChannelsError::MalformedEd25519Instruction,
-    );
+fn self_operated_pair_is_accepted() {
+    let mut env = setup();
+    let cap = signed_cap_ix(&env.client, &env.channel, DEPOSIT, 0, &env.client.pubkey());
+    let claim = signed_claim_ix(&env.client, &env.channel, CLAIM, 0);
+    let settle = settle_metered_ix(&env.channel);
+    send(&mut env, &[cap, claim, settle]).expect("tx ok");
+    assert_settled(&env, CLAIM);
 }
 
 #[test]
