@@ -48,9 +48,9 @@ pub enum PaymentChannelsError {
     MintAccountMismatch = 53,
     #[error("Token program must be SPL Token or Token-2022")]
     InvalidMintTokenProgram = 54,
-    #[error("Token account or mint TLV trailer is malformed")]
+    #[error("Token-2022 mint padding before the account type is not zeroed")]
     MalformedMintTokenAccountData = 55,
-    #[error("Token account or mint TLV trailer is malformed")]
+    #[error("Token-2022 mint TLV trailer is malformed")]
     MalformedMintTokenExtensions = 56,
     #[error("Payer token account is not ATA(payer, token_program, mint)")]
     PayerAccountMismatch = 57,
@@ -64,6 +64,8 @@ pub enum PaymentChannelsError {
     InvalidPayeeTokenAccount = 61,
     #[error("Payee token account has invalid extensions")]
     InvalidPayeeTokenExtensions = 62,
+    #[error("Token-2022 mint carries an unsupported extension")]
+    UnsupportedMintTokenExtensions = 63,
 
     // general object validations
     #[error("Deposit must be non-zero")]

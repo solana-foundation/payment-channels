@@ -1747,13 +1747,13 @@
       {
         "code": 55,
         "kind": "errorNode",
-        "message": "Token account or mint TLV trailer is malformed",
+        "message": "Token-2022 mint padding before the account type is not zeroed",
         "name": "malformedMintTokenAccountData"
       },
       {
         "code": 56,
         "kind": "errorNode",
-        "message": "Token account or mint TLV trailer is malformed",
+        "message": "Token-2022 mint TLV trailer is malformed",
         "name": "malformedMintTokenExtensions"
       },
       {
@@ -1791,6 +1791,12 @@
         "kind": "errorNode",
         "message": "Payee token account has invalid extensions",
         "name": "invalidPayeeTokenExtensions"
+      },
+      {
+        "code": 63,
+        "kind": "errorNode",
+        "message": "Token-2022 mint carries an unsupported extension",
+        "name": "unsupportedMintTokenExtensions"
       },
       {
         "code": 200,

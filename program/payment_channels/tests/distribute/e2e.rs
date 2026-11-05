@@ -1187,7 +1187,7 @@ fn unsupported_token_2022_mint_extensions_reject_without_state_changes() {
 
         let res = s.send(s.distribute_ix());
 
-        expect_custom_err(res, PaymentChannelsError::MalformedMintTokenExtensions);
+        expect_custom_err(res, PaymentChannelsError::UnsupportedMintTokenExtensions);
         assert_eq!(
             read_payout_watermark(&s.svm, &s.channel),
             payout_watermark_before
