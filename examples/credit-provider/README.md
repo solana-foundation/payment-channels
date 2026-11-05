@@ -29,8 +29,9 @@ crates used by the channel program. No devnet deployment is needed.
 
 The default channel runtime supports both ordinary 256-byte channels and hooked
 1121-byte channels. Hooked funding and refund instructions use outer tags 10–13;
-callbacks retain economic operation tags 1/3/7/8. The example deliberately does
-not enable `devnet-deployment`, which selects an alternate program address.
+callbacks retain economic operation tags 1/3/7/8. The example pins the canonical
+program address through the interface crate, so it runs against the `stable`
+channel built with `--features hooks`, not the `canary` address.
 
 `no-entrypoint` suppresses only the channel entrypoint on SBF; the channel library
 still supplies its no-allocation runtime and panic handler. An SBF consumer must

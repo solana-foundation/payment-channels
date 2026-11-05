@@ -46,8 +46,8 @@ V1 accounts. They are not expected to understand hooked accounts. New clients
 must select the correct account codec and instruction family rather than infer
 hooks from a program ID.
 
-The alternate `devnet-deployment` address selects a deployment identity only;
-both builds support both versions. It is not a migration mechanism, and accounts
+The `canary` channel address selects a deployment identity only;
+both hooked builds support both versions. It is not a migration mechanism, and accounts
 at different addresses are not interchangeable.
 
 Once V2 accounts exist, rolling the program back to a V1-only binary can strand
