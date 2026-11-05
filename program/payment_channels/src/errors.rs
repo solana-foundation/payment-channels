@@ -101,6 +101,12 @@ pub enum PaymentChannelsError {
     VoucherSignerMismatch = 237,
     #[error("Voucher payload magic prefix is invalid")]
     VoucherBadMagic = 238,
+    #[error("Metered voucher operator pubkey mismatch")]
+    VoucherOperatorMismatch = 239,
+    #[error("Metered claim exceeds signed cap")]
+    ClaimExceedsCap = 240,
+    #[error("Missing Ed25519 precompile ix at current-2")]
+    MissingSecondEd25519Verification = 241,
 
     // distribution validation
     #[error("num_recipients outside [0, 32]")]
