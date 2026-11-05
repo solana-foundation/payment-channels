@@ -9,11 +9,14 @@ use crate::helpers::accounts::view::{
     ChannelAccountView, ChannelContext, ChannelTokenAccountView, MintAccountView, PayerAccountView,
     PayerContext, PayerTokenAccountView, TokenContext, TokenProgramAccountView,
 };
+use crate::hooks::HookContextRuntime;
 use crate::state::channel::ChannelStatus;
 use crate::state::{Channel, Transmutable, load};
 
 /// Instruction discriminator byte for `topUp`.
 pub const DISCRIMINATOR: u8 = 3;
+#[cfg(feature = "hooks")]
+pub const WITH_HOOKS_DISCRIMINATOR: u8 = 11;
 
 /// Extends an `OPEN` channel's escrow. The full amount is transferred from
 /// [`TopUpAccounts::payer_token_account`] to
@@ -92,6 +95,27 @@ pub fn process(
     accounts: &mut [AccountView],
     args: &TopUpArgs,
 ) -> ProgramResult {
+    process_inner(accounts, args, false)
+}
+
+#[cfg(feature = "hooks")]
+pub fn process_with_hooks(
+    _program_id: &Address,
+    accounts: &mut [AccountView],
+    args: &TopUpArgs,
+) -> ProgramResult {
+    process_inner(accounts, args, true)
+}
+
+fn process_inner(
+    accounts: &mut [AccountView],
+    args: &TopUpArgs,
+    with_hooks: bool,
+) -> ProgramResult {
+    let split = if with_hooks { 6 } else { accounts.len() };
+    let (accounts, hook_accounts) = accounts
+        .split_at_mut_checked(split)
+        .ok_or(ProgramError::NotEnoughAccountKeys)?;
     let accs = TopUpAccounts::try_from(accounts)?;
 
     if !accs.payer.is_signer() {
@@ -105,6 +129,7 @@ pub fn process(
 
     {
         let ch = Channel::from_account(&accs.channel)?;
+        ch.require_hooks(with_hooks)?;
         if ch.status != ChannelStatus::Open as u8 {
             return Err(PaymentChannelsError::InvalidChannelStatus.into());
         }
@@ -121,14 +146,42 @@ pub fn process(
     let payer_ctx =
         PayerContext::new(accs.payer, accs.payer_token_account, &channel_ctx.token_ctx)?;
 
-    {
-        let mut ch = Channel::from_account_mut(&mut channel_ctx.channel)?;
-        let new_deposit = ch
-            .deposit()
+    let new_deposit = {
+        let ch = Channel::from_account(&channel_ctx.channel)?;
+        ch.deposit()
             .checked_add(amount)
-            .ok_or(PaymentChannelsError::TopUpDepositOverflow)?;
-        ch.set_deposit(new_deposit);
-    }
+            .ok_or(PaymentChannelsError::TopUpDepositOverflow)?
+    };
+
+    let hook_state = if with_hooks {
+        crate::hooks::validate_tail(&channel_ctx.channel, hook_accounts, 0)?;
+        let context = crate::hooks::HookContext::begin(
+            &mut channel_ctx.channel,
+            channel_ctx.token_ctx.token_program.address(),
+            DISCRIMINATOR,
+            amount,
+            0,
+            0,
+        )?;
+        let before = channel_ctx
+            .token_ctx
+            .token_program
+            .amount(&channel_ctx.channel_token_account.as_any())?;
+        crate::hook_guard::invoke(
+            &channel_ctx,
+            hook_accounts,
+            &context,
+            0,
+            crate::hook_guard::ProtectedAccounts {
+                payer: Some(&payer_ctx.payer_token_account),
+                ..Default::default()
+            },
+        )?;
+        crate::hooks::revalidate(&channel_ctx, Some(&payer_ctx.payer_token_account), before)?;
+        Some((context, before))
+    } else {
+        None
+    };
 
     TransferChecked {
         from: &payer_ctx.payer_token_account,
@@ -140,6 +193,30 @@ pub fn process(
         token_program: channel_ctx.token_ctx.token_program.address(),
     }
     .invoke()?;
+
+    Channel::from_account_mut(&mut channel_ctx.channel)?.set_deposit(new_deposit);
+    if let Some((mut hook_context, escrow_before)) = hook_state {
+        hook_context.funding_transferred = amount;
+        hook_context.actual(&channel_ctx.channel)?;
+        crate::hook_guard::invoke(
+            &channel_ctx,
+            hook_accounts,
+            &hook_context,
+            1,
+            crate::hook_guard::ProtectedAccounts {
+                payer: Some(&payer_ctx.payer_token_account),
+                ..Default::default()
+            },
+        )?;
+        crate::hooks::revalidate(
+            &channel_ctx,
+            Some(&payer_ctx.payer_token_account),
+            escrow_before
+                .checked_add(amount)
+                .ok_or(ProgramError::ArithmeticOverflow)?,
+        )?;
+        crate::hooks::finish(&mut channel_ctx.channel)?;
+    }
 
     Ok(())
 }

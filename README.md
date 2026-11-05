@@ -41,6 +41,29 @@ Vouchers are signed off-chain (Ed25519) and carry a **cumulative** amount, so a 
 - `open` stores only the SHA-256 commitment to the canonical distribution preimage. Any permissionless `distribute` caller supplies the preimage and recipient ATAs.
 - `rent_payer` can differ from the token payer, allowing an operator to fund SOL rent for a stablecoin-only client and recover that SOL at close.
 
+## Reading channel accounts on-chain
+
+`payment-channel-interface` provides
+`channel::ChannelAccountView::new(&account, &trusted_program_id)` for read-only
+Pinocchio account access. Construction checks ownership, discriminator, exact
+supported V1/V2 size, version and status. `with_v1` and `with_v2` recheck those
+properties on every read and reject cross-version access. They expose a
+`ChannelView` only inside a closure returning `Result<R, ProgramError>`; return
+owned snapshots, not references. No data borrow remains after the closure,
+including on error. Keep CPI outside these closures.
+
+The facade does not hash or validate the canonical PDA automatically. Use the
+reader's `find_pda` and compare both address and bump when required. Raw
+`ChannelView` byte readers remain layout-only tools for off-chain use and tests.
+Neither reader is issuer authorization.
+
+Callback recipients should use `validation::validate_callback`, which uses this
+facade and additionally checks the canonical PDA, callback provenance, live
+guard/sequence, configuration, privileges and accounting snapshot. It returns
+an owned `ValidatedCallback` with no lingering account-data borrow. The
+[credit-provider example](examples/credit-provider) consumes that validator
+before its own policy and token operations.
+
 ## Voucher wire format
 
 The Ed25519-signed message is exactly 50 bytes:

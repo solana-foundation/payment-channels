@@ -2,6 +2,6 @@ pub mod channel;
 pub mod common;
 pub mod transmutable;
 
-pub use channel::{CHANNEL_SEED, Channel, ChannelStatus, SettlementWatermarks};
+pub use channel::{CHANNEL_SEED, Channel, ChannelStatus, ChannelWithHooks, SettlementWatermarks};
 pub use common::{AccountDiscriminator, CURRENT_CHANNEL_VERSION};
 pub use transmutable::{Transmutable, load, load_mut};

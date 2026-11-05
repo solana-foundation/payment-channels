@@ -100,3 +100,22 @@ jobs:
 
       - name: Test client (vitest)
         run: just test-client
+
+  v2-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup
+        with:
+          rust-cache-key: "v2-test"
+          save-rust-cache: "true"
+
+      # Exercise the hooked ABI on the same dual-version runtime. The recipe
+      # pins tools v1.58 / SBPFv3 and asserts both loaded ELF versions.
+      - name: Test V2 SBF callbacks
+        run: just test-v2-hooks
+
+      - name: Test V2 client codec parity
+        run: just test-v2-client

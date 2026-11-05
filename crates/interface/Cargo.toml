@@ -1,0 +1,20 @@
+[package]
+name = "payment-channel-interface"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Allocation-free payment channel callback ABI and mechanical validation"
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+pinocchio = { version = "0.11.1", default-features = false }
+solana-address = { version = "2", features = ["curve25519", "borsh", "copy", "decode"] }
+borsh = { version = "1", default-features = false, features = ["derive"] }
+
+[target.'cfg(not(target_os = "solana"))'.dependencies]
+const-crypto = "0.3"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

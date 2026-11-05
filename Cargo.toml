@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/interface",
     "program/payment_channels",
     "clients/rust",
 ]

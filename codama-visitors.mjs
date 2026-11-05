@@ -43,6 +43,15 @@ export const addGeneratedClientAccountMetadata = {
         },
       );
 
+      if (ix.name.endsWith('WithHooks')) {
+        return {
+          ...ix,
+          accounts,
+          // Hook tails mix readonly and writable accounts. Callers append
+          // explicit metas; an address-only tail would silently erase privileges.
+          remainingAccounts: ix.name === 'distributeWithHooks' ? recipientAtaTail() : undefined,
+        };
+      }
       if (ix.name !== 'distribute') return { ...ix, accounts };
       sawDistribute = true;
       return {

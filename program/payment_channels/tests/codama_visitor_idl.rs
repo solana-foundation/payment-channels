@@ -159,8 +159,8 @@ fn idl_event_types_remain_in_defined_types() {
 }
 
 /// Locks the invariant the enforce-fixed-account-shapes script rests on:
-/// handlers with dynamic-tail destructuring (`@ ..`) are exactly the IDL
-/// instructions declaring `remainingAccounts`.
+/// V1 handlers with dynamic-tail destructuring (`@ ..`) mirror the IDL.
+/// Hooked variants share handlers but append explicitly privileged callback metas.
 #[test]
 fn dynamic_tail_handlers_match_idl_remaining_accounts() {
     let idl = committed_idl();
@@ -169,6 +169,7 @@ fn dynamic_tail_handlers_match_idl_remaining_accounts() {
         .and_then(Value::as_array)
         .expect("instructions")
         .iter()
+        .filter(|ix| !ix["name"].as_str().unwrap().ends_with("WithHooks"))
         .filter(|ix| {
             ix.get("remainingAccounts")
                 .and_then(Value::as_array)
@@ -199,4 +200,19 @@ fn dynamic_tail_handlers_match_idl_remaining_accounts() {
         "on-chain dynamic-tail handlers and IDL remainingAccounts diverged, \
          update the distribute tail injection in codama-visitors.mjs"
     );
+
+    for name in [
+        "openWithHooks",
+        "topUpWithHooks",
+        "distributeWithHooks",
+        "withdrawPayerWithHooks",
+    ] {
+        let ix = instruction(&idl, name);
+        let tails = ix.get("remainingAccounts").and_then(Value::as_array);
+        assert_eq!(
+            tails.map_or(0, Vec::len),
+            usize::from(name == "distributeWithHooks"),
+            "only distribution declares an address-only recipient tail; hooks use explicit metas"
+        );
+    }
 }

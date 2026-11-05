@@ -13,6 +13,7 @@ solana-account-info = "^3"
 solana-instruction = "^3"
 solana-program-error = "^3"
 solana-cpi = "^3"
+spl-collections = { version = "0.1.2", features = ["borsh"] }
 
   [dependencies.borsh]
   version = "1.0"
@@ -33,3 +34,7 @@ solana-cpi = "^3"
 [features]
 default = [ ]
 fetch = [ "dep:solana-client" ]
+
+[dev-dependencies]
+payment_channels = { path = "../../program/payment_channels" }
+serde_json = "1"
