@@ -159,7 +159,7 @@ export function identifyPaymentChannelsInstruction(
   if (containsBytes(data, getU8Encoder().encode(9), 0)) {
     return PaymentChannelsInstruction.Reclaim;
   }
-  if (containsBytes(data, getU8Encoder().encode(10), 0)) {
+  if (containsBytes(data, getU8Encoder().encode(14), 0)) {
     return PaymentChannelsInstruction.SettleMetered;
   }
   if (containsBytes(data, getU8Encoder().encode(228), 0)) {

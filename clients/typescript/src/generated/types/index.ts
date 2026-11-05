@@ -7,12 +7,12 @@
  */
 
 export * from "./accountDiscriminator";
+export * from "./capVoucherArgs";
 export * from "./channelHeader";
 export * from "./channelStatus";
+export * from "./claimVoucherArgs";
 export * from "./compactHookAccounts";
 export * from "./compactHookDescriptor";
-export * from "./capVoucherArgs";
-export * from "./claimVoucherArgs";
 export * from "./distributeArgs";
 export * from "./distributionEntry";
 export * from "./hookConfig";

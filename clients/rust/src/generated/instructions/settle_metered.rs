@@ -8,7 +8,7 @@
 use borsh::BorshDeserialize;
 use borsh::BorshSerialize;
 
-pub const SETTLE_METERED_DISCRIMINATOR: u8 = 10;
+pub const SETTLE_METERED_DISCRIMINATOR: u8 = 14;
 
 /// Accounts.
 #[derive(Debug)]
@@ -52,7 +52,7 @@ pub struct SettleMeteredInstructionData {
 
 impl SettleMeteredInstructionData {
     pub fn new() -> Self {
-        Self { discriminator: 10 }
+        Self { discriminator: 14 }
     }
 
     pub(crate) fn try_to_vec(&self) -> Result<Vec<u8>, std::io::Error> {

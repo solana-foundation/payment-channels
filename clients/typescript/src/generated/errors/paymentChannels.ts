@@ -93,8 +93,8 @@ export type PaymentChannelsError =
   | typeof PAYMENT_CHANNELS_ERROR__CHANNEL_ADDRESS_MISMATCH
   | typeof PAYMENT_CHANNELS_ERROR__CHANNEL_CLOSE_TOO_EARLY
   | typeof PAYMENT_CHANNELS_ERROR__CHANNEL_NOT_DISTRIBUTABLE
-  | typeof PAYMENT_CHANNELS_ERROR__CLOCK_SYSVAR_UNAVAILABLE
   | typeof PAYMENT_CHANNELS_ERROR__CLAIM_EXCEEDS_CAP
+  | typeof PAYMENT_CHANNELS_ERROR__CLOCK_SYSVAR_UNAVAILABLE
   | typeof PAYMENT_CHANNELS_ERROR__DEPOSIT_MUST_BE_NON_ZERO
   | typeof PAYMENT_CHANNELS_ERROR__DISTRIBUTE_BALANCE_CALCULATION_OVERFLOW
   | typeof PAYMENT_CHANNELS_ERROR__DISTRIBUTE_POOL_OVERFLOW
@@ -171,8 +171,8 @@ if (process.env["NODE_ENV"] !== "production") {
     [PAYMENT_CHANNELS_ERROR__CHANNEL_ADDRESS_MISMATCH]: `Derived channel account address does not match the user provided address`,
     [PAYMENT_CHANNELS_ERROR__CHANNEL_CLOSE_TOO_EARLY]: `Channel cannot be fully closed until clock.slot > open_slot + OPEN_SLOT_WINDOW`,
     [PAYMENT_CHANNELS_ERROR__CHANNEL_NOT_DISTRIBUTABLE]: `Channel is not in OPEN or SEALED`,
-    [PAYMENT_CHANNELS_ERROR__CLOCK_SYSVAR_UNAVAILABLE]: `Clock sysvar could not be read while evaluating the mint policy`,
     [PAYMENT_CHANNELS_ERROR__CLAIM_EXCEEDS_CAP]: `Metered claim exceeds signed cap`,
+    [PAYMENT_CHANNELS_ERROR__CLOCK_SYSVAR_UNAVAILABLE]: `Clock sysvar could not be read while evaluating the mint policy`,
     [PAYMENT_CHANNELS_ERROR__DEPOSIT_MUST_BE_NON_ZERO]: `Deposit must be non-zero`,
     [PAYMENT_CHANNELS_ERROR__DISTRIBUTE_BALANCE_CALCULATION_OVERFLOW]: `Channel rent rebalance calculation underflow`,
     [PAYMENT_CHANNELS_ERROR__DISTRIBUTE_POOL_OVERFLOW]: `Distribution pool calculation underflow`,

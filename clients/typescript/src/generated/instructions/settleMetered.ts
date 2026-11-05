@@ -32,7 +32,7 @@ import {
 import { getU8Decoder, getU8Encoder } from "../../safe-codecs.js";
 import { PAYMENT_CHANNELS_PROGRAM_ADDRESS } from "../programs";
 
-export const SETTLE_METERED_DISCRIMINATOR = 10;
+export const SETTLE_METERED_DISCRIMINATOR = 14;
 
 export function getSettleMeteredDiscriminatorBytes(): ReadonlyUint8Array {
   return getU8Encoder().encode(SETTLE_METERED_DISCRIMINATOR);

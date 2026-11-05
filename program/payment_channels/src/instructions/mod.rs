@@ -391,7 +391,7 @@ pub enum PaymentChannelsInstruction<'a> {
         codama(account(name = "channel", writable)),
         codama(account(name = "instructions_sysvar"))
     )]
-    SettleMetered = 10,
+    SettleMetered = 14,
 
     /// Self-CPI target for the event pipeline; not part of the public
     /// instruction set. `228 = EVENT_IX_TAG_LE[0]`: self-CPI event data

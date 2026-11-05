@@ -227,7 +227,7 @@ Permissionless crank. Deallocates a fully-drained `DISTRIBUTED` channel PDA — 
 | 0 | `channel` | — | yes | Must be `DISTRIBUTED`. Deallocated; all lamports drained. |
 | 1 | `rent_payer` | — | yes | Must equal `Channel.rent_payer`; receives every remaining lamport. |
 
-## `settleMetered` (10)
+## `settleMetered` (14)
 
 Permissionless crank for metered pricing. The client signs a **cap** (a ceiling on the watermark, naming an operator key), the operator signs a **claim** (the actual cumulative charge), and the program advances `settled` to the claim only if the cap covers it. A dishonest operator can under-claim but never over-claim.
 

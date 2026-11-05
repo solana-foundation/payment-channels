@@ -2979,7 +2979,7 @@
           {
             "defaultValue": {
               "kind": "numberValueNode",
-              "number": 10
+              "number": 14
             },
             "defaultValueStrategy": "omitted",
             "kind": "instructionArgumentNode",

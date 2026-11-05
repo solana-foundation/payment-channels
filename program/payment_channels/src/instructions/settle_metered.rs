@@ -9,7 +9,7 @@ use crate::instructions::helpers::voucher::verify_metered_pair;
 use crate::state::channel::{Channel, ChannelStatus};
 
 /// Instruction discriminator byte for `settle_metered`.
-pub const DISCRIMINATOR: u8 = 10;
+pub const DISCRIMINATOR: u8 = 14;
 
 pub struct SettleMeteredAccounts<'a> {
     /// [`settled`](crate::Channel::settled) is advanced in place.
