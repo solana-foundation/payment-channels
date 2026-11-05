@@ -64,6 +64,13 @@ pub fn set_clock(svm: &mut LiteSVM, unix_timestamp: i64) {
     svm.set_sysvar::<Clock>(&clock);
 }
 
+/// Sets the Clock epoch (slot and timestamp untouched).
+pub fn set_epoch(svm: &mut LiteSVM, epoch: u64) {
+    let mut clock = svm.get_sysvar::<Clock>();
+    clock.epoch = epoch;
+    svm.set_sysvar::<Clock>(&clock);
+}
+
 /// Current Clock slot as seen by the program.
 pub fn current_slot(svm: &LiteSVM) -> u64 {
     svm.get_sysvar::<Clock>().slot

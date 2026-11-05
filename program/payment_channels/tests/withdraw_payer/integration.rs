@@ -4,7 +4,8 @@ use payment_channels::state::channel::ChannelStatus;
 use solana_program_error::ProgramError;
 use solana_pubkey::Pubkey;
 
-use crate::common::ChannelBuilder;
+use crate::common::token_2022::mint_policy_cases;
+use crate::common::{ChannelBuilder, TOKEN_2022};
 
 use super::WithdrawPayerRun;
 
@@ -164,4 +165,33 @@ fn legacy_tombstone_account_rejects() {
         WithdrawPayerRun::new(Pubkey::new_unique(), vec![2u8]).run(),
         ProgramResult::Failure(ProgramError::InvalidAccountData),
     );
+}
+
+/// Mint policy runs after the status and identity checks and before any CPI.
+#[test]
+fn token_2022_mint_policy_gate_runs_before_any_cpi() {
+    for (label, mint_account, expected) in
+        mint_policy_cases(PaymentChannelsError::ChannelAccountMismatch)
+    {
+        let payer = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let run = WithdrawPayerRun {
+            mint,
+            token_program: TOKEN_2022,
+            mint_account: Some(mint_account),
+            ..WithdrawPayerRun::new(
+                payer,
+                ChannelBuilder::new()
+                    .status(ChannelStatus::Sealed)
+                    .payer(payer)
+                    .mint(mint)
+                    .build(),
+            )
+        };
+        assert_eq!(
+            run.run(),
+            ProgramResult::Failure(ProgramError::Custom(expected as u32)),
+            "{label}"
+        );
+    }
 }

@@ -39,6 +39,8 @@ export const PAYMENT_CHANNELS_ERROR__PAYEE_ACCOUNT_MISMATCH = 0x3c; // 60
 export const PAYMENT_CHANNELS_ERROR__INVALID_PAYEE_TOKEN_ACCOUNT = 0x3d; // 61
 export const PAYMENT_CHANNELS_ERROR__INVALID_PAYEE_TOKEN_EXTENSIONS = 0x3e; // 62
 export const PAYMENT_CHANNELS_ERROR__UNSUPPORTED_MINT_TOKEN_EXTENSIONS = 0x3f; // 63
+export const PAYMENT_CHANNELS_ERROR__ACTIVE_MINT_TOKEN_EXTENSION = 0x40; // 64
+export const PAYMENT_CHANNELS_ERROR__CLOCK_SYSVAR_UNAVAILABLE = 0x41; // 65
 export const PAYMENT_CHANNELS_ERROR__DEPOSIT_MUST_BE_NON_ZERO = 0xc8; // 200
 export const PAYMENT_CHANNELS_ERROR__GRACE_PERIOD_MUST_BE_NON_ZERO = 0xc9; // 201
 export const PAYMENT_CHANNELS_ERROR__MISSING_ED25519_VERIFICATION = 0xe6; // 230
@@ -83,10 +85,12 @@ export const PAYMENT_CHANNELS_ERROR__CHANNEL_CLOSE_TOO_EARLY = 0x96e; // 2414
 export const PAYMENT_CHANNELS_ERROR__HOOK_INVARIANT_VIOLATION = 0x9c4; // 2500
 
 export type PaymentChannelsError =
+  | typeof PAYMENT_CHANNELS_ERROR__ACTIVE_MINT_TOKEN_EXTENSION
   | typeof PAYMENT_CHANNELS_ERROR__CHANNEL_ACCOUNT_MISMATCH
   | typeof PAYMENT_CHANNELS_ERROR__CHANNEL_ADDRESS_MISMATCH
   | typeof PAYMENT_CHANNELS_ERROR__CHANNEL_CLOSE_TOO_EARLY
   | typeof PAYMENT_CHANNELS_ERROR__CHANNEL_NOT_DISTRIBUTABLE
+  | typeof PAYMENT_CHANNELS_ERROR__CLOCK_SYSVAR_UNAVAILABLE
   | typeof PAYMENT_CHANNELS_ERROR__DEPOSIT_MUST_BE_NON_ZERO
   | typeof PAYMENT_CHANNELS_ERROR__DISTRIBUTE_BALANCE_CALCULATION_OVERFLOW
   | typeof PAYMENT_CHANNELS_ERROR__DISTRIBUTE_POOL_OVERFLOW
@@ -156,10 +160,12 @@ let paymentChannelsErrorMessages:
   | undefined;
 if (process.env["NODE_ENV"] !== "production") {
   paymentChannelsErrorMessages = {
+    [PAYMENT_CHANNELS_ERROR__ACTIVE_MINT_TOKEN_EXTENSION]: `Token-2022 mint has a live transfer fee or an installed transfer hook`,
     [PAYMENT_CHANNELS_ERROR__CHANNEL_ACCOUNT_MISMATCH]: `Channel account does not match derived PDA`,
     [PAYMENT_CHANNELS_ERROR__CHANNEL_ADDRESS_MISMATCH]: `Derived channel account address does not match the user provided address`,
     [PAYMENT_CHANNELS_ERROR__CHANNEL_CLOSE_TOO_EARLY]: `Channel cannot be fully closed until clock.slot > open_slot + OPEN_SLOT_WINDOW`,
     [PAYMENT_CHANNELS_ERROR__CHANNEL_NOT_DISTRIBUTABLE]: `Channel is not in OPEN or SEALED`,
+    [PAYMENT_CHANNELS_ERROR__CLOCK_SYSVAR_UNAVAILABLE]: `Clock sysvar could not be read while evaluating the mint policy`,
     [PAYMENT_CHANNELS_ERROR__DEPOSIT_MUST_BE_NON_ZERO]: `Deposit must be non-zero`,
     [PAYMENT_CHANNELS_ERROR__DISTRIBUTE_BALANCE_CALCULATION_OVERFLOW]: `Channel rent rebalance calculation underflow`,
     [PAYMENT_CHANNELS_ERROR__DISTRIBUTE_POOL_OVERFLOW]: `Distribution pool calculation underflow`,
@@ -215,7 +221,7 @@ if (process.env["NODE_ENV"] !== "production") {
     [PAYMENT_CHANNELS_ERROR__TOP_UP_DEPOSIT_OVERFLOW]: `Deposit must be non-zero`,
     [PAYMENT_CHANNELS_ERROR__TREASURY_ACCOUNT_MISMATCH]: `Treasury token account is not ATA(TREASURY_OWNER, mint, token_program)`,
     [PAYMENT_CHANNELS_ERROR__UNSUPPORTED_CHANNEL_VERSION]: `Unsupported channel version`,
-    [PAYMENT_CHANNELS_ERROR__UNSUPPORTED_MINT_TOKEN_EXTENSIONS]: `Token-2022 mint carries an unsupported extension`,
+    [PAYMENT_CHANNELS_ERROR__UNSUPPORTED_MINT_TOKEN_EXTENSIONS]: `Token-2022 mint carries an extension outside the allow-list`,
     [PAYMENT_CHANNELS_ERROR__VOUCHER_BAD_MAGIC]: `Voucher payload magic prefix is invalid`,
     [PAYMENT_CHANNELS_ERROR__VOUCHER_CHANNEL_MISMATCH]: `Voucher channel_id does not match channel PDA`,
     [PAYMENT_CHANNELS_ERROR__VOUCHER_EXPIRED]: `Voucher expired`,
