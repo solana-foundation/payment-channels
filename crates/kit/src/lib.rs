@@ -17,6 +17,21 @@ pub use hooks::{HookContext, HookDescriptor, HookMeta, HookState};
 pub const ID: pinocchio::Address =
     solana_address::address!("CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX");
 
+/// The `canary` channel deployment (`Solex.toml`): the hooked build, on devnet
+/// and mainnet. It runs the same dual-version runtime as [`ID`].
+pub const CANARY_ID: pinocchio::Address =
+    solana_address::address!("CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ");
+
+/// Every deployment of the channel program this crate's ABI describes.
+pub const KNOWN_DEPLOYMENTS: [pinocchio::Address; 2] = [ID, CANARY_ID];
+
+/// Whether `program` is one of [`KNOWN_DEPLOYMENTS`]. A callback recipient may
+/// accept either, but must still bind each channel to the deployment it
+/// authorized (a channel PDA is owned only by the program it derives under).
+pub fn is_known_deployment(program: &pinocchio::Address) -> bool {
+    KNOWN_DEPLOYMENTS.contains(program)
+}
+
 /// SHA-256 used by descriptor commitments, identical on host and on-chain.
 pub fn sha256(input: &[u8]) -> [u8; 32] {
     #[cfg(target_os = "solana")]

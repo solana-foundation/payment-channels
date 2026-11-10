@@ -29,9 +29,13 @@ crates used by the channel program. No devnet deployment is needed.
 
 The default channel runtime supports both ordinary 256-byte channels and hooked
 1121-byte channels. Hooked funding and refund instructions use outer tags 10–13;
-callbacks retain economic operation tags 1/3/7/8. The example pins the canonical
-program address through the kit crate, so it runs against the `stable`
-channel built with `--features hooks`, not the `canary` address.
+callbacks retain economic operation tags 1/3/7/8. The example accepts both known
+deployments from the kit crate (`KNOWN_DEPLOYMENTS`): the canonical address,
+where the `stable` channel built with `--features hooks` runs locally, and the
+`canary` address deployed on devnet. A callback's channel program is the owner
+of the channel account it receives; `authorize` defaults to the canonical
+program, and `client::authorize_for` / `client::hook_tail_for` name the canary
+with a seventh account and the canary's callback authority PDA.
 
 `no-entrypoint` suppresses only the channel entrypoint on SBF; the channel library
 still supplies its no-allocation runtime and panic handler. An SBF consumer must

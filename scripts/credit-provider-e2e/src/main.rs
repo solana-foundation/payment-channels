@@ -77,11 +77,30 @@ fn event_authority() -> Pubkey {
     .0
 }
 
-struct Rpc(String);
+/// The RPC endpoint and, in live mode, the keypair that funds test accounts.
+///
+/// Offline (default): a loopback Surfpool started by
+/// scripts/test-credit-provider-surfpool.sh; accounts are airdropped and the
+/// channel program is written with a cheatcode. Live (`CREDIT_E2E_LIVE=1`):
+/// an `https` cluster RPC where the channel program is already deployed and
+/// `CREDIT_E2E_FUNDER` pays for every test account by transfer.
+struct Rpc(String, Option<Keypair>);
 impl Rpc {
     fn new() -> Self {
         let endpoint = std::env::var("CREDIT_E2E_RPC")
-            .expect("run via scripts/test-credit-provider-surfpool.sh");
+            .expect("run via scripts/test-credit-provider-surfpool.sh or set CREDIT_E2E_RPC");
+        if std::env::var("CREDIT_E2E_LIVE").as_deref() == Ok("1") {
+            assert!(
+                endpoint.starts_with("https://"),
+                "live mode needs an https RPC"
+            );
+            let path =
+                std::env::var("CREDIT_E2E_FUNDER").expect("live mode needs CREDIT_E2E_FUNDER");
+            let bytes: Vec<u8> =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            let funder = Keypair::try_from(bytes.as_slice()).expect("funder keypair");
+            return Self(endpoint, Some(funder));
+        }
         let port = endpoint
             .strip_prefix("http://127.0.0.1:")
             .expect("loopback only");
@@ -89,10 +108,39 @@ impl Rpc {
             port.parse::<u16>().is_ok(),
             "endpoint must contain only loopback host and port"
         );
-        Self(endpoint)
+        Self(endpoint, None)
+    }
+    fn live(&self) -> bool {
+        self.1.is_some()
+    }
+    /// Airdrop on Surfpool; a system transfer from the funder on a live cluster.
+    fn fund(&self, to: Pubkey, offline_lamports: u64, live_lamports: u64) {
+        match &self.1 {
+            None => {
+                self.call("requestAirdrop", json!([to.to_string(), offline_lamports]));
+            }
+            Some(funder) => {
+                let mut data = 2u32.to_le_bytes().to_vec();
+                data.extend(live_lamports.to_le_bytes());
+                let ix = Instruction {
+                    program_id: system(),
+                    accounts: vec![signer(funder.pubkey(), true), rw(to)],
+                    data,
+                };
+                self.send("fund test account", &[ix], funder, &[funder])
+                    .unwrap();
+            }
+        }
     }
     fn request(&self, method: &str, params: Value) -> Result<Value, Value> {
+        // A live cluster RPC rate-limits (429); retry with backoff there.
+        let retry: &[&str] = if self.live() {
+            &["--retry", "8", "--retry-delay", "2", "--retry-all-errors"]
+        } else {
+            &[]
+        };
         let mut child = Command::new("curl")
+            .args(retry)
             .args([
                 "--noproxy",
                 "*",
@@ -185,7 +233,9 @@ impl Rpc {
         // Submit even expected failures: rollback assertions inspect committed
         // ledger state after a real rejected transaction, not just simulation.
         let signature = self.call("sendTransaction", json!([STANDARD.encode(wire), {"encoding":"base64","skipPreflight":true,"preflightCommitment":"confirmed"}])).as_str().unwrap().to_owned();
-        for _ in 0..100 {
+        // Surfpool confirms in milliseconds; a live cluster takes seconds.
+        let (attempts, poll) = if self.live() { (120, 500) } else { (100, 100) };
+        for _ in 0..attempts {
             let status = self.call(
                 "getSignatureStatuses",
                 json!([[signature], {"searchTransactionHistory":true}]),
@@ -206,7 +256,7 @@ impl Rpc {
                     return Ok(signature);
                 }
             }
-            sleep(Duration::from_millis(100));
+            sleep(Duration::from_millis(poll));
         }
         panic!("{label}: confirmation timed out");
     }
@@ -343,10 +393,7 @@ impl<'a> Fixture<'a> {
         let owner = Keypair::new();
         let payee = Keypair::new();
         let mint = Keypair::new();
-        rpc.call(
-            "requestAirdrop",
-            json!([owner.pubkey().to_string(), 10_000_000_000u64]),
-        );
+        rpc.fund(owner.pubkey(), 10_000_000_000, 200_000_000);
         let ledger = key(credit_provider::ledger_address(
             &address(provider),
             &address(owner.pubkey()),
@@ -634,7 +681,8 @@ impl<'a> Fixture<'a> {
             .unwrap();
     }
     fn authorize_ix(&self, issuer: Pubkey, authorization: Authorization) -> Instruction {
-        client::authorize(
+        client::authorize_for(
+            &address(channel_program()),
             &address(self.provider),
             &address(self.owner.pubkey()),
             &address(self.mint),
@@ -651,7 +699,8 @@ impl<'a> Fixture<'a> {
         )
     }
     fn tail(&self, phase: u8) -> Vec<AccountMeta> {
-        client::hook_tail(
+        client::hook_tail_for(
+            &address(channel_program()),
             &address(self.provider),
             &address(self.owner.pubkey()),
             &address(self.mint),
@@ -834,22 +883,29 @@ fn main() {
     let provider_path = dir.join("provider.json");
     write_key(&issuer_path, &issuer);
     write_key(&provider_path, &provider);
-    let (_, channel_bytes) = v3_artifact("PAYMENT_CHANNELS_V2_SO");
     let (provider_path_so, _) = v3_artifact("CREDIT_PROVIDER_SO");
-    // Documented Surfpool 1.5 RPC: program_id, hex ELF, byte offset.
-    rpc.call(
-        "surfnet_writeProgram",
-        json!([channel_program().to_string(), hex::encode(channel_bytes), 0]),
-    );
+    if rpc.live() {
+        // Live: the channel program is the deployed one; never overwrite it.
+        println!(
+            "live cluster {}, channel program {}",
+            rpc.0,
+            channel_program()
+        );
+    } else {
+        let (_, channel_bytes) = v3_artifact("PAYMENT_CHANNELS_V2_SO");
+        // Documented Surfpool 1.5 RPC: program_id, hex ELF, byte offset.
+        rpc.call(
+            "surfnet_writeProgram",
+            json!([channel_program().to_string(), hex::encode(channel_bytes), 0]),
+        );
+    }
     assert_eq!(rpc.account(channel_program())["executable"], true);
     assert_eq!(
         rpc.account(channel_program())["owner"],
         credit_provider::LOADER.to_string()
     );
-    rpc.call(
-        "requestAirdrop",
-        json!([issuer.pubkey().to_string(), 100_000_000_000u64]),
-    );
+    // The issuer pays the provider deployment (about 0.5 SOL of rent live).
+    rpc.fund(issuer.pubkey(), 100_000_000_000, 1_500_000_000);
     let out = Command::new(std::env::var("SOLANA_CLI").unwrap_or_else(|_| "solana".into()))
         .args([
             "program",
@@ -867,7 +923,10 @@ fn main() {
             "--commitment",
             "confirmed",
             "--max-sign-attempts",
-            "5",
+            // A public cluster RPC drops write transactions under load.
+            if rpc.live() { "100" } else { "5" },
+            "--with-compute-unit-price",
+            if rpc.live() { "10000" } else { "0" },
             provider_path_so.to_str().unwrap(),
         ])
         .output()
@@ -979,8 +1038,10 @@ fn main() {
     assert_eq!(f.balance(f.vault), 1_100);
     assert_eq!(f.ledger().refunded, 200);
     assert!(!f.ledger().active);
-    f.authorize_for(300, 3, 3, 8);
-    for _ in 0..100 {
+    // A short window that expires mid-test; a live cluster needs a few more
+    // slots for the authorization itself to land before it.
+    f.authorize_for(300, 3, 3, if rpc.live() { 40 } else { 8 });
+    for _ in 0..600 {
         if rpc.slot() > f.auth.expires_at_slot {
             break;
         }
@@ -1006,7 +1067,16 @@ fn main() {
     f.send("fresh nonce after cancellation can fund", f.open(100));
     assert_eq!(f.ledger().credits, 1_000);
     assert_eq!(f.balance(f.vault), 1_000);
-    println!("PASS offline Surfpool backed-credit end-to-end scenarios");
+    if rpc.live() {
+        println!(
+            "PASS live backed-credit end-to-end scenarios on {} against {} (provider {})",
+            rpc.0,
+            channel_program(),
+            provider.pubkey()
+        );
+    } else {
+        println!("PASS offline Surfpool backed-credit end-to-end scenarios");
+    }
 }
 
 #[cfg(test)]
