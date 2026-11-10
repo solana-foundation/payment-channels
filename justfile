@@ -127,7 +127,7 @@ test-same-address-upgrade:
     bash scripts/v1-v2-upgrade-e2e/run.sh
 
 test-credit-provider-surfpool:
-    CARGO_INCREMENTAL=0 CARGO_NET_OFFLINE=true CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target}/credit-e2e-channel-sbf" cargo build-sbf --tools-version v1.58 --arch v3 --manifest-path program/payment_channels/Cargo.toml --sbf-out-dir target/deploy-v2
+    CARGO_INCREMENTAL=0 CARGO_NET_OFFLINE=true CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target}/credit-e2e-channel-sbf" cargo build-sbf --tools-version v1.58 --arch v3 --features hooks --manifest-path program/payment_channels/Cargo.toml --sbf-out-dir target/deploy-v2
     CARGO_INCREMENTAL=0 CARGO_NET_OFFLINE=true CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target}/credit-e2e-provider-sbf" cargo build-sbf --tools-version v1.58 --arch v3 --manifest-path examples/credit-provider/Cargo.toml --sbf-out-dir target/deploy
     bash scripts/test-credit-provider-surfpool.sh
 

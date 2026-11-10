@@ -145,11 +145,11 @@ pub fn hook_tail(
         "only the two configured phases are supported"
     );
     let state = hook_state(program, owner, mint);
-    let authority = payment_channel_interface::hooks::hook_authority(
-        &payment_channel_interface::ID,
+    let authority = payment_channel_kit::hooks::hook_authority(
+        &payment_channel_kit::ID,
         channel,
         &state.commitment,
-        payment_channel_interface::hooks::Phase::try_from(phase).unwrap(),
+        payment_channel_kit::hooks::Phase::try_from(phase).unwrap(),
         program,
     )
     .0;

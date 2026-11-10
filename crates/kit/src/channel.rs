@@ -42,7 +42,7 @@ impl TryFrom<u8> for ChannelStatus {
 ///
 /// Copy an owned accounting value out of a V2 account:
 /// ```
-/// use payment_channel_interface::channel::ChannelAccountView;
+/// use payment_channel_kit::channel::ChannelAccountView;
 /// use pinocchio::{AccountView, Address, error::ProgramError};
 ///
 /// fn read_deposit(
@@ -56,13 +56,13 @@ impl TryFrom<u8> for ChannelStatus {
 ///
 /// Borrowed readers and hook references cannot escape a closure:
 /// ```compile_fail
-/// use payment_channel_interface::channel::ChannelAccountView;
+/// use payment_channel_kit::channel::ChannelAccountView;
 /// fn escape(account: &ChannelAccountView<'_>) {
 ///     let view = account.with_v2(|view| Ok(view));
 /// }
 /// ```
 /// ```compile_fail
-/// use payment_channel_interface::channel::ChannelAccountView;
+/// use payment_channel_kit::channel::ChannelAccountView;
 /// fn escape(account: &ChannelAccountView<'_>) {
 ///     let hooks = account.with_v2(|view| view.hooks());
 /// }
