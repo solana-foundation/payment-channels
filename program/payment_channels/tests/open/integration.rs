@@ -18,7 +18,7 @@ use crate::common::token_2022::{
     EXT_METADATA_POINTER, EXT_MINT_CLOSE_AUTHORITY, EXT_TOKEN_GROUP, EXT_TOKEN_GROUP_MEMBER,
     EXT_TOKEN_METADATA, EXT_TRANSFER_FEE_CONFIG, EXT_TRANSFER_HOOK, POINTER_EXTENSION_LEN,
     TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN, add_account_extension,
-    add_mint_extension,
+    add_malformed_mint_extension, add_mint_extension,
 };
 use crate::common::{PROGRAM_ID, ProgramLoader, SPL_TOKEN, expect_custom_err, token_balance};
 
@@ -405,11 +405,54 @@ fn unsupported_token_2022_mint_extensions_reject_before_channel_creation() {
         let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
         expect_custom_err(
             svm.send_transaction(tx),
-            PaymentChannelsError::MalformedMintTokenExtensions,
+            PaymentChannelsError::UnsupportedMintTokenExtensions,
         );
         assert!(svm.get_account(&channel).is_none());
         assert_eq!(token_balance(&svm, &payer_token_account), DEPOSIT);
     }
+}
+
+#[test]
+fn malformed_token_2022_mint_extensions_reject_before_channel_creation() {
+    let mut svm = LiteSVM::load_program();
+
+    let payee = Pubkey::new_unique();
+    let authorized_signer = Keypair::new().pubkey();
+    let (payer, mint, payer_token_account) =
+        setup_funded_svm_with_token_program(&mut svm, DEPOSIT, &TOKEN_2022);
+    add_malformed_mint_extension(&mut svm, &mint, EXT_METADATA_POINTER, POINTER_EXTENSION_LEN);
+    let (channel, channel_token_account) = derive_pdas_with_token_program(
+        &payer.pubkey(),
+        &payee,
+        &mint,
+        &authorized_signer,
+        SALT,
+        0,
+        &TOKEN_2022,
+    );
+    let ix = open_ix_with_token_program(
+        &payer.pubkey(),
+        &payee,
+        &mint,
+        &authorized_signer,
+        &channel,
+        &payer_token_account,
+        &channel_token_account,
+        &TOKEN_2022,
+        SALT,
+        DEPOSIT,
+        GRACE,
+        0,
+        1,
+    );
+    let msg = Message::new(&[ix], Some(&payer.pubkey()));
+    let tx = Transaction::new(&[&payer], msg, svm.latest_blockhash());
+    expect_custom_err(
+        svm.send_transaction(tx),
+        PaymentChannelsError::MalformedMintTokenExtensions,
+    );
+    assert!(svm.get_account(&channel).is_none());
+    assert_eq!(token_balance(&svm, &payer_token_account), DEPOSIT);
 }
 
 #[test]
