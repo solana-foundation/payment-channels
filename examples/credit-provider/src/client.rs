@@ -157,7 +157,7 @@ pub fn hook_tail(
     phase: u8,
 ) -> Vec<AccountMeta> {
     hook_tail_for(
-        &payment_channel_interface::ID,
+        &payment_channel_kit::ID,
         program,
         owner,
         mint,
@@ -181,11 +181,11 @@ pub fn hook_tail_for(
         "only the two configured phases are supported"
     );
     let state = hook_state(program, owner, mint);
-    let authority = payment_channel_interface::hooks::hook_authority(
+    let authority = payment_channel_kit::hooks::hook_authority(
         channel_program,
         channel,
         &state.commitment,
-        payment_channel_interface::hooks::Phase::try_from(phase).unwrap(),
+        payment_channel_kit::hooks::Phase::try_from(phase).unwrap(),
         program,
     )
     .0;

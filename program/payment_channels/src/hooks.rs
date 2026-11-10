@@ -13,7 +13,7 @@ use crate::{
     helpers::{accounts::validation::AccountValidator, accounts::view::ChannelContext},
 };
 
-pub use payment_channel_interface::hooks::*;
+pub use payment_channel_kit::hooks::*;
 
 pub fn check_entry(accounts: &[AccountView]) -> ProgramResult {
     for account in accounts {
@@ -309,7 +309,7 @@ mod tests {
     extern crate alloc;
     use super::*;
     use alloc::vec::Vec;
-    use payment_channel_interface::sha256;
+    use payment_channel_kit::sha256;
 
     fn vector() -> Vec<u8> {
         let mut bytes = Vec::from([1]);

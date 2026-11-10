@@ -1,7 +1,7 @@
 # Callback safety contract
 
 Financial checks belong in the channel program, not only in the callback SDK:
-a malicious provider can choose not to use an SDK. The interface crate validates
+a malicious provider can choose not to use an SDK. The kit crate validates
 callback provenance for honest consumers; core validates effects on protected
 accounts when the callback returns.
 

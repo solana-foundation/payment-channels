@@ -30,7 +30,7 @@ crates used by the channel program. No devnet deployment is needed.
 The default channel runtime supports both ordinary 256-byte channels and hooked
 1121-byte channels. Hooked funding and refund instructions use outer tags 10–13;
 callbacks retain economic operation tags 1/3/7/8. The example pins the canonical
-program address through the interface crate, so it runs against the `stable`
+program address through the kit crate, so it runs against the `stable`
 channel built with `--features hooks`, not the `canary` address.
 
 `no-entrypoint` suppresses only the channel entrypoint on SBF; the channel library
@@ -38,7 +38,7 @@ still supplies its no-allocation runtime and panic handler. An SBF consumer must
 not define duplicate allocator or panic handlers. On host targets this feature
 links `std` so the dependency's declared `cdylib` can link for client tests.
 Default channel builds are unchanged. This is a narrow example integration,
-not a general-purpose runtime-independent interface crate.
+not a general-purpose runtime-independent kit crate.
 
 ## Transaction flow
 

@@ -43,7 +43,7 @@ Vouchers are signed off-chain (Ed25519) and carry a **cumulative** amount, so a 
 
 ## Reading channel accounts on-chain
 
-`payment-channel-interface` provides
+`payment-channel-kit` provides
 `channel::ChannelAccountView::new(&account, &trusted_program_id)` for read-only
 Pinocchio account access. Construction checks ownership, discriminator, exact
 supported V1/V2 size, version and status. `with_v1` and `with_v2` recheck those

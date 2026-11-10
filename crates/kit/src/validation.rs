@@ -45,7 +45,7 @@ fn require(value: bool) -> Result<(), ProgramError> {
 /// checked together before a context is returned.
 ///
 /// ```
-/// use payment_channel_interface::validation::{
+/// use payment_channel_kit::validation::{
 ///     CallbackExpectations, ValidatedCallback, validate_callback,
 /// };
 /// use pinocchio::{AccountView, error::ProgramError};

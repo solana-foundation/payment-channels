@@ -18,7 +18,7 @@ use crate::state::transmutable::{Transmutable, load, load_mut};
 /// address itself is per-incarnation: the open window plus the reclaim gate
 /// guarantee an address can never host two channels, so vouchers bind the
 /// incarnation by binding `channel_id` alone.
-pub use payment_channel_interface::channel::CHANNEL_SEED;
+pub use payment_channel_kit::channel::CHANNEL_SEED;
 
 /// Current position of a [`Channel`] in the FSM.
 /// [`Open = 0`](ChannelStatus::Open) is deliberate: [`AccountDiscriminator`]
@@ -243,7 +243,7 @@ impl Channel {
         salt: u64,
         open_slot: u64,
     ) -> (Address, u8) {
-        payment_channel_interface::channel::channel_address(
+        payment_channel_kit::channel::channel_address(
             &crate::ID,
             payer,
             payee,
@@ -375,7 +375,7 @@ unsafe impl Transmutable for Channel {
 }
 
 const _: () = {
-    assert!(Channel::LEN == payment_channel_interface::channel::CHANNEL_V1_LEN);
+    assert!(Channel::LEN == payment_channel_kit::channel::CHANNEL_V1_LEN);
 };
 
 /// Hooked channels append immutable callback configuration and operation state
@@ -436,7 +436,7 @@ unsafe impl Transmutable for ChannelWithHooks {
 }
 
 const _: () = {
-    assert!(ChannelWithHooks::LEN == payment_channel_interface::channel::CHANNEL_V2_LEN);
+    assert!(ChannelWithHooks::LEN == payment_channel_kit::channel::CHANNEL_V2_LEN);
     assert!(core::mem::offset_of!(ChannelWithHooks, hooks) == 256);
     assert!(core::mem::align_of::<ChannelWithHooks>() == 1);
 };
@@ -579,7 +579,7 @@ mod tests {
 
     #[test]
     fn interface_reader_matches_frozen_core_accounting_layout() {
-        use payment_channel_interface::channel::ChannelView;
+        use payment_channel_kit::channel::ChannelView;
         let mut bytes = [0; ChannelWithHooks::LEN];
         Channel::init_at(
             &mut bytes[..Channel::LEN],

@@ -15,7 +15,7 @@ import {
   structTypeNode,
 } from '@codama/nodes';
 
-const source = readFileSync(new URL('./crates/interface/src/hooks.rs', import.meta.url), 'utf8');
+const source = readFileSync(new URL('./crates/kit/src/hooks.rs', import.meta.url), 'utf8');
 const field = (name, type) => structFieldTypeNode({ name, type });
 const array = (type, count) => arrayTypeNode(type, fixedCountNode(count));
 const u8 = () => numberTypeNode('u8');
