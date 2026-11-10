@@ -133,7 +133,14 @@ impl Rpc {
         }
     }
     fn request(&self, method: &str, params: Value) -> Result<Value, Value> {
+        // A live cluster RPC rate-limits (429); retry with backoff there.
+        let retry: &[&str] = if self.live() {
+            &["--retry", "8", "--retry-delay", "2", "--retry-all-errors"]
+        } else {
+            &[]
+        };
         let mut child = Command::new("curl")
+            .args(retry)
             .args([
                 "--noproxy",
                 "*",
@@ -227,7 +234,7 @@ impl Rpc {
         // ledger state after a real rejected transaction, not just simulation.
         let signature = self.call("sendTransaction", json!([STANDARD.encode(wire), {"encoding":"base64","skipPreflight":true,"preflightCommitment":"confirmed"}])).as_str().unwrap().to_owned();
         // Surfpool confirms in milliseconds; a live cluster takes seconds.
-        let attempts = if self.live() { 600 } else { 100 };
+        let (attempts, poll) = if self.live() { (120, 500) } else { (100, 100) };
         for _ in 0..attempts {
             let status = self.call(
                 "getSignatureStatuses",
@@ -249,7 +256,7 @@ impl Rpc {
                     return Ok(signature);
                 }
             }
-            sleep(Duration::from_millis(100));
+            sleep(Duration::from_millis(poll));
         }
         panic!("{label}: confirmation timed out");
     }
@@ -916,7 +923,10 @@ fn main() {
             "--commitment",
             "confirmed",
             "--max-sign-attempts",
-            "5",
+            // A public cluster RPC drops write transactions under load.
+            if rpc.live() { "100" } else { "5" },
+            "--with-compute-unit-price",
+            if rpc.live() { "10000" } else { "0" },
             provider_path_so.to_str().unwrap(),
         ])
         .output()

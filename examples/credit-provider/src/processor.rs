@@ -218,15 +218,29 @@ pub fn authorize(
     // An optional seventh account names the channel deployment to fund
     // (canonical or canary); without it the canonical deployment is used.
     let (owner, issuer, ledger_account, vault, payer, token, channel_program) = match accounts {
-        [owner, issuer, ledger, vault, payer, token] => {
-            (owner, issuer, ledger, vault, payer, token, payment_channel_interface::ID)
-        }
-        [owner, issuer, ledger, vault, payer, token, channel_program] => {
-            (owner, issuer, ledger, vault, payer, token, *channel_program.address())
-        }
+        [owner, issuer, ledger, vault, payer, token] => (
+            owner,
+            issuer,
+            ledger,
+            vault,
+            payer,
+            token,
+            payment_channel_interface::ID,
+        ),
+        [owner, issuer, ledger, vault, payer, token, channel_program] => (
+            owner,
+            issuer,
+            ledger,
+            vault,
+            payer,
+            token,
+            *channel_program.address(),
+        ),
         _ => return Err(ProgramError::NotEnoughAccountKeys),
     };
-    require(payment_channel_interface::is_known_deployment(&channel_program))?;
+    require(payment_channel_interface::is_known_deployment(
+        &channel_program,
+    ))?;
     let mut ledger = load(program, ledger_account)?;
     owner_signed(owner, &ledger)?;
     require(issuer.is_signer() && issuer.address().as_array() == &ledger.issuer)?;
@@ -284,7 +298,9 @@ pub fn callback(program: &Address, accounts: &mut [AccountView], data: &[u8]) ->
         .get(1)
         .ok_or(ProgramError::NotEnoughAccountKeys)?
         .owner();
-    require(payment_channel_interface::is_known_deployment(&channel_program))?;
+    require(payment_channel_interface::is_known_deployment(
+        &channel_program,
+    ))?;
     let validated = validate_callback(
         accounts,
         data,
