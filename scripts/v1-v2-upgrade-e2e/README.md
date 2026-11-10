@@ -12,9 +12,12 @@ network cluster are used. Surfpool runs offline on a dedicated loopback port
 (default 18999; override with `UPGRADE_PORT`).
 
 The runner extracts commit `25df9636698c320a0716ba224cbc8724acf63edf` into
-ignored `target/v1-upgrade-baseline`, builds that actual historical program,
-and separately builds the current default runtime. Both builds use SBPF v3 /
-platform-tools v1.58; this tests historical **source** compatibility, not
+ignored `target/v1-upgrade-baseline`, builds that actual historical program
+with its `mainnet-beta` feature, and separately builds the current `stable`
+channel with `--features hooks`. Both therefore use the canonical program id
+and the mainnet treasury, which is the pair a mainnet upgrade replaces. Both
+builds use SBPF v3 / platform-tools v1.58; this tests historical **source**
+compatibility, not
 reproducibility of a previously published binary. Host and both SBF build
 directories are isolated. `UPGRADE_BUILD_ROOT` can select another attached
 worktree's build cache when disk space is limited.

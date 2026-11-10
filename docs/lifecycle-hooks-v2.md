@@ -10,11 +10,12 @@ is not proof of production issuer integration.
 
 | Build | Program ID | Accepted channel bytes |
 | --- | --- | --- |
-| Default | `CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX` | V1: 256; V2: 1121 |
-| Feature `devnet-deployment` | `CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ` | V1: 256; V2: 1121 |
+| `stable` + `--features hooks` (local tests) | `CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX` | V1: 256; V2: 1121 |
+| `canary` channel (`Solex.toml`) | `CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ` | V1: 256; V2: 1121 |
 
-The deployment feature selects only the address. It does not select account
-layout or disable either ABI. Existing V1 accounts remain V1, with unchanged
+The channel selects the address and treasury (see
+[release channels](release-channels.md)); the `hooks` feature selects the
+instruction set. Neither selects the account layout or disables either ABI. Existing V1 accounts remain V1, with unchanged
 addresses, instruction encodings and voucher bytes. There is no automatic
 conversion or migration instruction.
 

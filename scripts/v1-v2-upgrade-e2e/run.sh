@@ -15,11 +15,11 @@ export UPGRADE_OLD_SO="$PWD/target/v1-upgrade-old/payment_channels.so"
 export UPGRADE_NEW_SO="$PWD/target/v1-upgrade-new/payment_channels.so"
 CARGO_TARGET_DIR="$build_root/old-sbf" cargo build-sbf \
     --tools-version v1.58 --arch v3 \
-    --manifest-path "$source_dir/program/payment_channels/Cargo.toml" \
+    --manifest-path "$source_dir/program/payment_channels/Cargo.toml" --features mainnet-beta \
     --sbf-out-dir "$PWD/target/v1-upgrade-old"
 CARGO_TARGET_DIR="$build_root/new-sbf" cargo build-sbf \
     --tools-version v1.58 --arch v3 \
-    --manifest-path program/payment_channels/Cargo.toml \
+    --manifest-path program/payment_channels/Cargo.toml --features hooks \
     --sbf-out-dir "$PWD/target/v1-upgrade-new"
 run_dir="$(mktemp -d "$PWD/target/v1-upgrade-run.XXXXXX")"
 {

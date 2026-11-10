@@ -211,10 +211,8 @@ impl<'a> Fixture<'a> {
             &payer,
             &[&payer, &mint],
         );
-        let treasury =
-            Pubkey::new_from_array(std::array::from_fn(
-                |i| if i % 2 == 0 { 0xbe } else { 0xef },
-            ));
+        // Mainnet treasury: the historical binary is built with `mainnet-beta`, the new one as the `stable` channel.
+        let treasury = id("Cs2zdfUNonRdRGsiZUQQLdTxzxVvJZmgiX2mpLYKuEqP");
         for owner in [payer.pubkey(), payee.pubkey(), treasury] {
             rpc.send(
                 "create ATA",
