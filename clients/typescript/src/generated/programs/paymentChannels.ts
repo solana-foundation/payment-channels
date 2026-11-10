@@ -30,48 +30,71 @@ import {
   type SelfPlanAndSendFunctions,
 } from "@solana/program-client-core";
 import { getU8Encoder } from "../../safe-codecs.js";
-import { getChannelCodec, type Channel, type ChannelArgs } from "../accounts";
+import {
+  getChannelCodec,
+  getChannelWithHooksCodec,
+  type Channel,
+  type ChannelArgs,
+  type ChannelWithHooks,
+  type ChannelWithHooksArgs,
+} from "../accounts";
 import {
   getDistributeInstructionAsync,
+  getDistributeWithHooksInstructionAsync,
   getEmitEventInstructionAsync,
   getOpenInstructionAsync,
+  getOpenWithHooksInstructionAsync,
   getReclaimInstruction,
   getRequestCloseInstruction,
   getSealInstruction,
   getSettleAndSealInstruction,
   getSettleInstruction,
   getTopUpInstruction,
+  getTopUpWithHooksInstruction,
   getWithdrawPayerInstruction,
+  getWithdrawPayerWithHooksInstruction,
   parseDistributeInstruction,
+  parseDistributeWithHooksInstruction,
   parseEmitEventInstruction,
   parseOpenInstruction,
+  parseOpenWithHooksInstruction,
   parseReclaimInstruction,
   parseRequestCloseInstruction,
   parseSealInstruction,
   parseSettleAndSealInstruction,
   parseSettleInstruction,
   parseTopUpInstruction,
+  parseTopUpWithHooksInstruction,
   parseWithdrawPayerInstruction,
+  parseWithdrawPayerWithHooksInstruction,
   type DistributeAsyncInput,
+  type DistributeWithHooksAsyncInput,
   type EmitEventAsyncInput,
   type OpenAsyncInput,
+  type OpenWithHooksAsyncInput,
   type ParsedDistributeInstruction,
+  type ParsedDistributeWithHooksInstruction,
   type ParsedEmitEventInstruction,
   type ParsedOpenInstruction,
+  type ParsedOpenWithHooksInstruction,
   type ParsedReclaimInstruction,
   type ParsedRequestCloseInstruction,
   type ParsedSealInstruction,
   type ParsedSettleAndSealInstruction,
   type ParsedSettleInstruction,
   type ParsedTopUpInstruction,
+  type ParsedTopUpWithHooksInstruction,
   type ParsedWithdrawPayerInstruction,
+  type ParsedWithdrawPayerWithHooksInstruction,
   type ReclaimInput,
   type RequestCloseInput,
   type SealInput,
   type SettleAndSealInput,
   type SettleInput,
   type TopUpInput,
+  type TopUpWithHooksInput,
   type WithdrawPayerInput,
+  type WithdrawPayerWithHooksInput,
 } from "../instructions";
 import { findEventAuthorityPda } from "../pdas";
 
@@ -80,6 +103,7 @@ export const PAYMENT_CHANNELS_PROGRAM_ADDRESS =
 
 export enum PaymentChannelsAccount {
   Channel,
+  ChannelWithHooks,
 }
 
 export enum PaymentChannelsInstruction {
@@ -93,6 +117,10 @@ export enum PaymentChannelsInstruction {
   WithdrawPayer,
   Reclaim,
   EmitEvent,
+  OpenWithHooks,
+  TopUpWithHooks,
+  DistributeWithHooks,
+  WithdrawPayerWithHooks,
 }
 
 export function identifyPaymentChannelsInstruction(
@@ -128,6 +156,18 @@ export function identifyPaymentChannelsInstruction(
   }
   if (containsBytes(data, getU8Encoder().encode(228), 0)) {
     return PaymentChannelsInstruction.EmitEvent;
+  }
+  if (containsBytes(data, getU8Encoder().encode(10), 0)) {
+    return PaymentChannelsInstruction.OpenWithHooks;
+  }
+  if (containsBytes(data, getU8Encoder().encode(11), 0)) {
+    return PaymentChannelsInstruction.TopUpWithHooks;
+  }
+  if (containsBytes(data, getU8Encoder().encode(12), 0)) {
+    return PaymentChannelsInstruction.DistributeWithHooks;
+  }
+  if (containsBytes(data, getU8Encoder().encode(13), 0)) {
+    return PaymentChannelsInstruction.WithdrawPayerWithHooks;
   }
   throw new SolanaError(
     SOLANA_ERROR__PROGRAM_CLIENTS__FAILED_TO_IDENTIFY_INSTRUCTION,
@@ -167,7 +207,19 @@ export type ParsedPaymentChannelsInstruction<
     } & ParsedReclaimInstruction<TProgram>)
   | ({
       instructionType: PaymentChannelsInstruction.EmitEvent;
-    } & ParsedEmitEventInstruction<TProgram>);
+    } & ParsedEmitEventInstruction<TProgram>)
+  | ({
+      instructionType: PaymentChannelsInstruction.OpenWithHooks;
+    } & ParsedOpenWithHooksInstruction<TProgram>)
+  | ({
+      instructionType: PaymentChannelsInstruction.TopUpWithHooks;
+    } & ParsedTopUpWithHooksInstruction<TProgram>)
+  | ({
+      instructionType: PaymentChannelsInstruction.DistributeWithHooks;
+    } & ParsedDistributeWithHooksInstruction<TProgram>)
+  | ({
+      instructionType: PaymentChannelsInstruction.WithdrawPayerWithHooks;
+    } & ParsedWithdrawPayerWithHooksInstruction<TProgram>);
 
 export function parsePaymentChannelsInstruction<TProgram extends string>(
   instruction: Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array>,
@@ -244,6 +296,34 @@ export function parsePaymentChannelsInstruction<TProgram extends string>(
         ...parseEmitEventInstruction(instruction),
       };
     }
+    case PaymentChannelsInstruction.OpenWithHooks: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: PaymentChannelsInstruction.OpenWithHooks,
+        ...parseOpenWithHooksInstruction(instruction),
+      };
+    }
+    case PaymentChannelsInstruction.TopUpWithHooks: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: PaymentChannelsInstruction.TopUpWithHooks,
+        ...parseTopUpWithHooksInstruction(instruction),
+      };
+    }
+    case PaymentChannelsInstruction.DistributeWithHooks: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: PaymentChannelsInstruction.DistributeWithHooks,
+        ...parseDistributeWithHooksInstruction(instruction),
+      };
+    }
+    case PaymentChannelsInstruction.WithdrawPayerWithHooks: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: PaymentChannelsInstruction.WithdrawPayerWithHooks,
+        ...parseWithdrawPayerWithHooksInstruction(instruction),
+      };
+    }
     default:
       throw new SolanaError(
         SOLANA_ERROR__PROGRAM_CLIENTS__UNRECOGNIZED_INSTRUCTION_TYPE,
@@ -264,6 +344,8 @@ export type PaymentChannelsPlugin = {
 export type PaymentChannelsPluginAccounts = {
   channel: ReturnType<typeof getChannelCodec> &
     SelfFetchFunctions<ChannelArgs, Channel>;
+  channelWithHooks: ReturnType<typeof getChannelWithHooksCodec> &
+    SelfFetchFunctions<ChannelWithHooksArgs, ChannelWithHooks>;
 };
 
 export type PaymentChannelsPluginInstructions = {
@@ -301,6 +383,22 @@ export type PaymentChannelsPluginInstructions = {
     input: EmitEventAsyncInput,
   ) => ReturnType<typeof getEmitEventInstructionAsync> &
     SelfPlanAndSendFunctions;
+  openWithHooks: (
+    input: OpenWithHooksAsyncInput,
+  ) => ReturnType<typeof getOpenWithHooksInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  topUpWithHooks: (
+    input: TopUpWithHooksInput,
+  ) => ReturnType<typeof getTopUpWithHooksInstruction> &
+    SelfPlanAndSendFunctions;
+  distributeWithHooks: (
+    input: DistributeWithHooksAsyncInput,
+  ) => ReturnType<typeof getDistributeWithHooksInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  withdrawPayerWithHooks: (
+    input: WithdrawPayerWithHooksInput,
+  ) => ReturnType<typeof getWithdrawPayerWithHooksInstruction> &
+    SelfPlanAndSendFunctions;
 };
 
 export type PaymentChannelsPluginPdas = {
@@ -321,7 +419,13 @@ export function paymentChannelsProgram() {
   } => {
     return extendClient(client, {
       paymentChannels: <PaymentChannelsPlugin>{
-        accounts: { channel: addSelfFetchFunctions(client, getChannelCodec()) },
+        accounts: {
+          channel: addSelfFetchFunctions(client, getChannelCodec()),
+          channelWithHooks: addSelfFetchFunctions(
+            client,
+            getChannelWithHooksCodec(),
+          ),
+        },
         instructions: {
           open: (input) =>
             addSelfPlanAndSendFunctions(client, getOpenInstructionAsync(input)),
@@ -357,6 +461,26 @@ export function paymentChannelsProgram() {
             addSelfPlanAndSendFunctions(
               client,
               getEmitEventInstructionAsync(input),
+            ),
+          openWithHooks: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getOpenWithHooksInstructionAsync(input),
+            ),
+          topUpWithHooks: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getTopUpWithHooksInstruction(input),
+            ),
+          distributeWithHooks: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getDistributeWithHooksInstructionAsync(input),
+            ),
+          withdrawPayerWithHooks: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getWithdrawPayerWithHooksInstruction(input),
             ),
         },
         pdas: { eventAuthority: findEventAuthorityPda },

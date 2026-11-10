@@ -160,6 +160,31 @@
         },
         "kind": "accountNode",
         "name": "channel"
+      },
+      {
+        "data": {
+          "fields": [
+            {
+              "kind": "structFieldTypeNode",
+              "name": "channel",
+              "type": {
+                "kind": "definedTypeLinkNode",
+                "name": "channelHeader"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "hooks",
+              "type": {
+                "kind": "definedTypeLinkNode",
+                "name": "hookState"
+              }
+            }
+          ],
+          "kind": "structTypeNode"
+        },
+        "kind": "accountNode",
+        "name": "channelWithHooks"
       }
     ],
     "definedTypes": [
@@ -338,6 +363,78 @@
       },
       {
         "kind": "definedTypeNode",
+        "name": "openWithHooksArgs",
+        "type": {
+          "fields": [
+            {
+              "kind": "structFieldTypeNode",
+              "name": "salt",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "deposit",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "gracePeriod",
+              "type": {
+                "endian": "le",
+                "format": "u32",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "openSlot",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "recipients",
+              "type": {
+                "count": {
+                  "kind": "prefixedCountNode",
+                  "prefix": {
+                    "endian": "le",
+                    "format": "u32",
+                    "kind": "numberTypeNode"
+                  }
+                },
+                "item": {
+                  "kind": "definedTypeLinkNode",
+                  "name": "distributionEntry"
+                },
+                "kind": "arrayTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "hookConfig",
+              "type": {
+                "kind": "definedTypeLinkNode",
+                "name": "hookConfig"
+              }
+            }
+          ],
+          "kind": "structTypeNode"
+        }
+      },
+      {
+        "kind": "definedTypeNode",
         "name": "settleAndSealArgs",
         "type": {
           "fields": [
@@ -505,6 +602,975 @@
               "name": "closedChannel"
             }
           ]
+        }
+      },
+      {
+        "kind": "definedTypeNode",
+        "name": "channelHeader",
+        "type": {
+          "fields": [
+            {
+              "kind": "structFieldTypeNode",
+              "name": "discriminator",
+              "type": {
+                "endian": "le",
+                "format": "u8",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "version",
+              "type": {
+                "endian": "le",
+                "format": "u8",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "bump",
+              "type": {
+                "endian": "le",
+                "format": "u8",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "status",
+              "type": {
+                "endian": "le",
+                "format": "u8",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "salt",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "deposit",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "settlement",
+              "type": {
+                "kind": "definedTypeLinkNode",
+                "name": "settlementWatermarks"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "closureStartedAt",
+              "type": {
+                "endian": "le",
+                "format": "i64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "payerWithdrawnAt",
+              "type": {
+                "endian": "le",
+                "format": "i64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "gracePeriod",
+              "type": {
+                "endian": "le",
+                "format": "u32",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "distributionHash",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 32
+                },
+                "item": {
+                  "endian": "le",
+                  "format": "u8",
+                  "kind": "numberTypeNode"
+                },
+                "kind": "arrayTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "payer",
+              "type": {
+                "kind": "publicKeyTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "payee",
+              "type": {
+                "kind": "publicKeyTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "authorizedSigner",
+              "type": {
+                "kind": "publicKeyTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "mint",
+              "type": {
+                "kind": "publicKeyTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "rentPayer",
+              "type": {
+                "kind": "publicKeyTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "openSlot",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            }
+          ],
+          "kind": "structTypeNode"
+        }
+      },
+      {
+        "kind": "definedTypeNode",
+        "name": "hookMeta",
+        "type": {
+          "fields": [
+            {
+              "kind": "structFieldTypeNode",
+              "name": "address",
+              "type": {
+                "kind": "publicKeyTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "writable",
+              "type": {
+                "endian": "le",
+                "format": "u8",
+                "kind": "numberTypeNode"
+              }
+            }
+          ],
+          "kind": "structTypeNode"
+        }
+      },
+      {
+        "kind": "definedTypeNode",
+        "name": "hookDescriptor",
+        "type": {
+          "fields": [
+            {
+              "kind": "structFieldTypeNode",
+              "name": "program",
+              "type": {
+                "kind": "publicKeyTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "entrypoint",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 8
+                },
+                "item": {
+                  "endian": "le",
+                  "format": "u8",
+                  "kind": "numberTypeNode"
+                },
+                "kind": "arrayTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "accountCount",
+              "type": {
+                "endian": "le",
+                "format": "u8",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "staticLen",
+              "type": {
+                "endian": "le",
+                "format": "u8",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "staticContext",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 32
+                },
+                "item": {
+                  "endian": "le",
+                  "format": "u8",
+                  "kind": "numberTypeNode"
+                },
+                "kind": "arrayTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "accounts",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 4
+                },
+                "item": {
+                  "kind": "definedTypeLinkNode",
+                  "name": "hookMeta"
+                },
+                "kind": "arrayTypeNode"
+              }
+            }
+          ],
+          "kind": "structTypeNode"
+        }
+      },
+      {
+        "kind": "definedTypeNode",
+        "name": "hookState",
+        "type": {
+          "fields": [
+            {
+              "kind": "structFieldTypeNode",
+              "name": "inProgress",
+              "type": {
+                "endian": "le",
+                "format": "u8",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "sequence",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 8
+                },
+                "item": {
+                  "endian": "le",
+                  "format": "u8",
+                  "kind": "numberTypeNode"
+                },
+                "kind": "arrayTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "commitment",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 32
+                },
+                "item": {
+                  "endian": "le",
+                  "format": "u8",
+                  "kind": "numberTypeNode"
+                },
+                "kind": "arrayTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "descriptors",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 4
+                },
+                "item": {
+                  "kind": "definedTypeLinkNode",
+                  "name": "hookDescriptor"
+                },
+                "kind": "arrayTypeNode"
+              }
+            }
+          ],
+          "kind": "structTypeNode"
+        }
+      },
+      {
+        "kind": "definedTypeNode",
+        "name": "hookContext",
+        "type": {
+          "fields": [
+            {
+              "kind": "structFieldTypeNode",
+              "name": "abiVersion",
+              "type": {
+                "endian": "le",
+                "format": "u8",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "phase",
+              "type": {
+                "endian": "le",
+                "format": "u8",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "operation",
+              "type": {
+                "endian": "le",
+                "format": "u8",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "executed",
+              "type": {
+                "endian": "le",
+                "format": "u8",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "channel",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 32
+                },
+                "item": {
+                  "endian": "le",
+                  "format": "u8",
+                  "kind": "numberTypeNode"
+                },
+                "kind": "arrayTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "sequence",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "openSlot",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "payer",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 32
+                },
+                "item": {
+                  "endian": "le",
+                  "format": "u8",
+                  "kind": "numberTypeNode"
+                },
+                "kind": "arrayTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "payee",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 32
+                },
+                "item": {
+                  "endian": "le",
+                  "format": "u8",
+                  "kind": "numberTypeNode"
+                },
+                "kind": "arrayTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "mint",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 32
+                },
+                "item": {
+                  "endian": "le",
+                  "format": "u8",
+                  "kind": "numberTypeNode"
+                },
+                "kind": "arrayTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "tokenProgram",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 32
+                },
+                "item": {
+                  "endian": "le",
+                  "format": "u8",
+                  "kind": "numberTypeNode"
+                },
+                "kind": "arrayTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "configuration",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 32
+                },
+                "item": {
+                  "endian": "le",
+                  "format": "u8",
+                  "kind": "numberTypeNode"
+                },
+                "kind": "arrayTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "authorizedSigner",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 32
+                },
+                "item": {
+                  "endian": "le",
+                  "format": "u8",
+                  "kind": "numberTypeNode"
+                },
+                "kind": "arrayTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "distributionHash",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 32
+                },
+                "item": {
+                  "endian": "le",
+                  "format": "u8",
+                  "kind": "numberTypeNode"
+                },
+                "kind": "arrayTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "depositBefore",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "settledBefore",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "payoutBefore",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "withdrawnBefore",
+              "type": {
+                "endian": "le",
+                "format": "i64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "fundingRequested",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "merchantDue",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "refundDue",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "fundingTransferred",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "merchantTransferred",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "refundTransferredToPayer",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "redirectedPrincipal",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "treasurySurplus",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "depositAfter",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "payoutAfter",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "withdrawnAfter",
+              "type": {
+                "endian": "le",
+                "format": "i64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "refundDestination",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 32
+                },
+                "item": {
+                  "endian": "le",
+                  "format": "u8",
+                  "kind": "numberTypeNode"
+                },
+                "kind": "arrayTypeNode"
+              }
+            }
+          ],
+          "kind": "structTypeNode"
+        }
+      },
+      {
+        "kind": "definedTypeNode",
+        "name": "compactHookAccounts",
+        "type": {
+          "kind": "enumTypeNode",
+          "size": {
+            "endian": "le",
+            "format": "u8",
+            "kind": "numberTypeNode"
+          },
+          "variants": [
+            {
+              "kind": "enumStructVariantTypeNode",
+              "name": "accounts0",
+              "struct": {
+                "fields": [
+                  {
+                    "kind": "structFieldTypeNode",
+                    "name": "staticContext",
+                    "type": {
+                      "count": {
+                        "kind": "prefixedCountNode",
+                        "prefix": {
+                          "endian": "le",
+                          "format": "u8",
+                          "kind": "numberTypeNode"
+                        }
+                      },
+                      "item": {
+                        "endian": "le",
+                        "format": "u8",
+                        "kind": "numberTypeNode"
+                      },
+                      "kind": "arrayTypeNode"
+                    }
+                  },
+                  {
+                    "kind": "structFieldTypeNode",
+                    "name": "accounts",
+                    "type": {
+                      "count": {
+                        "kind": "fixedCountNode",
+                        "value": 0
+                      },
+                      "item": {
+                        "kind": "definedTypeLinkNode",
+                        "name": "hookMeta"
+                      },
+                      "kind": "arrayTypeNode"
+                    }
+                  }
+                ],
+                "kind": "structTypeNode"
+              }
+            },
+            {
+              "kind": "enumStructVariantTypeNode",
+              "name": "accounts1",
+              "struct": {
+                "fields": [
+                  {
+                    "kind": "structFieldTypeNode",
+                    "name": "staticContext",
+                    "type": {
+                      "count": {
+                        "kind": "prefixedCountNode",
+                        "prefix": {
+                          "endian": "le",
+                          "format": "u8",
+                          "kind": "numberTypeNode"
+                        }
+                      },
+                      "item": {
+                        "endian": "le",
+                        "format": "u8",
+                        "kind": "numberTypeNode"
+                      },
+                      "kind": "arrayTypeNode"
+                    }
+                  },
+                  {
+                    "kind": "structFieldTypeNode",
+                    "name": "accounts",
+                    "type": {
+                      "count": {
+                        "kind": "fixedCountNode",
+                        "value": 1
+                      },
+                      "item": {
+                        "kind": "definedTypeLinkNode",
+                        "name": "hookMeta"
+                      },
+                      "kind": "arrayTypeNode"
+                    }
+                  }
+                ],
+                "kind": "structTypeNode"
+              }
+            },
+            {
+              "kind": "enumStructVariantTypeNode",
+              "name": "accounts2",
+              "struct": {
+                "fields": [
+                  {
+                    "kind": "structFieldTypeNode",
+                    "name": "staticContext",
+                    "type": {
+                      "count": {
+                        "kind": "prefixedCountNode",
+                        "prefix": {
+                          "endian": "le",
+                          "format": "u8",
+                          "kind": "numberTypeNode"
+                        }
+                      },
+                      "item": {
+                        "endian": "le",
+                        "format": "u8",
+                        "kind": "numberTypeNode"
+                      },
+                      "kind": "arrayTypeNode"
+                    }
+                  },
+                  {
+                    "kind": "structFieldTypeNode",
+                    "name": "accounts",
+                    "type": {
+                      "count": {
+                        "kind": "fixedCountNode",
+                        "value": 2
+                      },
+                      "item": {
+                        "kind": "definedTypeLinkNode",
+                        "name": "hookMeta"
+                      },
+                      "kind": "arrayTypeNode"
+                    }
+                  }
+                ],
+                "kind": "structTypeNode"
+              }
+            },
+            {
+              "kind": "enumStructVariantTypeNode",
+              "name": "accounts3",
+              "struct": {
+                "fields": [
+                  {
+                    "kind": "structFieldTypeNode",
+                    "name": "staticContext",
+                    "type": {
+                      "count": {
+                        "kind": "prefixedCountNode",
+                        "prefix": {
+                          "endian": "le",
+                          "format": "u8",
+                          "kind": "numberTypeNode"
+                        }
+                      },
+                      "item": {
+                        "endian": "le",
+                        "format": "u8",
+                        "kind": "numberTypeNode"
+                      },
+                      "kind": "arrayTypeNode"
+                    }
+                  },
+                  {
+                    "kind": "structFieldTypeNode",
+                    "name": "accounts",
+                    "type": {
+                      "count": {
+                        "kind": "fixedCountNode",
+                        "value": 3
+                      },
+                      "item": {
+                        "kind": "definedTypeLinkNode",
+                        "name": "hookMeta"
+                      },
+                      "kind": "arrayTypeNode"
+                    }
+                  }
+                ],
+                "kind": "structTypeNode"
+              }
+            },
+            {
+              "kind": "enumStructVariantTypeNode",
+              "name": "accounts4",
+              "struct": {
+                "fields": [
+                  {
+                    "kind": "structFieldTypeNode",
+                    "name": "staticContext",
+                    "type": {
+                      "count": {
+                        "kind": "prefixedCountNode",
+                        "prefix": {
+                          "endian": "le",
+                          "format": "u8",
+                          "kind": "numberTypeNode"
+                        }
+                      },
+                      "item": {
+                        "endian": "le",
+                        "format": "u8",
+                        "kind": "numberTypeNode"
+                      },
+                      "kind": "arrayTypeNode"
+                    }
+                  },
+                  {
+                    "kind": "structFieldTypeNode",
+                    "name": "accounts",
+                    "type": {
+                      "count": {
+                        "kind": "fixedCountNode",
+                        "value": 4
+                      },
+                      "item": {
+                        "kind": "definedTypeLinkNode",
+                        "name": "hookMeta"
+                      },
+                      "kind": "arrayTypeNode"
+                    }
+                  }
+                ],
+                "kind": "structTypeNode"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "definedTypeNode",
+        "name": "compactHookDescriptor",
+        "type": {
+          "fields": [
+            {
+              "kind": "structFieldTypeNode",
+              "name": "program",
+              "type": {
+                "kind": "publicKeyTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "entrypoint",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 8
+                },
+                "item": {
+                  "endian": "le",
+                  "format": "u8",
+                  "kind": "numberTypeNode"
+                },
+                "kind": "arrayTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "accounts",
+              "type": {
+                "kind": "definedTypeLinkNode",
+                "name": "compactHookAccounts"
+              }
+            }
+          ],
+          "kind": "structTypeNode"
+        }
+      },
+      {
+        "kind": "definedTypeNode",
+        "name": "hookConfig",
+        "type": {
+          "count": {
+            "kind": "fixedCountNode",
+            "value": 4
+          },
+          "item": {
+            "fixed": false,
+            "item": {
+              "kind": "definedTypeLinkNode",
+              "name": "compactHookDescriptor"
+            },
+            "kind": "optionTypeNode",
+            "prefix": {
+              "endian": "le",
+              "format": "u8",
+              "kind": "numberTypeNode"
+            }
+          },
+          "kind": "arrayTypeNode"
         }
       },
       {
@@ -971,6 +2037,12 @@
         "kind": "errorNode",
         "message": "Channel cannot be fully closed until clock.slot > open_slot + OPEN_SLOT_WINDOW",
         "name": "channelCloseTooEarly"
+      },
+      {
+        "code": 2500,
+        "kind": "errorNode",
+        "message": "Lifecycle callback changed protected channel custody",
+        "name": "hookInvariantViolation"
       }
     ],
     "events": [
@@ -1787,6 +2859,427 @@
         ],
         "kind": "instructionNode",
         "name": "emitEvent"
+      },
+      {
+        "accounts": [
+          {
+            "isSigner": true,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "payer"
+          },
+          {
+            "isSigner": true,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "rentPayer"
+          },
+          {
+            "isSigner": false,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "payee"
+          },
+          {
+            "isSigner": false,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "mint"
+          },
+          {
+            "isSigner": false,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "authorizedSigner"
+          },
+          {
+            "isSigner": false,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "channel"
+          },
+          {
+            "isSigner": false,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "payerTokenAccount"
+          },
+          {
+            "isSigner": false,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "channelTokenAccount"
+          },
+          {
+            "isSigner": false,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "tokenProgram"
+          },
+          {
+            "defaultValue": {
+              "kind": "publicKeyValueNode",
+              "publicKey": "11111111111111111111111111111111"
+            },
+            "isSigner": false,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "systemProgram"
+          },
+          {
+            "isSigner": false,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "rent"
+          },
+          {
+            "isSigner": false,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "associatedTokenProgram"
+          },
+          {
+            "defaultValue": {
+              "kind": "pdaValueNode",
+              "pda": {
+                "kind": "pdaLinkNode",
+                "name": "eventAuthority"
+              },
+              "seeds": []
+            },
+            "isSigner": false,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "eventAuthority"
+          },
+          {
+            "defaultValue": {
+              "kind": "publicKeyValueNode",
+              "publicKey": "CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX"
+            },
+            "isSigner": false,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "selfProgram"
+          }
+        ],
+        "arguments": [
+          {
+            "defaultValue": {
+              "kind": "numberValueNode",
+              "number": 10
+            },
+            "defaultValueStrategy": "omitted",
+            "kind": "instructionArgumentNode",
+            "name": "discriminator",
+            "type": {
+              "endian": "le",
+              "format": "u8",
+              "kind": "numberTypeNode"
+            }
+          },
+          {
+            "kind": "instructionArgumentNode",
+            "name": "openWithHooksArgs",
+            "type": {
+              "kind": "definedTypeLinkNode",
+              "name": "openWithHooksArgs"
+            }
+          }
+        ],
+        "discriminators": [
+          {
+            "kind": "fieldDiscriminatorNode",
+            "name": "discriminator",
+            "offset": 0
+          }
+        ],
+        "docs": [
+          "V2: append enabled hook tails in preFund, postFund order, after the fixed head and any recipient ATAs.",
+          "Each tail is target program, readonly nonsigner callback authority, then committed extra accounts with their exact writable flags and no signers.",
+          "These variable-privilege tails are not synthesized by the generated builders; the caller must append AccountMeta entries."
+        ],
+        "kind": "instructionNode",
+        "name": "openWithHooks"
+      },
+      {
+        "accounts": [
+          {
+            "isSigner": true,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "payer"
+          },
+          {
+            "isSigner": false,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "channel"
+          },
+          {
+            "isSigner": false,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "payerTokenAccount"
+          },
+          {
+            "isSigner": false,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "channelTokenAccount"
+          },
+          {
+            "isSigner": false,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "mint"
+          },
+          {
+            "isSigner": false,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "tokenProgram"
+          }
+        ],
+        "arguments": [
+          {
+            "defaultValue": {
+              "kind": "numberValueNode",
+              "number": 11
+            },
+            "defaultValueStrategy": "omitted",
+            "kind": "instructionArgumentNode",
+            "name": "discriminator",
+            "type": {
+              "endian": "le",
+              "format": "u8",
+              "kind": "numberTypeNode"
+            }
+          },
+          {
+            "kind": "instructionArgumentNode",
+            "name": "topUpArgs",
+            "type": {
+              "kind": "definedTypeLinkNode",
+              "name": "topUpArgs"
+            }
+          }
+        ],
+        "discriminators": [
+          {
+            "kind": "fieldDiscriminatorNode",
+            "name": "discriminator",
+            "offset": 0
+          }
+        ],
+        "docs": [
+          "V2: append enabled hook tails in preFund, postFund order, after the fixed head and any recipient ATAs.",
+          "Each tail is target program, readonly nonsigner callback authority, then committed extra accounts with their exact writable flags and no signers.",
+          "These variable-privilege tails are not synthesized by the generated builders; the caller must append AccountMeta entries."
+        ],
+        "kind": "instructionNode",
+        "name": "topUpWithHooks"
+      },
+      {
+        "accounts": [
+          {
+            "isSigner": false,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "channel"
+          },
+          {
+            "isSigner": false,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "payer"
+          },
+          {
+            "isSigner": false,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "rentPayer"
+          },
+          {
+            "isSigner": false,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "channelTokenAccount"
+          },
+          {
+            "isSigner": false,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "payerTokenAccount"
+          },
+          {
+            "isSigner": false,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "payeeTokenAccount"
+          },
+          {
+            "isSigner": false,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "treasuryTokenAccount"
+          },
+          {
+            "isSigner": false,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "mint"
+          },
+          {
+            "isSigner": false,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "tokenProgram"
+          },
+          {
+            "defaultValue": {
+              "kind": "pdaValueNode",
+              "pda": {
+                "kind": "pdaLinkNode",
+                "name": "eventAuthority"
+              },
+              "seeds": []
+            },
+            "isSigner": false,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "eventAuthority"
+          },
+          {
+            "defaultValue": {
+              "kind": "publicKeyValueNode",
+              "publicKey": "CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX"
+            },
+            "isSigner": false,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "selfProgram"
+          }
+        ],
+        "arguments": [
+          {
+            "defaultValue": {
+              "kind": "numberValueNode",
+              "number": 12
+            },
+            "defaultValueStrategy": "omitted",
+            "kind": "instructionArgumentNode",
+            "name": "discriminator",
+            "type": {
+              "endian": "le",
+              "format": "u8",
+              "kind": "numberTypeNode"
+            }
+          },
+          {
+            "kind": "instructionArgumentNode",
+            "name": "distributeArgs",
+            "type": {
+              "kind": "definedTypeLinkNode",
+              "name": "distributeArgs"
+            }
+          }
+        ],
+        "discriminators": [
+          {
+            "kind": "fieldDiscriminatorNode",
+            "name": "discriminator",
+            "offset": 0
+          }
+        ],
+        "docs": [
+          "V2: append enabled hook tails in preDistribute, postDistribute order, after the fixed head and any recipient ATAs.",
+          "Each tail is target program, readonly nonsigner callback authority, then committed extra accounts with their exact writable flags and no signers.",
+          "These variable-privilege tails are not synthesized by the generated builders; the caller must append AccountMeta entries."
+        ],
+        "kind": "instructionNode",
+        "name": "distributeWithHooks",
+        "remainingAccounts": [
+          {
+            "isSigner": false,
+            "isWritable": true,
+            "kind": "instructionRemainingAccountsNode",
+            "value": {
+              "kind": "argumentValueNode",
+              "name": "recipientTokenAccounts"
+            }
+          }
+        ]
+      },
+      {
+        "accounts": [
+          {
+            "isSigner": true,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "payer"
+          },
+          {
+            "isSigner": false,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "channel"
+          },
+          {
+            "isSigner": false,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "channelTokenAccount"
+          },
+          {
+            "isSigner": false,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "payerTokenAccount"
+          },
+          {
+            "isSigner": false,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "mint"
+          },
+          {
+            "isSigner": false,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "tokenProgram"
+          }
+        ],
+        "arguments": [
+          {
+            "defaultValue": {
+              "kind": "numberValueNode",
+              "number": 13
+            },
+            "defaultValueStrategy": "omitted",
+            "kind": "instructionArgumentNode",
+            "name": "discriminator",
+            "type": {
+              "endian": "le",
+              "format": "u8",
+              "kind": "numberTypeNode"
+            }
+          }
+        ],
+        "discriminators": [
+          {
+            "kind": "fieldDiscriminatorNode",
+            "name": "discriminator",
+            "offset": 0
+          }
+        ],
+        "docs": [
+          "V2: append enabled hook tails in preDistribute, postDistribute order, after the fixed head and any recipient ATAs.",
+          "Each tail is target program, readonly nonsigner callback authority, then committed extra accounts with their exact writable flags and no signers.",
+          "These variable-privilege tails are not synthesized by the generated builders; the caller must append AccountMeta entries."
+        ],
+        "kind": "instructionNode",
+        "name": "withdrawPayerWithHooks"
       }
     ],
     "kind": "programNode",

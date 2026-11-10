@@ -63,9 +63,9 @@ const _: () = assert!(
 /// residuals are unspendable.
 ///
 /// The value is per deployment and comes from `vars.treasury_owner` of the
-/// channel being built (see `Solex.toml`). `localnet` carries the `0xBEEF`
-/// placeholder; a channel without the var does not compile, which replaces the
-/// former cluster-feature release gate.
+/// channel being built (see `Solex.toml`); a channel without the var does not
+/// compile, which replaces the former cluster-feature release gate and its
+/// `0xBEEF` placeholder.
 pub const TREASURY_OWNER: pinocchio::Address = pinocchio::Address::new_from_array(
     const_crypto::bs58::decode_pubkey(solex::var!("treasury_owner")),
 );

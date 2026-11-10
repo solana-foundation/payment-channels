@@ -4,6 +4,7 @@ export default {
   idl: IDL_PATH,
   scripts: {
     idl: [
+      './codama-lifecycle-visitors.mjs#addLifecycleTypes',
       './codama-visitors.mjs#addGeneratedClientAccountMetadata',
       './codama-visitors.mjs#normalizeEvents',
       {

@@ -6,23 +6,31 @@
 //!
 
 pub(crate) mod r#distribute;
+pub(crate) mod r#distribute_with_hooks;
 pub(crate) mod r#emit_event;
 pub(crate) mod r#open;
+pub(crate) mod r#open_with_hooks;
 pub(crate) mod r#reclaim;
 pub(crate) mod r#request_close;
 pub(crate) mod r#seal;
 pub(crate) mod r#settle;
 pub(crate) mod r#settle_and_seal;
 pub(crate) mod r#top_up;
+pub(crate) mod r#top_up_with_hooks;
 pub(crate) mod r#withdraw_payer;
+pub(crate) mod r#withdraw_payer_with_hooks;
 
 pub use self::r#distribute::*;
+pub use self::r#distribute_with_hooks::*;
 pub use self::r#emit_event::*;
 pub use self::r#open::*;
+pub use self::r#open_with_hooks::*;
 pub use self::r#reclaim::*;
 pub use self::r#request_close::*;
 pub use self::r#seal::*;
 pub use self::r#settle::*;
 pub use self::r#settle_and_seal::*;
 pub use self::r#top_up::*;
+pub use self::r#top_up_with_hooks::*;
 pub use self::r#withdraw_payer::*;
+pub use self::r#withdraw_payer_with_hooks::*;

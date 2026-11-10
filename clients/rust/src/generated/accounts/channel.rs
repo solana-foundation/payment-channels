@@ -34,8 +34,13 @@ pub struct Channel {
 impl Channel {
     #[inline(always)]
     pub fn from_bytes(data: &[u8]) -> Result<Self, std::io::Error> {
-        let mut data = data;
-        Self::deserialize(&mut data)
+        if data.len() != 256 || data[0] != 1 || data[1] != 1 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid channel account size, discriminator, or version",
+            ));
+        }
+        Self::try_from_slice(data)
     }
 }
 
@@ -43,8 +48,7 @@ impl<'a> TryFrom<&solana_account_info::AccountInfo<'a>> for Channel {
     type Error = std::io::Error;
 
     fn try_from(account_info: &solana_account_info::AccountInfo<'a>) -> Result<Self, Self::Error> {
-        let mut data: &[u8] = &(*account_info.data).borrow();
-        Self::deserialize(&mut data)
+        Self::from_bytes(&account_info.data.borrow())
     }
 }
 
@@ -120,7 +124,7 @@ pub fn fetch_all_maybe_channel(
 #[cfg(feature = "anchor")]
 impl anchor_lang::AccountDeserialize for Channel {
     fn try_deserialize_unchecked(buf: &mut &[u8]) -> anchor_lang::Result<Self> {
-        Ok(Self::deserialize(buf)?)
+        Ok(Self::from_bytes(buf)?)
     }
 }
 

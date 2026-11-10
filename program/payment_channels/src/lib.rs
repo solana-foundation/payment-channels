@@ -5,6 +5,9 @@
 
 #![no_std]
 
+#[cfg(all(feature = "no-entrypoint", not(target_os = "solana")))]
+extern crate std;
+
 #[cfg(feature = "idl")]
 extern crate alloc;
 
@@ -13,8 +16,11 @@ compile_error!("the `idl` feature is host-only; do not enable it for SBF builds"
 
 use pinocchio::{AccountView, Address, ProgramResult};
 
+#[cfg(not(feature = "no-entrypoint"))]
 pinocchio::program_entrypoint!(process_instruction);
+#[cfg(any(not(feature = "no-entrypoint"), target_os = "solana"))]
 pinocchio::no_allocator!();
+#[cfg(any(not(feature = "no-entrypoint"), target_os = "solana"))]
 pinocchio::nostd_panic_handler!();
 
 pub mod constants;
@@ -33,16 +39,43 @@ pub use instructions::*;
 pub mod state;
 pub use state::*;
 
+mod hook_guard;
+pub mod hooks;
+
 // Program id of the channel being built (Solex.toml, `SOLEX_CHANNEL`).
 solex::declare_id!();
 
+// The V2 lifecycle-hook instructions are the `hooks` Cargo feature, enabled
+// on the `canary` channel by Solex.toml. A `stable` build has no dispatch
+// arm, variant or discriminator for them; `solex features` shows the whole
+// feature as one row.
+#[cfg_attr(feature = "no-entrypoint", allow(dead_code))]
 fn process_instruction(
     program_id: &Address,
     accounts: &mut [AccountView],
     instruction_data: &[u8],
 ) -> ProgramResult {
+    // Check all supplied channel accounts, including aliases. Internal operation
+    // code can load guarded state, but no callback may start another entrypoint.
+    hooks::check_entry(accounts)?;
     match PaymentChannelsInstruction::from_bytes(instruction_data)? {
         PaymentChannelsInstruction::Open(args) => open::process(program_id, accounts, &args),
+        #[cfg(feature = "hooks")]
+        PaymentChannelsInstruction::OpenWithHooks(args) => {
+            open::process(program_id, accounts, &args)
+        }
+        #[cfg(feature = "hooks")]
+        PaymentChannelsInstruction::TopUpWithHooks(args) => {
+            top_up::process_with_hooks(program_id, accounts, args)
+        }
+        #[cfg(feature = "hooks")]
+        PaymentChannelsInstruction::DistributeWithHooks(args) => {
+            distribute::process_with_hooks(program_id, accounts, &args)
+        }
+        #[cfg(feature = "hooks")]
+        PaymentChannelsInstruction::WithdrawPayerWithHooks => {
+            withdraw_payer::process_with_hooks(program_id, accounts)
+        }
         PaymentChannelsInstruction::Settle => settle::process(program_id, accounts),
         PaymentChannelsInstruction::TopUp(args) => top_up::process(program_id, accounts, args),
         PaymentChannelsInstruction::SettleAndSeal(args) => {

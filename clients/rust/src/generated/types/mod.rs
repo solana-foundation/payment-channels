@@ -6,10 +6,19 @@
 //!
 
 pub(crate) mod r#account_discriminator;
+pub(crate) mod r#channel_header;
 pub(crate) mod r#channel_status;
+pub(crate) mod r#compact_hook_accounts;
+pub(crate) mod r#compact_hook_descriptor;
 pub(crate) mod r#distribute_args;
 pub(crate) mod r#distribution_entry;
+pub(crate) mod r#hook_config;
+pub(crate) mod r#hook_context;
+pub(crate) mod r#hook_descriptor;
+pub(crate) mod r#hook_meta;
+pub(crate) mod r#hook_state;
 pub(crate) mod r#open_args;
+pub(crate) mod r#open_with_hooks_args;
 pub(crate) mod r#opened;
 pub(crate) mod r#payout_beneficiary;
 pub(crate) mod r#payout_redirected;
@@ -20,10 +29,19 @@ pub(crate) mod r#top_up_args;
 pub(crate) mod r#voucher_args;
 
 pub use self::r#account_discriminator::*;
+pub use self::r#channel_header::*;
 pub use self::r#channel_status::*;
+pub use self::r#compact_hook_accounts::*;
+pub use self::r#compact_hook_descriptor::*;
 pub use self::r#distribute_args::*;
 pub use self::r#distribution_entry::*;
+pub use self::r#hook_config::*;
+pub use self::r#hook_context::*;
+pub use self::r#hook_descriptor::*;
+pub use self::r#hook_meta::*;
+pub use self::r#hook_state::*;
 pub use self::r#open_args::*;
+pub use self::r#open_with_hooks_args::*;
 pub use self::r#opened::*;
 pub use self::r#payout_beneficiary::*;
 pub use self::r#payout_redirected::*;

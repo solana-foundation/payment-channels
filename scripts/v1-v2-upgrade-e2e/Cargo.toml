@@ -1,0 +1,25 @@
+[package]
+name = "v1-v2-upgrade-e2e"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+# Extracted, unmodified historical client, NOT the current generated client.
+payment_channels_client = { path = "../../target/v1-upgrade-baseline/clients/rust" }
+base64 = "0.22"
+bincode = "1"
+borsh = "1"
+hex = "0.4"
+serde_json = "1"
+solana-instruction = "3"
+solana-keypair = "3"
+solana-pubkey = "3"
+solana-signer = "3"
+solana-transaction = { version = "3", features = ["bincode"] }
+
+[profile.dev]
+debug = 0
+incremental = false
