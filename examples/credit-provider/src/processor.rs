@@ -1,5 +1,5 @@
 use borsh::{BorshDeserialize, BorshSerialize};
-use payment_channel_interface::{
+use payment_channel_kit::{
     channel::{ChannelStatus, channel_address},
     hooks::{HookContext, Operation},
     validation::{CallbackExpectations, validate_callback},
@@ -240,7 +240,7 @@ pub fn authorize(
     drop(p);
     let mint = Address::new_from_array(ledger.mint);
     ledger.channel = *channel_address(
-        &payment_channel_interface::ID,
+        &payment_channel_kit::ID,
         owner.address(),
         &Address::new_from_array(authorization.payee),
         &mint,
@@ -272,7 +272,7 @@ pub fn callback(program: &Address, accounts: &mut [AccountView], data: &[u8]) ->
         accounts,
         data,
         &CallbackExpectations {
-            channel_program: &payment_channel_interface::ID,
+            channel_program: &payment_channel_kit::ID,
             callback_program: program,
             channel: &Address::new_from_array(ledger.channel),
             token_program: &pinocchio_token::ID,

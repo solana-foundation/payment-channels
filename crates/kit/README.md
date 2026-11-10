@@ -1,6 +1,6 @@
-# Payment channel on-chain interface
+# Payment channel kit
 
-`payment-channel-interface` is a `no_std`, library-only crate for programs receiving
+`payment-channel-kit` is a `no_std`, library-only crate for programs receiving
 payment-channel lifecycle callbacks. It defines no entrypoint, allocator or panic
 handler. The channel program and the credit-provider example share these ABI types.
 
@@ -37,7 +37,7 @@ checks its ledger authorization and custody before changing credits.
 From the repository root:
 
 ```sh
-cargo test -p payment-channel-interface
+cargo test -p payment-channel-kit
 just test-v2-hooks
 just test-credit-provider-surfpool
 just test-same-address-upgrade

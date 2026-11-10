@@ -8,7 +8,7 @@ extern crate alloc;
 extern crate std;
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use payment_channel_interface::hooks::{
+use payment_channel_kit::hooks::{
     HookContext, HookDescriptor, HookMeta, HookState, descriptor_commitment,
 };
 use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError};

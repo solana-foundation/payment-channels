@@ -16,7 +16,7 @@ default = []
 # which channels enable it; `solex build`/`solex test` pass --features.
 hooks = []
 # Retained for host integration harnesses that inspect the full core state.
-# On-chain consumers use payment-channel-interface instead. On SBF this program
+# On-chain consumers use payment-channel-kit instead. On SBF this program
 # still owns its allocator/panic handler; host library consumers link std because
 # this package also builds a cdylib.
 no-entrypoint = []
@@ -32,7 +32,7 @@ serde_json = { version = "1", optional = true }
 solex-types = { version = "0.2.1", default-features = false, features = ["toml"] }
 
 [dependencies]
-payment-channel-interface         = { version = "0.1.0", path = "../../crates/interface" }
+payment-channel-kit         = { version = "0.1.0", path = "../../crates/kit" }
 pinocchio                          = { version = "0.11.1", features = ["cpi", "copy", "account-resize"] }
 solex-lang                         = { version = "0.2.1", default-features = false, features = ["pinocchio"] }
 solana-address                     = { version = "2", features = ["curve25519", "borsh"] }

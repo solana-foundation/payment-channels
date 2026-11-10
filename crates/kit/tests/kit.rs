@@ -1,5 +1,5 @@
 use borsh::{BorshDeserialize, BorshSerialize};
-use payment_channel_interface::{
+use payment_channel_kit::{
     HookContext, HookDescriptor, HookMeta, HookState, ID,
     channel::{CHANNEL_V1_LEN, CHANNEL_V2_LEN, ChannelAccountView, ChannelView, channel_address},
     hooks::{HOOK_CONTEXT_LEN, Operation, Phase, descriptor_commitment, hook_authority},
@@ -81,7 +81,7 @@ fn golden_sparse_config_commits_the_original_fixed_slots() {
     fixed[40..44].copy_from_slice(&[1, 2, 4, 5]);
     fixed[74..106].fill(9);
     fixed[106] = 1;
-    assert_eq!(state.commitment, payment_channel_interface::sha256(&fixed));
+    assert_eq!(state.commitment, payment_channel_kit::sha256(&fixed));
     for end in 0..sparse.len() {
         assert!(HookState::parse(&sparse[..end]).is_err());
     }

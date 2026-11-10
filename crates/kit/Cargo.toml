@@ -1,5 +1,5 @@
 [package]
-name = "payment-channel-interface"
+name = "payment-channel-kit"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
