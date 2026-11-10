@@ -8,24 +8,41 @@ use pinocchio::{
 };
 
 use crate::errors::PaymentChannelsError;
-use crate::instructions::helpers::voucher::verify_voucher;
+use crate::instructions::helpers::voucher::{verify_metered_pair, verify_voucher};
 use crate::state::channel::{Channel, ChannelStatus};
 use crate::state::{Transmutable, load};
 
 /// Instruction discriminator byte for `settleAndSeal`.
 pub const DISCRIMINATOR: u8 = 4;
 
-/// Cooperative-close payload: a single option-tag byte. When the voucher is
-/// applied it is read from the bundled Ed25519 precompile ix — the same source
-/// as `settle` — so it is never duplicated in this instruction's data.
+/// [`SettleAndSealArgs::has_voucher`] value that skips voucher verification.
+pub const NO_VOUCHER: u8 = 0;
+
+/// [`SettleAndSealArgs::has_voucher`] value that applies the v1 voucher in
+/// the slot immediately before this instruction, as in `settle`.
+pub const V1_VOUCHER: u8 = 1;
+
+/// [`SettleAndSealArgs::has_voucher`] value that selects the metered
+/// cap/claim pair in the two slots immediately before this instruction (cap
+/// first, claim second), as in `settle_metered`.
+pub const METERED_VOUCHER: u8 = 2;
+
+/// Cooperative-close payload: a single option-tag byte. When a voucher is
+/// applied it is read from the bundled Ed25519 precompile ix(s) — the same
+/// source as `settle` / `settle_metered` — so it is never duplicated in this
+/// instruction's data.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "idl", derive(CodamaType))]
 pub struct SettleAndSealArgs {
-    /// Option tag: `0` skips the voucher (lock whatever is already in
-    /// [`settled`](crate::Channel::settled)); any non-zero value applies the
-    /// voucher carried by the preceding Ed25519 precompile ix first, under the
-    /// same freshness and monotonicity rules as `settle`.
+    /// Voucher tag: `0` skips the voucher (lock whatever is already in
+    /// [`settled`](crate::Channel::settled)); `1` applies the v1 voucher
+    /// carried by the preceding Ed25519 precompile ix first, under the same
+    /// freshness and monotonicity rules as `settle`; `2` applies the metered
+    /// cap/claim precompile pair in the two slots immediately before this
+    /// instruction (cap first, claim second) first, advancing `settled` to the claim
+    /// under `settled < claim <= cap <= deposit`. Any other value is rejected
+    /// with `InvalidInstructionData`.
     pub has_voucher: u8,
 }
 
@@ -49,7 +66,7 @@ pub struct SettleAndSealAccounts<'a> {
     /// written.
     pub channel: &'a mut AccountView,
     /// Consulted only when
-    /// [`SettleAndSealArgs::has_voucher`] == 1.
+    /// [`SettleAndSealArgs::has_voucher`] != [`NO_VOUCHER`].
     pub instructions_sysvar: &'a AccountView,
 }
 
@@ -110,9 +127,19 @@ pub fn process(
         return Err(PaymentChannelsError::InvalidChannelPayee.into());
     }
 
-    if args.has_voucher != 0 {
-        let new_watermark = verify_voucher(&channel_address, &ch, accs.instructions_sysvar, now)?;
-        ch.set_settled(new_watermark);
+    match args.has_voucher {
+        NO_VOUCHER => {}
+        V1_VOUCHER => {
+            let new_watermark =
+                verify_voucher(&channel_address, &ch, accs.instructions_sysvar, now)?;
+            ch.set_settled(new_watermark);
+        }
+        METERED_VOUCHER => {
+            let new_watermark =
+                verify_metered_pair(&channel_address, &ch, accs.instructions_sysvar, now)?;
+            ch.set_settled(new_watermark);
+        }
+        _ => return Err(ProgramError::InvalidInstructionData),
     }
 
     ch.status = ChannelStatus::Sealed as u8;

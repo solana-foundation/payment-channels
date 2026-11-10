@@ -521,6 +521,113 @@
       },
       {
         "kind": "definedTypeNode",
+        "name": "capVoucherArgs",
+        "type": {
+          "fields": [
+            {
+              "kind": "structFieldTypeNode",
+              "name": "magic",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 2
+                },
+                "item": {
+                  "endian": "le",
+                  "format": "u8",
+                  "kind": "numberTypeNode"
+                },
+                "kind": "arrayTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "channelId",
+              "type": {
+                "kind": "publicKeyTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "capCumulative",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "expiresAt",
+              "type": {
+                "endian": "le",
+                "format": "i64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "operator",
+              "type": {
+                "kind": "publicKeyTypeNode"
+              }
+            }
+          ],
+          "kind": "structTypeNode"
+        }
+      },
+      {
+        "kind": "definedTypeNode",
+        "name": "claimVoucherArgs",
+        "type": {
+          "fields": [
+            {
+              "kind": "structFieldTypeNode",
+              "name": "magic",
+              "type": {
+                "count": {
+                  "kind": "fixedCountNode",
+                  "value": 2
+                },
+                "item": {
+                  "endian": "le",
+                  "format": "u8",
+                  "kind": "numberTypeNode"
+                },
+                "kind": "arrayTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "channelId",
+              "type": {
+                "kind": "publicKeyTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "claimCumulative",
+              "type": {
+                "endian": "le",
+                "format": "u64",
+                "kind": "numberTypeNode"
+              }
+            },
+            {
+              "kind": "structFieldTypeNode",
+              "name": "expiresAt",
+              "type": {
+                "endian": "le",
+                "format": "i64",
+                "kind": "numberTypeNode"
+              }
+            }
+          ],
+          "kind": "structTypeNode"
+        }
+      },
+      {
+        "kind": "definedTypeNode",
         "name": "channelStatus",
         "type": {
           "kind": "enumTypeNode",
@@ -1877,6 +1984,24 @@
         "name": "voucherBadMagic"
       },
       {
+        "code": 239,
+        "kind": "errorNode",
+        "message": "Metered voucher operator pubkey mismatch",
+        "name": "voucherOperatorMismatch"
+      },
+      {
+        "code": 240,
+        "kind": "errorNode",
+        "message": "Metered claim exceeds signed cap",
+        "name": "claimExceedsCap"
+      },
+      {
+        "code": 241,
+        "kind": "errorNode",
+        "message": "Missing Ed25519 precompile ix at current-2",
+        "name": "missingSecondEd25519Verification"
+      },
+      {
         "code": 260,
         "kind": "errorNode",
         "message": "num_recipients outside [0, 32]",
@@ -2834,6 +2959,47 @@
         ],
         "kind": "instructionNode",
         "name": "reclaim"
+      },
+      {
+        "accounts": [
+          {
+            "isSigner": false,
+            "isWritable": true,
+            "kind": "instructionAccountNode",
+            "name": "channel"
+          },
+          {
+            "isSigner": false,
+            "isWritable": false,
+            "kind": "instructionAccountNode",
+            "name": "instructionsSysvar"
+          }
+        ],
+        "arguments": [
+          {
+            "defaultValue": {
+              "kind": "numberValueNode",
+              "number": 14
+            },
+            "defaultValueStrategy": "omitted",
+            "kind": "instructionArgumentNode",
+            "name": "discriminator",
+            "type": {
+              "endian": "le",
+              "format": "u8",
+              "kind": "numberTypeNode"
+            }
+          }
+        ],
+        "discriminators": [
+          {
+            "kind": "fieldDiscriminatorNode",
+            "name": "discriminator",
+            "offset": 0
+          }
+        ],
+        "kind": "instructionNode",
+        "name": "settleMetered"
       },
       {
         "accounts": [
