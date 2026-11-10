@@ -170,7 +170,7 @@ version = "0.0.0"
 dependencies = [
  "borsh",
  "const-crypto",
- "payment-channel-interface",
+ "payment-channel-kit",
  "pinocchio",
  "pinocchio-associated-token-account",
  "pinocchio-system",
@@ -552,7 +552,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
 
 [[package]]
-name = "payment-channel-interface"
+name = "payment-channel-kit"
 version = "0.1.0"
 dependencies = [
  "borsh",
@@ -567,7 +567,7 @@ version = "0.1.0"
 dependencies = [
  "borsh",
  "const-crypto",
- "payment-channel-interface",
+ "payment-channel-kit",
  "pinocchio",
  "pinocchio-associated-token-account",
  "pinocchio-system",

@@ -1,6 +1,6 @@
 //! Per-callback custody checks. Only accounts supplied to the operation are protected.
 use core::mem::MaybeUninit;
-use payment_channel_interface::sha256;
+use payment_channel_kit::sha256;
 use pinocchio::{AccountView, ProgramResult, error::ProgramError};
 
 use crate::{
