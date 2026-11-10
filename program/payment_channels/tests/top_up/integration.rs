@@ -4,7 +4,8 @@ use payment_channels::state::channel::ChannelStatus;
 use solana_program_error::ProgramError;
 use solana_pubkey::Pubkey;
 
-use crate::common::ChannelBuilder;
+use crate::common::token_2022::mint_policy_cases;
+use crate::common::{ChannelBuilder, TOKEN_2022};
 
 use super::{DEPOSIT, TopUpRun};
 
@@ -179,4 +180,35 @@ fn unknown_token_program_rejects() {
             PaymentChannelsError::InvalidMintTokenProgram as u32
         )),
     );
+}
+
+/// Mint policy runs after the channel identity checks and before any CPI.
+#[test]
+fn token_2022_mint_policy_gate_runs_before_any_cpi() {
+    for (label, mint_account, expected) in
+        mint_policy_cases(PaymentChannelsError::ChannelAccountMismatch)
+    {
+        let payer = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let run = TopUpRun {
+            mint,
+            token_program: TOKEN_2022,
+            mint_account: Some(mint_account),
+            ..TopUpRun::new(
+                payer,
+                ChannelBuilder::new()
+                    .status(ChannelStatus::Open)
+                    .deposit(DEPOSIT)
+                    .payer(payer)
+                    .mint(mint)
+                    .build(),
+                DEPOSIT,
+            )
+        };
+        assert_eq!(
+            run.run(),
+            ProgramResult::Failure(ProgramError::Custom(expected as u32)),
+            "{label}"
+        );
+    }
 }

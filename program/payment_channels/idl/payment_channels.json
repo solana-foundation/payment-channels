@@ -1795,8 +1795,20 @@
       {
         "code": 63,
         "kind": "errorNode",
-        "message": "Token-2022 mint carries an unsupported extension",
+        "message": "Token-2022 mint carries an extension outside the allow-list",
         "name": "unsupportedMintTokenExtensions"
+      },
+      {
+        "code": 64,
+        "kind": "errorNode",
+        "message": "Token-2022 mint has a live transfer fee or an installed transfer hook",
+        "name": "activeMintTokenExtension"
+      },
+      {
+        "code": 65,
+        "kind": "errorNode",
+        "message": "Clock sysvar could not be read while evaluating the mint policy",
+        "name": "clockSysvarUnavailable"
       },
       {
         "code": 200,

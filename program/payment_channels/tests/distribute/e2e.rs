@@ -29,13 +29,20 @@ use super::{
 };
 use crate::common::events::events;
 use crate::common::token_2022::{
-    EXT_GROUP_MEMBER_POINTER, EXT_GROUP_POINTER, EXT_IMMUTABLE_OWNER, EXT_MEMO_TRANSFER,
-    EXT_METADATA_POINTER, EXT_MINT_CLOSE_AUTHORITY, EXT_TOKEN_GROUP, EXT_TOKEN_GROUP_MEMBER,
-    EXT_TOKEN_METADATA, EXT_TRANSFER_FEE_CONFIG, EXT_TRANSFER_HOOK, POINTER_EXTENSION_LEN,
-    TOKEN_2022_ACCOUNT_TYPE_ACCOUNT, TOKEN_2022_ACCOUNT_TYPE_OFFSET, TOKEN_2022_BASE_ACCOUNT_LEN,
-    TOKEN_2022_TLV_START, TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN, TOKEN_METADATA_MIN_LEN,
-    add_account_extension, add_mint_extension, close_token_account, set_token_account_owner,
-    set_token_account_state,
+    CONFIDENTIAL_TRANSFER_FEE_CONFIG_LEN, CONFIDENTIAL_TRANSFER_MINT_LEN,
+    EXT_CONFIDENTIAL_TRANSFER_ACCOUNT, EXT_CONFIDENTIAL_TRANSFER_FEE_CONFIG,
+    EXT_CONFIDENTIAL_TRANSFER_MINT, EXT_DEFAULT_ACCOUNT_STATE, EXT_GROUP_MEMBER_POINTER,
+    EXT_GROUP_POINTER, EXT_IMMUTABLE_OWNER, EXT_MEMO_TRANSFER, EXT_METADATA_POINTER,
+    EXT_MINT_CLOSE_AUTHORITY, EXT_NON_TRANSFERABLE, EXT_PAUSABLE, EXT_PERMANENT_DELEGATE,
+    EXT_SCALED_UI_AMOUNT, EXT_TOKEN_GROUP, EXT_TOKEN_GROUP_MEMBER, EXT_TOKEN_METADATA,
+    EXT_TRANSFER_FEE_AMOUNT, EXT_TRANSFER_FEE_CONFIG, EXT_TRANSFER_HOOK, EXT_TRANSFER_HOOK_ACCOUNT,
+    MINT_CLOSE_AUTHORITY_LEN, PAUSABLE_LEN, PERMANENT_DELEGATE_LEN, POINTER_EXTENSION_LEN,
+    SCALED_UI_AMOUNT_LEN, TOKEN_2022_ACCOUNT_TYPE_ACCOUNT, TOKEN_2022_ACCOUNT_TYPE_OFFSET,
+    TOKEN_2022_BASE_ACCOUNT_LEN, TOKEN_2022_TLV_START, TOKEN_GROUP_LEN, TOKEN_GROUP_MEMBER_LEN,
+    TOKEN_METADATA_MIN_LEN, TRANSFER_FEE_CONFIG_LEN, TRANSFER_HOOK_LEN, add_account_extension,
+    add_mint_extension, close_token_account, extension_ids, set_token_account_owner,
+    set_token_account_state, set_transfer_fee, set_transfer_hook_program,
+    setup_paxos_style_funded_svm,
 };
 use solana_compute_budget::compute_budget_limits::MAX_COMPUTE_UNIT_LIMIT;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
@@ -43,7 +50,7 @@ use solana_compute_budget_interface::ComputeBudgetInstruction;
 use crate::common::{
     ATA_PROGRAM, INSTRUCTIONS_SYSVAR, PROGRAM_ID, ProgramLoader, SPL_TOKEN, SYSTEM_PROGRAM,
     SYSVAR_RENT, build_reclaim_ix, channel_open_slot, current_slot, event_authority,
-    expect_custom_err, expect_instruction_err, mutate_channel, read_channel, set_clock,
+    expect_custom_err, expect_instruction_err, mutate_channel, read_channel, set_clock, set_epoch,
     token_balance, treasury_owner,
     voucher::{build_ed25519_ix, voucher, voucher_payload},
     warp_past_close_gate,
@@ -389,13 +396,51 @@ impl Scenario {
         status: u8,
         token_program: Pubkey,
     ) -> Self {
+        Self::build_with_mint_setup(
+            splits,
+            deposit,
+            settled,
+            payout_watermark,
+            status,
+            token_program,
+            |svm, deposit| setup_funded_svm_with_token_program(svm, deposit, &token_program),
+        )
+    }
+
+    /// Token-2022 scenario on a PYUSD/USDG-shaped mint; the payer is the issuer.
+    fn build_paxos_style(
+        splits: Vec<Split>,
+        deposit: u64,
+        settled: u64,
+        payout_watermark: u64,
+        status: u8,
+    ) -> Self {
+        Self::build_with_mint_setup(
+            splits,
+            deposit,
+            settled,
+            payout_watermark,
+            status,
+            TOKEN_2022,
+            setup_paxos_style_funded_svm,
+        )
+    }
+
+    fn build_with_mint_setup(
+        splits: Vec<Split>,
+        deposit: u64,
+        settled: u64,
+        payout_watermark: u64,
+        status: u8,
+        token_program: Pubkey,
+        setup: impl FnOnce(&mut LiteSVM, u64) -> (Keypair, Pubkey, Pubkey),
+    ) -> Self {
         let mut svm = LiteSVM::load_program();
         let fee_payer = Keypair::new();
         svm.airdrop(&fee_payer.pubkey(), 10_000_000_000).unwrap();
         svm.airdrop(&treasury_owner(), 1_000_000_000).unwrap();
 
-        let (payer_kp, mint, payer_ata) =
-            setup_funded_svm_with_token_program(&mut svm, deposit, &token_program);
+        let (payer_kp, mint, payer_ata) = setup(&mut svm, deposit);
         let payer = payer_kp.pubkey();
 
         let opened = open_channel(
@@ -1155,6 +1200,22 @@ fn token_2022_allowed_mint_extensions_succeed() {
         (EXT_TOKEN_GROUP, TOKEN_GROUP_LEN),
         (EXT_GROUP_MEMBER_POINTER, POINTER_EXTENSION_LEN),
         (EXT_TOKEN_GROUP_MEMBER, TOKEN_GROUP_MEMBER_LEN),
+        // Trusted / inert under the mint trust model.
+        (EXT_MINT_CLOSE_AUTHORITY, MINT_CLOSE_AUTHORITY_LEN),
+        (EXT_PERMANENT_DELEGATE, PERMANENT_DELEGATE_LEN),
+        (
+            EXT_CONFIDENTIAL_TRANSFER_MINT,
+            CONFIDENTIAL_TRANSFER_MINT_LEN,
+        ),
+        (
+            EXT_CONFIDENTIAL_TRANSFER_FEE_CONFIG,
+            CONFIDENTIAL_TRANSFER_FEE_CONFIG_LEN,
+        ),
+        (EXT_PAUSABLE, PAUSABLE_LEN),
+        (EXT_SCALED_UI_AMOUNT, SCALED_UI_AMOUNT_LEN),
+        // State-gated, zero-filled == dormant.
+        (EXT_TRANSFER_FEE_CONFIG, TRANSFER_FEE_CONFIG_LEN),
+        (EXT_TRANSFER_HOOK, TRANSFER_HOOK_LEN),
     ] {
         add_mint_extension(&mut s.svm, &s.mint, extension_type, value_len);
     }
@@ -1170,9 +1231,9 @@ fn token_2022_allowed_mint_extensions_succeed() {
 #[test]
 fn unsupported_token_2022_mint_extensions_reject_without_state_changes() {
     for (extension_type, value_len) in [
-        (EXT_TRANSFER_FEE_CONFIG, 108),
-        (EXT_TRANSFER_HOOK, 64),
-        (EXT_MINT_CLOSE_AUTHORITY, 32),
+        (EXT_NON_TRANSFERABLE, 0),
+        (EXT_DEFAULT_ACCOUNT_STATE, 1),
+        (EXT_CONFIDENTIAL_TRANSFER_ACCOUNT, 1),
     ] {
         let splits = vec![Split {
             owner: Pubkey::new_unique(),
@@ -1195,6 +1256,137 @@ fn unsupported_token_2022_mint_extensions_reject_without_state_changes() {
         assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
         assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
     }
+}
+
+// ===========================================================================
+// PYUSD / USDG-shaped mint through the real Token-2022 program.
+
+/// OPEN then SEALED distribute on a PYUSD/USDG-shaped mint: exact balances,
+/// escrow with auto-added extensions closes, channel fully deallocated.
+#[test]
+fn paxos_style_mint_full_lifecycle_open_then_sealed_close() {
+    let splits = vec![
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 2_500,
+        },
+        Split {
+            owner: Pubkey::new_unique(),
+            bps: 2_500,
+        },
+    ];
+    let deposit = 200_000;
+    let first_settled = 100_000;
+    let mut s = Scenario::build_paxos_style(splits, deposit, first_settled, 0, STATUS_OPEN);
+
+    for ata in
+        s.recipient_atas
+            .iter()
+            .chain([&s.payee_ata, &s.payer_ata, &s.treasury_ata, &s.channel_ata])
+    {
+        let mut exts = extension_ids(&s.svm, ata);
+        exts.sort_unstable();
+        assert_eq!(
+            exts,
+            vec![
+                EXT_TRANSFER_FEE_AMOUNT,
+                EXT_IMMUTABLE_OWNER,
+                EXT_TRANSFER_HOOK_ACCOUNT
+            ],
+            "every ATA of a fee+hook mint carries the auto-added account records"
+        );
+    }
+
+    s.send(s.distribute_ix())
+        .expect("OPEN distribute on paxos-style mint");
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 25_000);
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 25_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 50_000);
+    assert_eq!(
+        token_balance(&s.svm, &s.channel_ata),
+        deposit - first_settled
+    );
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), first_settled);
+
+    // Settle more, seal, and run the terminal distribute.
+    let final_settled = 150_000;
+    let fee_payer = s.fee_payer.insecure_clone();
+    s.svm.expire_blockhash();
+    settle_to(
+        &mut s.svm,
+        &fee_payer,
+        &s.channel,
+        &s.authorized_signer,
+        final_settled,
+        0,
+    );
+    set_status(&mut s.svm, &s.channel, STATUS_SEALED);
+    warp_past_close_gate(&mut s.svm, &s.channel);
+
+    let rent_payer_before = s.svm.get_account(&s.payer).unwrap().lamports;
+    let channel_lamports = s.svm.get_account(&s.channel).unwrap().lamports;
+    let escrow_lamports = s.svm.get_account(&s.channel_ata).unwrap().lamports;
+
+    s.send(s.distribute_ix())
+        .expect("SEALED distribute on paxos-style mint");
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 37_500);
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[1]), 37_500);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 75_000);
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - final_settled);
+    assert_eq!(
+        token_balance(&s.svm, &s.treasury_ata),
+        0,
+        "no flooring dust, no fee dust"
+    );
+    assert!(
+        s.svm.get_account(&s.channel_ata).is_none(),
+        "escrow with auto-added extensions closes cleanly"
+    );
+    assert_fully_closed(&s.svm, &s.channel);
+    assert_eq!(
+        s.svm.get_account(&s.payer).unwrap().lamports - rent_payer_before,
+        channel_lamports + escrow_lamports
+    );
+}
+
+/// A fee or hook activated mid-channel rejects `distribute` with no state
+/// change; reverting it re-enables (ADR-007 wedge class).
+#[test]
+fn paxos_style_mint_live_fee_or_hook_rejects_distribute_without_state_changes() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5_000,
+    }];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let mut s = Scenario::build_paxos_style(splits, deposit, settled, 0, STATUS_OPEN);
+    let issuer = s.payer_keypair.insecure_clone();
+    let watermark_before = read_payout_watermark(&s.svm, &s.channel);
+
+    set_transfer_fee(&mut s.svm, &issuer, &s.mint, 10, 1_000);
+    expect_custom_err(
+        s.send(s.distribute_ix()),
+        PaymentChannelsError::ActiveMintTokenExtension,
+    );
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), watermark_before);
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 0);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.channel_ata), deposit);
+
+    set_transfer_fee(&mut s.svm, &issuer, &s.mint, 0, 0);
+    set_transfer_hook_program(&mut s.svm, &issuer, &s.mint, Some(Pubkey::new_unique()));
+    expect_custom_err(
+        s.send(s.distribute_ix()),
+        PaymentChannelsError::ActiveMintTokenExtension,
+    );
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), watermark_before);
+    assert_eq!(token_balance(&s.svm, &s.channel_ata), deposit);
+
+    set_transfer_hook_program(&mut s.svm, &issuer, &s.mint, None);
+    s.send(s.distribute_ix()).expect("dormant again");
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 50_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 50_000);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), settled);
 }
 
 #[test]
@@ -2611,4 +2803,98 @@ fn full_close_recovers_prefund_surplus_lamports() {
         channel_lamports_before + channel_ata_lamports_before,
         "rent payer recovers rent + surplus + escrow-ATA rent"
     );
+}
+
+/// `withdrawPayer` on a PYUSD/USDG-shaped mint: rejected while a fee is
+/// scheduled, exact refund once reverted.
+#[test]
+fn paxos_style_mint_live_fee_rejects_withdraw_payer_without_state_changes() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5_000,
+    }];
+    let deposit = 200_000;
+    let settled = 150_000;
+    let mut s = Scenario::build_paxos_style(splits, deposit, settled, 0, STATUS_SEALED);
+    let issuer = s.payer_keypair.insecure_clone();
+    let withdraw = |s: &mut Scenario| {
+        let ix = WithdrawPayer {
+            payer: s.payer,
+            channel: s.channel,
+            channel_token_account: s.channel_ata,
+            payer_token_account: s.payer_ata,
+            mint: s.mint,
+            token_program: s.token_program,
+        }
+        .instruction();
+        s.svm.expire_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&s.payer),
+            &[&s.payer_keypair],
+            s.svm.latest_blockhash(),
+        );
+        s.svm.send_transaction(tx)
+    };
+
+    set_transfer_fee(&mut s.svm, &issuer, &s.mint, 10, 1_000);
+    expect_custom_err(
+        withdraw(&mut s),
+        PaymentChannelsError::ActiveMintTokenExtension,
+    );
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), 0);
+    assert_eq!(token_balance(&s.svm, &s.channel_ata), deposit);
+    assert_eq!(
+        read_channel(&s.svm, &s.channel, |ch| ch.payer_withdrawn_at()),
+        0
+    );
+
+    set_transfer_fee(&mut s.svm, &issuer, &s.mint, 0, 0);
+    withdraw(&mut s).expect("dormant again");
+    assert_eq!(token_balance(&s.svm, &s.payer_ata), deposit - settled);
+    assert_eq!(token_balance(&s.svm, &s.channel_ata), settled);
+}
+
+/// Fee lifecycle through real epochs (ADR-007): a scheduled fee is rejected
+/// at once; after it activates and the issuer reverts, Token-2022 keeps
+/// charging the old schedule until the zero one takes over, and the gate
+/// reopens exactly then.
+#[test]
+fn paxos_style_mint_fee_gate_follows_token_2022_epoch_schedule() {
+    let splits = vec![Split {
+        owner: Pubkey::new_unique(),
+        bps: 5_000,
+    }];
+    let deposit = 200_000;
+    let settled = 100_000;
+    let mut s = Scenario::build_paxos_style(splits, deposit, settled, 0, STATUS_OPEN);
+    let issuer = s.payer_keypair.insecure_clone();
+
+    // Epoch 0: schedule 10 bps -> newer.epoch = 2.
+    set_transfer_fee(&mut s.svm, &issuer, &s.mint, 10, 1_000);
+    expect_custom_err(
+        s.send(s.distribute_ix()),
+        PaymentChannelsError::ActiveMintTokenExtension,
+    );
+
+    // Epoch 2: the fee is live; issuer reverts -> older = 10 bps, newer = 0 at epoch 4.
+    set_epoch(&mut s.svm, 2);
+    set_transfer_fee(&mut s.svm, &issuer, &s.mint, 0, 0);
+    for epoch in [2, 3] {
+        set_epoch(&mut s.svm, epoch);
+        expect_custom_err(
+            s.send(s.distribute_ix()),
+            PaymentChannelsError::ActiveMintTokenExtension,
+        );
+    }
+    assert_eq!(token_balance(&s.svm, &s.channel_ata), deposit);
+    assert_eq!(read_payout_watermark(&s.svm, &s.channel), 0);
+
+    // Epoch 4: zero schedule governs; payouts are exact, nothing withheld.
+    set_epoch(&mut s.svm, 4);
+    s.send(s.distribute_ix())
+        .expect("gate reopens with Token-2022");
+    assert_eq!(token_balance(&s.svm, &s.recipient_atas[0]), 50_000);
+    assert_eq!(token_balance(&s.svm, &s.payee_ata), 50_000);
+    assert_eq!(token_balance(&s.svm, &s.channel_ata), deposit - settled);
 }

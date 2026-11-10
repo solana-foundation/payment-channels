@@ -31,6 +31,8 @@ pub(super) struct WithdrawPayerRun {
     pub payer_ata: Pubkey,
     pub mint: Pubkey,
     pub token_program: Pubkey,
+    /// Account served at `mint`; a lamports-only dummy when `None`.
+    pub mint_account: Option<Account>,
 }
 
 impl WithdrawPayerRun {
@@ -43,6 +45,7 @@ impl WithdrawPayerRun {
             payer_ata: Pubkey::new_unique(),
             mint: Pubkey::new_unique(),
             token_program: SPL_TOKEN,
+            mint_account: None,
         }
     }
 
@@ -85,6 +88,8 @@ impl WithdrawPayerRun {
             .map(|m| {
                 let acc = if m.pubkey == channel_pubkey {
                     channel_account.clone()
+                } else if m.pubkey == self.mint {
+                    self.mint_account.clone().unwrap_or_else(|| dummy.clone())
                 } else {
                     dummy.clone()
                 };

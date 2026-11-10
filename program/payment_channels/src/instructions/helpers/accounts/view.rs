@@ -6,7 +6,12 @@ use core::{
 use borsh::BorshSerialize;
 #[cfg(feature = "idl")]
 use codama::CodamaType;
-use pinocchio::{AccountView, Address, ProgramResult, cpi::Signer, error::ProgramError};
+use pinocchio::{
+    AccountView, Address, ProgramResult,
+    cpi::Signer,
+    error::ProgramError,
+    sysvars::{Sysvar, clock::Clock},
+};
 
 use crate::{
     PaymentChannelsError, TREASURY_OWNER,
@@ -14,7 +19,8 @@ use crate::{
     events::PayoutRedirected,
     helpers::{
         accounts::validation::{AccountValidationError, AccountValidator},
-        token::{MintExtensionPolicy, TokenExtensionError, base_layout, scan_tlv_extensions, tlv},
+        token::{TokenExtensionError, base_layout, scan_tlv_extensions, tlv},
+        token_extensions::MintExtensionPolicy,
     },
 };
 
@@ -310,22 +316,29 @@ impl<'a> TokenContext<'a> {
                 .try_borrow()
                 .map_err(|_| PaymentChannelsError::MintAccountMismatch)?;
             if data.len() > base_layout::MINT_LEN {
-                // Require zero padding between mint base and AccountType offset,
-                // then walk the whitelisted TLV trailer.
+                // Zero padding up to the AccountType byte, then the policy walk
+                // (ADR-007). Re-run by every token-moving instruction, so a fee
+                // or hook activated mid-channel is rejected from then on.
                 let all_zero = data[base_layout::MINT_LEN..tlv::ACCOUNT_TYPE_OFFSET]
                     .iter()
                     .all(|b| *b == 0);
                 if !all_zero {
                     return Err(PaymentChannelsError::MalformedMintTokenAccountData);
                 }
-                scan_tlv_extensions::<MintExtensionPolicy>(&data[tlv::START..]).map_err(|err| {
-                    match err {
-                        TokenExtensionError::MalformedTokenAccountData => {
-                            PaymentChannelsError::MalformedMintTokenExtensions
-                        }
-                        TokenExtensionError::UnsupportedTokenExtension => {
-                            PaymentChannelsError::UnsupportedMintTokenExtensions
-                        }
+                let policy = MintExtensionPolicy {
+                    epoch: Clock::get()
+                        .map_err(|_| PaymentChannelsError::ClockSysvarUnavailable)?
+                        .epoch,
+                };
+                scan_tlv_extensions(&policy, &data[tlv::START..]).map_err(|err| match err {
+                    TokenExtensionError::MalformedTokenAccountData => {
+                        PaymentChannelsError::MalformedMintTokenExtensions
+                    }
+                    TokenExtensionError::UnsupportedTokenExtension => {
+                        PaymentChannelsError::UnsupportedMintTokenExtensions
+                    }
+                    TokenExtensionError::ActiveTokenExtension => {
+                        PaymentChannelsError::ActiveMintTokenExtension
                     }
                 })?;
             }

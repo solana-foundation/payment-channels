@@ -98,6 +98,8 @@ pub(super) struct DistributeRun {
     pub token_program: Pubkey,
     pub recipient_atas: Vec<Pubkey>,
     pub recipients: Vec<DistributionEntry>,
+    /// Account served at `mint`; a lamports-only dummy when `None`.
+    pub mint_account: Option<Account>,
 }
 
 impl DistributeRun {
@@ -116,6 +118,7 @@ impl DistributeRun {
             token_program: SPL_TOKEN,
             recipient_atas: splits.iter().map(|_| Pubkey::new_unique()).collect(),
             recipients: build_recipients(splits),
+            mint_account: None,
         }
     }
 
@@ -160,6 +163,8 @@ impl DistributeRun {
             .map(|m| {
                 let acc = if m.pubkey == self.channel {
                     channel_account.clone()
+                } else if m.pubkey == self.mint {
+                    self.mint_account.clone().unwrap_or_else(|| dummy.clone())
                 } else {
                     dummy.clone()
                 };
