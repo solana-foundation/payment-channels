@@ -215,9 +215,18 @@ pub fn authorize(
     accounts: &mut [AccountView],
     authorization: Authorization,
 ) -> ProgramResult {
-    let [owner, issuer, ledger_account, vault, payer, token] = accounts else {
-        return Err(ProgramError::NotEnoughAccountKeys);
+    // An optional seventh account names the channel deployment to fund
+    // (canonical or canary); without it the canonical deployment is used.
+    let (owner, issuer, ledger_account, vault, payer, token, channel_program) = match accounts {
+        [owner, issuer, ledger, vault, payer, token] => {
+            (owner, issuer, ledger, vault, payer, token, payment_channel_interface::ID)
+        }
+        [owner, issuer, ledger, vault, payer, token, channel_program] => {
+            (owner, issuer, ledger, vault, payer, token, *channel_program.address())
+        }
+        _ => return Err(ProgramError::NotEnoughAccountKeys),
     };
+    require(payment_channel_interface::is_known_deployment(&channel_program))?;
     let mut ledger = load(program, ledger_account)?;
     owner_signed(owner, &ledger)?;
     require(issuer.is_signer() && issuer.address().as_array() == &ledger.issuer)?;
@@ -240,7 +249,7 @@ pub fn authorize(
     drop(p);
     let mint = Address::new_from_array(ledger.mint);
     ledger.channel = *channel_address(
-        &payment_channel_interface::ID,
+        &channel_program,
         owner.address(),
         &Address::new_from_array(authorization.payee),
         &mint,
@@ -268,11 +277,19 @@ pub fn callback(program: &Address, accounts: &mut [AccountView], data: &[u8]) ->
         &Address::new_from_array(ledger.owner),
         &Address::new_from_array(ledger.mint),
     );
+    // The channel's owner selects the deployment, but only a known one: the
+    // ledger's channel was derived under the deployment chosen at authorize,
+    // and only that program can own an account at its PDA.
+    let channel_program = *accounts
+        .get(1)
+        .ok_or(ProgramError::NotEnoughAccountKeys)?
+        .owner();
+    require(payment_channel_interface::is_known_deployment(&channel_program))?;
     let validated = validate_callback(
         accounts,
         data,
         &CallbackExpectations {
-            channel_program: &payment_channel_interface::ID,
+            channel_program: &channel_program,
             callback_program: program,
             channel: &Address::new_from_array(ledger.channel),
             token_program: &pinocchio_token::ID,

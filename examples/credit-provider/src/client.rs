@@ -89,6 +89,22 @@ pub fn authorize(
     )
 }
 
+/// [`authorize`] for a channel on `channel_program` (canonical or canary):
+/// the program account is appended so the provider derives the channel under
+/// that deployment.
+pub fn authorize_for(
+    channel_program: &Address,
+    program: &Address,
+    owner: &Address,
+    mint: &Address,
+    issuer: &Address,
+    authorization: Authorization,
+) -> Instruction {
+    let mut ix = authorize(program, owner, mint, issuer, authorization);
+    ix.accounts.push(meta(*channel_program, false, false));
+    ix
+}
+
 /// Cancel only an authorization that has never funded a channel. Its nonce is
 /// not reset; subsequent authorization must use the next nonce.
 pub fn cancel_unfunded(
@@ -140,13 +156,33 @@ pub fn hook_tail(
     channel: &Address,
     phase: u8,
 ) -> Vec<AccountMeta> {
+    hook_tail_for(
+        &payment_channel_interface::ID,
+        program,
+        owner,
+        mint,
+        channel,
+        phase,
+    )
+}
+
+/// [`hook_tail`] for a channel on `channel_program` (canonical or canary):
+/// the callback authority is a PDA of the channel program.
+pub fn hook_tail_for(
+    channel_program: &Address,
+    program: &Address,
+    owner: &Address,
+    mint: &Address,
+    channel: &Address,
+    phase: u8,
+) -> Vec<AccountMeta> {
     assert!(
         matches!(phase, 0 | 3),
         "only the two configured phases are supported"
     );
     let state = hook_state(program, owner, mint);
     let authority = payment_channel_interface::hooks::hook_authority(
-        &payment_channel_interface::ID,
+        channel_program,
         channel,
         &state.commitment,
         payment_channel_interface::hooks::Phase::try_from(phase).unwrap(),
