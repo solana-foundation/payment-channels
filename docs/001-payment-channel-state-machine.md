@@ -97,7 +97,7 @@ Because `open_slot` is a seed, the channel address is **per-incarnation by const
 
 ### Voucher
 
-Payer-signed off-chain payload authorizing cumulative spend. Committed on-chain via `settle` or `settleAndSeal`.
+Payer-signed off-chain payload authorizing cumulative spend. Committed on-chain via `settle` or `settleAndSeal`. Metered pricing uses a cap/claim pair instead; see [Metered pair](#metered-pair).
 
 #### Off-chain wire format
 
@@ -145,12 +145,16 @@ Total 50 bytes (offsets `0..2`, `2..34`, `34..42`, `42..50`), stored align-1 (`[
 
 **Cluster scope.** Vouchers are not bound to a cluster. A voucher could in principle be replayed against an identically-addressed channel on another cluster — which requires the same program, payer, payee, mint, authorized signer, salt, and `open_slot` at identical addresses on two clusters plus an operator accepting it cross-cluster. This residual replay is an accepted operational risk (no parallel clusters in use; SVM has no EVM-style cross-chain vector), mitigated off-chain by pinning each server and channel to one cluster — see ADR-002, Server Implementation Requirements.
 
+#### Metered pair
+
+For metered pricing, authority over `settled` is split in two. The client (`authorized_signer`) signs an 82-byte **cap** (`[0x56, 0x03]`) that sets a ceiling and names an `operator` key. The operator signs a 50-byte **claim** (`[0x56, 0x04]`) with the actual cumulative charge. `settleMetered`, or `settleAndSeal` with `has_voucher == 2`, applies the claim only if `settled < claim ≤ cap ≤ deposit`. The operator lives in the signed cap, not in `Channel`, so every existing channel can use metered settlement without a layout change. Payload layouts, the validation order and the magic registry are in [ADR-003](./003-program-instructions.md#settlemetered-10).
+
 ### FSM
 
 ```mermaid
 stateDiagram-v2
     [*] --> OPEN: open
-    OPEN --> OPEN: settle / topUp / distribute
+    OPEN --> OPEN: settle / settleMetered / topUp / distribute
     OPEN --> SEALED: settleAndSeal
     OPEN --> CLOSING: requestClose
     CLOSING --> SEALED: settleAndSeal (before deadline)
@@ -169,10 +173,11 @@ stateDiagram-v2
 |---|---|---|
 | `open` | `NONEXISTENT → OPEN` | payer signer; `authorized_signer` is a valid Ed25519 public key; channel PDA matches the seeds — derived over `open_slot` among the rest — and is uninitialized; `deposit > 0`; `grace_period > 0`; `open_slot ≤ clock.slot` and `clock.slot − open_slot ≤ OPEN_SLOT_WINDOW`; `payer != payee`; `payee` may be on-curve or a program-derived address (PDA); `count ≤ MAX_DISTRIBUTION_RECIPIENTS`; exact preimage length; `bps[i] > 0 ∀ i ∈ [0, count)`; `Σ bps[0..count] ≤ 10000`; recipients unique; no recipient equals the derived channel PDA |
 | `settle` | `OPEN → OPEN` | channel is `OPEN`; preceding Ed25519 ix exists; voucher magic valid; voucher channel id matches the channel PDA (which also binds the incarnation); voucher signer equals `authorized_signer`; voucher fresh†; `settled < voucher.cumulative ≤ deposit` |
+| `settleMetered` | `OPEN → OPEN` | channel is `OPEN`; Ed25519 ix at `current − 2` holds the cap and at `current − 1` the claim; both bound to the channel PDA and fresh†; cap signer equals `authorized_signer`; claim signer equals `cap.operator`; `settled < claim ≤ cap ≤ deposit` |
 | `topUp` | `OPEN → OPEN` | payer signer equals channel `payer`; `amount > 0`; channel is `OPEN`; mint/source/escrow token accounts match channel |
-| `settleAndSeal` | `OPEN → SEALED` | payee signer equals channel `payee`; voucher optional (if present: preceding Ed25519 ix, signer equals `authorized_signer`, voucher fresh†, `settled < voucher.cumulative ≤ deposit`) |
+| `settleAndSeal` | `OPEN → SEALED` | payee signer equals channel `payee`; voucher optional (`has_voucher == 1`: preceding Ed25519 ix, signer equals `authorized_signer`, voucher fresh†, `settled < voucher.cumulative ≤ deposit`; `has_voucher == 2`: metered pair under the `settleMetered` guard) |
 | `requestClose` | `OPEN → CLOSING` | payer signer equals channel `payer`; channel is `OPEN`; sets `closureStartedAt = now` |
-| `settleAndSeal` | `CLOSING → SEALED` | payee signer equals channel `payee`; `now < closureStartedAt + GRACE`; voucher optional (if present: preceding Ed25519 ix, signer equals `authorized_signer`, voucher fresh†, `settled < voucher.cumulative ≤ deposit`) |
+| `settleAndSeal` | `CLOSING → SEALED` | payee signer equals channel `payee`; `now < closureStartedAt + GRACE`; voucher optional (`has_voucher == 1`: preceding Ed25519 ix, signer equals `authorized_signer`, voucher fresh†, `settled < voucher.cumulative ≤ deposit`; `has_voucher == 2`: metered pair under the `settleMetered` guard) |
 | `seal` | `CLOSING → SEALED` | channel is `CLOSING`; `now ≥ closureStartedAt + GRACE` |
 | `distribute` | `OPEN → OPEN` | channel is `OPEN`; parsed preimage hash matches `distribution_hash`; recipient account tail length/order matches preimage; `settled > payout_watermark`; pays cumulative floor deltas and advances `payout_watermark` to `settled` |
 | `distribute` | `SEALED → DISTRIBUTED/gone` | channel is `SEALED`; parsed preimage hash matches `distribution_hash`; recipient account tail length/order matches preimage; pays cumulative floor deltas for any unaccounted settled watermark, performs any pending payer refund, sweeps final irreducible residual dust to treasury, and closes escrow — none of it slot-gated; then deallocates the PDA in place if `clock.slot > open_slot + OPEN_SLOT_WINDOW` already holds, else sets `DISTRIBUTED` |

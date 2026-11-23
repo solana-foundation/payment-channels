@@ -22,7 +22,8 @@ use solana_transaction::versioned::VersionedTransaction;
 use litesvm::LiteSVM;
 
 use super::fixtures::{
-    self, DEFAULT_DEPOSIT, DEFAULT_SETTLED, Fixture, GRACE_PERIOD, MintShape, build_settle_pair,
+    self, DEFAULT_DEPOSIT, DEFAULT_SETTLED, Fixture, GRACE_PERIOD, MintShape,
+    build_settle_metered_ixs, build_settle_pair,
 };
 use super::record;
 use crate::common::{
@@ -191,6 +192,21 @@ fn settle_advance() {
     let (ed_ix, settle_ix) = build_settle_pair(&f, DEFAULT_SETTLED, 0);
     let tx = build_focal_tx(&svm, &f.payer, &[], &[ed_ix, settle_ix]);
     record(&mut svm, tx, "settle[advance]").expect("settle ok");
+}
+
+/// Metered N=1: an 82-byte client cap at the full deposit, a 50-byte
+/// operator claim at half the deposit, then `settle_metered`. Covers the
+/// full pair verification; compare with `settle[fresh]` for the CU delta of
+/// the second precompile and the cap checks.
+#[test]
+fn settle_metered_n01() {
+    let mut svm = LiteSVM::load_program();
+    let f = fixtures::prepare_channel(&mut svm, 1, SPL_TOKEN);
+    fixtures::open_setup(&mut svm, &f, DEFAULT_DEPOSIT);
+    let (cap_ix, claim_ix, settle_metered_ix) =
+        build_settle_metered_ixs(&f, DEFAULT_DEPOSIT, DEFAULT_SETTLED, 0);
+    let tx = build_focal_tx(&svm, &f.payer, &[], &[cap_ix, claim_ix, settle_metered_ix]);
+    record(&mut svm, tx, "settle_metered[n=01]").expect("settle_metered ok");
 }
 
 // ───────────────────────────────────────────────────────────────────────────

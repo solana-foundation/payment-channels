@@ -289,6 +289,11 @@ buy — re-keying `authorized_signer` or changing splits per session — is
 already excluded by PDA seeds and the hash commitment, and is properly served
 by opening a new channel.
 
+> The `[0x56, 0x03]` magic named above was never allocated by this design.
+> It is now the metered cap voucher; see the
+> [voucher magic registry](./003-program-instructions.md#voucher-magic-registry).
+> A revived epoch-reset design would need a new format byte.
+
 ### Fold `topUp` into `rearm`
 
 One instruction, one round trip. Rejected: it requires payer and payee

@@ -16,6 +16,7 @@ export * from "./requestClose";
 export * from "./seal";
 export * from "./settle";
 export * from "./settleAndSeal";
+export * from "./settleMetered";
 export * from "./topUp";
 export * from "./topUpWithHooks";
 export * from "./withdrawPayer";

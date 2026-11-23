@@ -18,9 +18,10 @@ pub(super) struct SettleAndSealRun {
     pub payee: Pubkey,
     pub is_signer: bool,
     pub channel_blob: Vec<u8>,
-    /// `0` = no voucher; any other byte = apply the voucher carried by the
-    /// bundled Ed25519 ix. These Mollusk runs wire no real precompile ix, so a
-    /// non-zero value here exercises the missing-Ed25519 path, not a happy one.
+    /// `0` = no voucher; `1` = v1 voucher carried by the bundled Ed25519 ix;
+    /// `2` = metered cap/claim pair; any other byte is rejected. These Mollusk
+    /// runs wire no real precompile ix, so `1` or `2` here exercises the
+    /// missing-Ed25519 path, not a happy one.
     pub has_voucher: u8,
 }
 

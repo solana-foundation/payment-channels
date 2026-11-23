@@ -13,12 +13,13 @@ Quick reference for every instruction exposed by the payment-channels program: d
 | 1 | `open` | payer | payer | `NONEXISTENT → OPEN` | Create the channel PDA, create escrow ATA, transfer the initial deposit, and commit the distribution preimage hash. |
 | 2 | `settle` | permissionless | Ed25519 voucher | `OPEN → OPEN` | Advance the cumulative settled watermark from an authorized-signer voucher. |
 | 3 | `topUp` | payer | payer | `OPEN → OPEN` | Add escrow and raise the deposit ceiling. |
-| 4 | `settleAndSeal` | payee | payee, optional Ed25519 voucher | `OPEN/CLOSING → SEALED` | Optional final settle, then lock the channel for distribution/refund. |
+| 4 | `settleAndSeal` | payee | payee, optional Ed25519 voucher or metered pair | `OPEN/CLOSING → SEALED` | Optional final settle (v1 voucher or metered cap/claim pair), then lock the channel for distribution/refund. |
 | 5 | `requestClose` | payer | payer | `OPEN → CLOSING` | Start the grace-period close window. |
 | 6 | `seal` | permissionless | — | `CLOSING → SEALED` | Seal after the grace period expires. |
 | 7 | `distribute` | permissionless | — | `OPEN → OPEN`; `SEALED → DISTRIBUTED/gone` | Pay cumulative floor deltas to recipients/payee; on `SEALED`, refund/sweep and close the escrow immediately (never slot-gated), then deallocate the channel PDA in place if `clock.slot > open_slot + OPEN_SLOT_WINDOW` already holds, else mark it `DISTRIBUTED`. Channel PDA signs token CPIs internally. |
 | 8 | `withdrawPayer` | payer | payer | `SEALED → SEALED` | One-shot payer refund of `deposit - settled` without closing the PDA. Channel PDA signs the refund CPI internally. |
 | 9 | `reclaim` | permissionless | — | `DISTRIBUTED → gone` | Deallocate a fully-drained `DISTRIBUTED` channel PDA and return all its lamports to `rent_payer`, once `clock.slot > open_slot + OPEN_SLOT_WINDOW`. Batchable. |
+| 10 | `settleMetered` | permissionless | Ed25519 cap + Ed25519 claim | `OPEN → OPEN` | Advance the settled watermark to an operator-signed claim, bounded by a client-signed cap. |
 | 228 | `emitEvent` | program self-CPI | event authority PDA | — | Internal Anchor-compatible event emission target. |
 
 The **Signer** column lists transaction-level signers where applicable; `Ed25519 voucher` means precompile-verified authorization rather than an account signer. PDA signer seeds used for internal CPIs are called out in the purpose or account descriptions.
@@ -114,7 +115,7 @@ Payer-signed deposit increase while the channel is `OPEN`.
 
 ## `settleAndSeal` (4)
 
-Payee-signed cooperative close. Optionally applies one final voucher using the same Ed25519 verification path as `settle`, then moves the channel to `SEALED`. A direct transaction requires an on-curve `payee` signer equal to `Channel.payee`; if `payee` is a program-derived address (PDA), the owning program must invoke this instruction via CPI with signer seeds.
+Payee-signed cooperative close. Optionally applies one final voucher, either a v1 voucher through the same Ed25519 verification path as `settle` or a metered pair through the same path as `settleMetered`, then moves the channel to `SEALED`. A direct transaction requires an on-curve `payee` signer equal to `Channel.payee`; if `payee` is a program-derived address (PDA), the owning program must invoke this instruction via CPI with signer seeds.
 
 **Args**
 
@@ -122,7 +123,18 @@ Current wire after the discriminator is a single byte: `has_voucher(u8)`. The vo
 
 | Name | Type | Description |
 |---|---|---|
-| `has_voucher` | `u8` | `0` skips voucher verification; any non-zero value applies the voucher carried by the preceding Ed25519 precompile ix. |
+| `has_voucher` | `u8` | Selects the final voucher, if any. See the table below. |
+
+| `has_voucher` | Behaviour |
+|---|---|
+| `0` | No voucher: seal at the current `settled` watermark. |
+| `1` | v1 voucher from the Ed25519 precompile ix at `current − 1`, verified exactly as in `settle`. |
+| `2` | Metered pair from the Ed25519 precompile ixs at `current − 2` (cap) and `current − 1` (claim), verified exactly as in [`settleMetered`](#settlemetered-10). |
+| `3..=255` | Rejected with `InvalidInstructionData`, before any voucher is read. |
+
+> **Compatibility.** Before metered settlement, every non-zero `has_voucher` meant "v1 voucher". Now only `1` does: an integrator that sent `2` with a lone v1 voucher gets `MissingSecondEd25519Verification` (241), and one that sent `3..=255` gets `InvalidInstructionData`. Nothing is settled wrongly, but the transaction fails. Every in-repo client and test sends `0`, `1` or `2`; the TypeScript client exports `SETTLE_AND_SEAL_NO_VOUCHER`, `SETTLE_AND_SEAL_V1_VOUCHER` and `SETTLE_AND_SEAL_METERED_VOUCHER`.
+
+> **Front-running the final metered pair.** In `OPEN`, the payee's `[cap, claim, settleAndSeal(2)]` transaction reveals a valid pair. Anyone can copy the two precompile ixs into `[cap, claim, settleMetered]` and land it first. `settled` then already equals the claim, and the payee's `settleAndSeal(2)` fails with `VoucherWatermarkNotMonotonic` (234). No funds move to anyone but the payee's own channel. The payee recovers by re-reading the channel and resending `settleAndSeal(0)`, which seals at the watermark the front-runner just applied. The same race exists between `settle` and `settleAndSeal(1)`. It can't happen in `CLOSING`, because `settleMetered` requires `OPEN`. Submitters SHOULD treat error 234 from a voucher-bearing `settleAndSeal` as "already settled" and retry with `0`.
 
 **Accounts**
 
@@ -215,6 +227,50 @@ Permissionless crank. Deallocates a fully-drained `DISTRIBUTED` channel PDA — 
 | 0 | `channel` | — | yes | Must be `DISTRIBUTED`. Deallocated; all lamports drained. |
 | 1 | `rent_payer` | — | yes | Must equal `Channel.rent_payer`; receives every remaining lamport. |
 
+## `settleMetered` (14)
+
+Permissionless crank for metered pricing. The client signs a **cap** (a ceiling on the watermark, naming an operator key), the operator signs a **claim** (the actual cumulative charge), and the program advances `settled` to the claim only if the cap covers it. A dishonest operator can under-claim but never over-claim.
+
+**Args**
+
+No instruction-specific data follows the discriminator.
+
+**Voucher source**
+
+The cap and the claim are read from the two Ed25519 precompile instructions immediately before `settleMetered`:
+
+```text
+[optional compute-budget ixs]
+ed25519(cap)      # 82-byte CapVoucherArgs, signed by Channel.authorized_signer
+ed25519(claim)    # 50-byte ClaimVoucherArgs, signed by cap.operator
+settleMetered(channel, instructions_sysvar)
+```
+
+The order is fixed: the cap at `current − 2`, the claim at `current − 1`. Each slot's magic, which is inside the signed bytes, must be the kind expected at that position. Both must use the canonical single-signature inline layout (as in `settle`), with `message_data_size` of exactly 82 for the cap and 50 for the claim. Nothing may sit between the pair and `settleMetered`.
+
+**Validation order**
+
+1. Channel is `OPEN`; discriminator and version supported.
+2. For `ix[current − 2]`, then `ix[current − 1]`:
+   - it is the Ed25519 program, else `MissingSecondEd25519Verification` (241) for `current − 2` and `MissingEd25519Verification` (230) for `current − 1`;
+   - it parses as a canonical layout whose message size is the one expected at that position (82 for the cap at `current − 2`, 50 for the claim at `current − 1`), else `MalformedEd25519Instruction` (231) — a swapped pair fails here;
+   - its magic is the kind expected at that position, else `VoucherBadMagic` (238).
+3. Cap: `channel_id` equals the channel PDA (232); fresh (233); signer equals `Channel.authorized_signer` (237).
+4. Claim: `channel_id` equals the channel PDA (232); fresh (233); signer equals `cap.operator` (239).
+5. Amounts: `cap_cumulative ≤ deposit` (235), `claim_cumulative ≤ cap_cumulative` (240), `settled < claim_cumulative` (234).
+6. Write `settled = claim_cumulative`.
+
+"Fresh" uses the v1 rule: `expires_at == 0 || now < expires_at`.
+
+**Replay.** Cap reuse is intended: one cap can cover several increasing claims, and an older, lower cap is harmless because every claim must still strictly advance `settled`. A leaked cap lets the named operator settle up to that cap and nothing else, the same exposure as a leaked v1 voucher. Because caps replay, a client's exposure on an open channel is the highest cap it has ever signed, not the latest one; signing a lower cap later does not reduce it.
+
+**Accounts**
+
+| # | Name | Signer | Writable | Description |
+|---|---|---|---|---|
+| 0 | `channel` | — | yes | Active channel. `settled` is advanced in place. |
+| 1 | `instructions_sysvar` | — | — | Used to read the two immediately preceding Ed25519 precompile instructions. |
+
 ## `emitEvent` (228)
 
 Internal self-CPI target for Anchor-compatible events. Event instruction data is `EVENT_IX_TAG_LE` (8 bytes) `|| event_discriminator` (8 bytes) `|| borsh_payload`; because `EVENT_IX_TAG_LE[0] == 228`, byte-0 dispatch routes to this handler. Only the event authority PDA may sign. Both emitted events (`Opened`, `PayoutRedirected`) are declared in the committed Codama IDL (`program.events`) together with their 8-byte Anchor discriminators, so IDL-driven indexers can decode them without custom tooling.
@@ -282,10 +338,15 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | 232 | `VoucherChannelMismatch` | `voucher.channel_id` does not equal the channel PDA address. Because `open_slot` is a PDA seed, this check also covers cross-incarnation replay: a voucher issued for a previous channel at recycled parameters targets a different (and never-again-derivable) address. |
 | 233 | `VoucherExpired` | `voucher.expires_at != 0` and `now ≥ voucher.expires_at`. |
 | 234 | `VoucherWatermarkNotMonotonic` | `voucher.cumulative_amount ≤ Channel.settled` (must be strictly greater). |
-| 235 | `VoucherOverDeposit` | `voucher.cumulative_amount > Channel.deposit`. |
+| 235 | `VoucherOverDeposit` | `voucher.cumulative_amount > Channel.deposit` (v1), or `cap.cap_cumulative > Channel.deposit` (metered). |
 | 236 | `VoucherMessageMismatch` | Reserved (formerly: signed message did not equal a caller-supplied voucher copy; the voucher is now read from the precompile message directly). |
 | 237 | `VoucherSignerMismatch` | Ed25519 pubkey does not equal `Channel.authorized_signer`. |
-| 238 | `VoucherBadMagic` | Voucher payload does not start with the `[0x56, 0x01]` magic (tag byte `'V'` + format version). |
+| 238 | `VoucherBadMagic` | Voucher payload does not start with the magic its instruction expects: `[0x56, 0x01]` for `settle` and `settleAndSeal(1)`; for the metered pair, `[0x56, 0x03]` for the cap at `current − 2` and `[0x56, 0x04]` for the claim at `current − 1` (a message of the wrong size for its slot fails the layout parser with 231 instead). See [Voucher magic registry](#voucher-magic-registry). |
+| 239 | `VoucherOperatorMismatch` | Metered claim's Ed25519 signer does not equal the cap's `operator`. |
+| 240 | `ClaimExceedsCap` | Metered `claim_cumulative > cap_cumulative`. |
+| 241 | `MissingSecondEd25519Verification` | Metered pair: no Ed25519 precompile instruction at `current_index − 2`, or wrong program id. |
+
+For the metered pair, 232, 233, 234, 235 and 237 keep their v1 meaning, applied to the cap (232, 233, 235, 237) and the claim (232, 233, 234) as listed under [`settleMetered`](#settlemetered-10).
 
 ### Distribution validation
 
@@ -367,6 +428,42 @@ Internal self-CPI target for Anchor-compatible events. Event instruction data is
 | `channel_id` | `Address` | Channel PDA the voucher applies to. Also the incarnation binding: `open_slot` is a PDA seed, so the address is per-incarnation and no separate epoch field is needed. |
 | `cumulative_amount` | `u64` | Strictly increasing cumulative watermark. Must be `<= deposit`. |
 | `expires_at` | `i64` | Unix timestamp expiry; `0` means no expiry. |
+
+### `CapVoucherArgs`
+
+82-byte signed payload (offsets `0..2`, `2..34`, `34..42`, `42..50`, `50..82`), signed by `Channel.authorized_signer`. Canonical precompile ix: 194 bytes; `message_data_size == 82`.
+
+| Name | Type | Description |
+|---|---|---|
+| `magic` | `[u8; 2]` | `[0x56, 0x03]`. |
+| `channel_id` | `Address` | Channel PDA the cap applies to. |
+| `cap_cumulative` | `u64` | Ceiling on the settled watermark. Must be `<= deposit`. |
+| `expires_at` | `i64` | Unix timestamp expiry; `0` means no expiry. |
+| `operator` | `Address` | Ed25519 key allowed to sign claims under this cap. |
+
+### `ClaimVoucherArgs`
+
+50-byte signed payload with the same layout as `VoucherArgs` and a different magic, signed by the cap's `operator`. Canonical precompile ix: 162 bytes; `message_data_size == 50`.
+
+| Name | Type | Description |
+|---|---|---|
+| `magic` | `[u8; 2]` | `[0x56, 0x04]`. |
+| `channel_id` | `Address` | Channel PDA the claim applies to. |
+| `claim_cumulative` | `u64` | New settled watermark: `settled < claim_cumulative <= cap_cumulative`. |
+| `expires_at` | `i64` | Unix timestamp expiry; `0` means no expiry. |
+
+### Voucher magic registry
+
+Every signed voucher payload starts with the tag byte `0x56` (`'V'`) and a format byte. This table is the single allocation list; a new format MUST be added here before it is used.
+
+| Magic | Payload | Size | Signed by | Accepted by | Defined in |
+|---|---|---|---|---|---|
+| `[0x56, 0x01]` | `VoucherArgs` | 50 | `authorized_signer` | `settle`, `settleAndSeal(1)` | ADR-001 |
+| `[0x56, 0x02]` | `BatchVoucherArgsV2` | `43 + 8·count` | `authorized_signer` | `settleBatch` (proposed, not implemented) | [ADR-004](./004-batch-voucher-settlement.md) |
+| `[0x56, 0x03]` | `CapVoucherArgs` | 82 | `authorized_signer` | `settleMetered`, `settleAndSeal(2)` | this ADR |
+| `[0x56, 0x04]` | `ClaimVoucherArgs` | 50 | `cap.operator` | `settleMetered`, `settleAndSeal(2)` | this ADR |
+
+The v1 voucher and the claim have the same size. The magic is what keeps a claim out of `settle` and a v1 voucher out of the metered pair. [ADR-005](./005-channel-rearm.md) mentions `[0x56, 0x03]` for a rejected epoch-reset design; that design never allocated it.
 
 ### `DistributionEntry`
 

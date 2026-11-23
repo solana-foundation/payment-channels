@@ -8,5 +8,6 @@ mod request_close;
 mod seal;
 mod settle;
 mod settle_and_seal;
+mod settle_metered;
 mod top_up;
 mod withdraw_payer;

@@ -18,7 +18,7 @@ use litesvm::LiteSVM;
 use litesvm_token::{CreateAssociatedTokenAccount, MintTo};
 use payment_channels_client::instructions::{Open, OpenInstructionArgs, Settle};
 use payment_channels_client::types::{DistributionEntry, OpenArgs};
-use solana_instruction::Instruction;
+use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
@@ -32,7 +32,7 @@ use crate::common::token_2022::create_paxos_style_mint_at;
 use crate::common::{
     ATA_PROGRAM, INSTRUCTIONS_SYSVAR, PROGRAM_ID, SYSTEM_PROGRAM, SYSVAR_RENT, current_slot,
     event_authority, treasury_owner,
-    voucher::{build_ed25519_ix, voucher, voucher_payload},
+    voucher::{build_ed25519_ix, build_metered_pair, voucher, voucher_payload},
 };
 
 pub const GRACE_PERIOD: u32 = 3_600;
@@ -362,6 +362,35 @@ pub fn build_settle_pair(
     }
     .instruction();
     (ed_ix, settle_ix)
+}
+
+/// `[ed25519(cap), ed25519(claim), settle_metered]`. Cap is signed by the
+/// channel's authorized signer; claim is signed by a seeded operator named
+/// inside the cap. Message sizes are the metered wire sizes (82 and 50).
+pub fn build_settle_metered_ixs(
+    f: &Fixture,
+    cap_cumulative: u64,
+    claim_cumulative: u64,
+    expires_at: i64,
+) -> (Instruction, Instruction, Instruction) {
+    let operator = seeded_keypair("settle_metered/operator");
+    let (cap_ix, claim_ix) = build_metered_pair(
+        &f.channel,
+        &f.authorized_signer,
+        &operator,
+        cap_cumulative,
+        claim_cumulative,
+        expires_at,
+    );
+    let settle_metered_ix = Instruction::new_with_bytes(
+        PROGRAM_ID,
+        &[payment_channels::settle_metered::DISCRIMINATOR],
+        vec![
+            AccountMeta::new(f.channel, false),
+            AccountMeta::new_readonly(INSTRUCTIONS_SYSVAR, false),
+        ],
+    );
+    (cap_ix, claim_ix, settle_metered_ix)
 }
 
 /// Run `[ed25519, settle]` to advance the watermark to `cumulative` as a
