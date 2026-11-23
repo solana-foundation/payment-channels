@@ -381,10 +381,11 @@ pub enum PaymentChannelsInstruction<'a> {
 
     /// Permissionless crank: advances [`settled`](crate::Channel::settled)
     /// to an operator-signed claim, bounded by a client-signed cap. The pair
-    /// rides in the two Ed25519 precompile ixs immediately before, in either
-    /// order: the cap is signed by
-    /// [`authorized_signer`](crate::Channel::authorized_signer), the claim by
-    /// the cap's `operator`, and `settled < claim <= cap <= deposit`.
+    /// rides in the two Ed25519 precompile ixs immediately before, in a fixed
+    /// order: the cap at `current - 2`, signed by
+    /// [`authorized_signer`](crate::Channel::authorized_signer), then the
+    /// claim at `current - 1`, signed by the cap's `operator`, and
+    /// `settled < claim <= cap <= deposit`.
     /// Account shape matches [`Settle`]. `OPEN → OPEN`.
     #[cfg_attr(
         feature = "idl",
