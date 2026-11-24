@@ -22,6 +22,21 @@ program_id = "CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX"
 cluster = "mainnet"
 vars = { treasury_owner = "Cs2zdfUNonRdRGsiZUQQLdTxzxVvJZmgiX2mpLYKuEqP" }
 
+# The stable surface on devnet, under the canonical address. It is its own
+# channel rather than a devnet override of `stable` so that `stable`, the
+# default channel, stays a single artifact that builds without SOLEX_CLUSTER.
+#
+# Upgrades go through a Squads multisig (2 of 5). The multisig account is
+# declared and solex derives its vault, FC2HWzdi..., the upgrade authority.
+# The treasury is the one the devnet binary was deployed with.
+[channels.stable-devnet]
+description = "V1 instruction set on devnet, upgraded through the multisig"
+includes = ["stable"]
+program_id = "CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX"
+cluster = "devnet"
+upgrade_authority = "squads:HW3cHACbbZ3gmpxokmWQxywoT8xJHUnkhGAmtT1Mv7LZ"
+vars = { treasury_owner = "4zTeC5mVqWLruDexgU2mV66p9t5vCA9JyiZqdGDUspap" }
+
 [channels.canary]
 description = "stable plus the hooks feature"
 includes = ["stable"]
