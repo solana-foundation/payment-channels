@@ -1,9 +1,9 @@
 # Lifecycle hooks V2 ABI
 
 V2 adds four immutable optional callbacks inside channel funding and distribution.
-This revision is an experimental, same-address dual-version runtime. It has not
-been deployed. The [deployment record](devnet-v2-deployment.md) describes the
-earlier separate-address prototype, not this instruction ABI. A successful build
+This revision is an experimental, same-address dual-version runtime. The
+`canary` build is deployed on devnet and has run the credit-provider example
+end to end there; see the [deployment record](devnet-v2-deployment.md). That
 is not proof of production issuer integration.
 
 ## Account versions and deployment addresses

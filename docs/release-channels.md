@@ -6,6 +6,7 @@ The program is built per channel with [solex](https://github.com/lgalabru/solex)
 | Channel | Program id | Clusters | Features | Treasury owner |
 | --- | --- | --- | --- | --- |
 | `stable` | `CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX` | mainnet | none (V1 surface) | `Cs2zdf…` |
+| `stable-devnet` | `CHNLxYvVA28MJP9PrFuDXccuoGXAx7jBacfLEkahyGsX` | devnet | none (V1 surface) | `4zTeC5…` |
 | `canary` | `CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ` | devnet | `hooks` | `4zTeC5…` |
 | `canary` | `CHNLxBtXw7VPqd5GMcbtVoEbn4ehyaSoiHj56Ao5sWkJ` | mainnet | `hooks` | `Cs2zdf…` |
 
